@@ -1,0 +1,227 @@
+[
+  {
+    "role": "user",
+    "content": " 给我的朋友 和 一人点十个赞",
+    "timestamp": "2026-03-01T13:31:56.607143",
+    "session_id": "group_579433934",
+    "images": [],
+    "agent_id": "miya_default",
+    "metadata": {
+      "source": "qq",
+      "msg_type": "group",
+      "sender_id": 1523878699,
+      "sender_name": "佳",
+      "group_name": "二元3队"
+    }
+  },
+  {
+    "role": "user",
+    "content": "？",
+    "timestamp": "2026-03-01T13:32:34.990077",
+    "session_id": "group_579433934",
+    "images": [],
+    "agent_id": "miya_default",
+    "metadata": {
+      "source": "qq",
+      "msg_type": "group",
+      "sender_id": 1523878699,
+      "sender_name": "佳",
+      "group_name": "二元3队"
+    }
+  },
+  {
+    "role": "user",
+    "content": "@弥娅 给我的朋友@苦玄 和@银鳕鱼(^～^)𓆜 一人点十个赞",
+    "timestamp": "2026-03-01T14:15:03.444644",
+    "session_id": "group_579433934",
+    "images": [],
+    "agent_id": "miya_default",
+    "metadata": {
+      "source": "qq",
+      "msg_type": "group",
+      "sender_id": 1523878699,
+      "sender_name": "佳",
+      "group_name": "二元3队"
+    }
+  },
+  {
+    "role": "user",
+    "content": "@弥娅 给我的朋友@苦玄 和@银鳕鱼(^～^)𓆜 一人点十个赞",
+    "timestamp": "2026-03-01T14:17:42.367955",
+    "session_id": "group_579433934",
+    "images": [],
+    "agent_id": "miya_default",
+    "metadata": {
+      "source": "qq",
+      "msg_type": "group",
+      "sender_id": 1523878699,
+      "sender_name": "佳",
+      "group_name": "二元3队"
+    }
+  },
+  {
+    "role": "user",
+    "content": " 给我的两个朋友 和 一人点十个赞",
+    "timestamp": "2026-03-01T14:19:04.063488",
+    "session_id": "group_579433934",
+    "images": [],
+    "agent_id": "miya_default",
+    "metadata": {
+      "source": "qq",
+      "msg_type": "group",
+      "sender_id": 1523878699,
+      "sender_name": "佳",
+      "group_name": "二元3队"
+    }
+  },
+  {
+    "role": "user",
+    "content": " 给我的两个朋友 和 一人点十个赞",
+    "timestamp": "2026-03-01T14:22:07.393345",
+    "session_id": "group_579433934",
+    "images": [],
+    "agent_id": "miya_default",
+    "metadata": {
+      "source": "qq",
+      "msg_type": "group",
+      "sender_id": 1523878699,
+      "sender_name": "佳",
+      "group_name": "二元3队"
+    }
+  },
+  {
+    "role": "user",
+    "content": " 给我的两个朋友 和 一人点十个赞",
+    "timestamp": "2026-03-01T14:24:11.834497",
+    "session_id": "group_579433934",
+    "images": [],
+    "agent_id": "miya_default",
+    "metadata": {
+      "source": "qq",
+      "msg_type": "group",
+      "sender_id": 1523878699,
+      "sender_name": "佳",
+      "group_name": "二元3队"
+    }
+  },
+  {
+    "role": "user",
+    "content": "",
+    "timestamp": "2026-03-01T14:24:42.490235",
+    "session_id": "group_579433934",
+    "images": [],
+    "agent_id": "miya_default",
+    "metadata": {
+      "source": "qq",
+      "msg_type": "group",
+      "sender_id": 1523878699,
+      "sender_name": "佳",
+      "group_name": "二元3队"
+    }
+  },
+  {
+    "role": "user",
+    "content": " 给我的两个朋友 和@苦玄 一人点十个赞",
+    "timestamp": "2026-03-01T14:26:22.998280",
+    "session_id": "group_579433934",
+    "images": [],
+    "agent_id": "miya_default",
+    "metadata": {
+      "source": "qq",
+      "msg_type": "group",
+      "sender_id": 1523878699,
+      "sender_name": "佳",
+      "group_name": "二元3队"
+    }
+  },
+  {
+    "role": "user",
+    "content": "OK",
+    "timestamp": "2026-03-01T14:26:36.096739",
+    "session_id": "group_579433934",
+    "images": [],
+    "agent_id": "miya_default",
+    "metadata": {
+      "source": "qq",
+      "msg_type": "group",
+      "sender_id": 1523878699,
+      "sender_name": "佳",
+      "group_name": "二元3队"
+    }
+  },
+  {
+    "role": "user",
+    "content": " 给 点十个赞",
+    "timestamp": "2026-03-01T14:27:05.775731",
+    "session_id": "group_579433934",
+    "images": [],
+    "agent_id": "miya_default",
+    "metadata": {
+      "source": "qq",
+      "msg_type": "group",
+      "sender_id": 1523878699,
+      "sender_name": "佳",
+      "group_name": "二元3队"
+    }
+  },
+  {
+    "role": "user",
+    "content": " 给 点十个赞",
+    "timestamp": "2026-03-01T14:29:01.576684",
+    "session_id": "group_579433934",
+    "images": [],
+    "agent_id": "miya_default",
+    "metadata": {
+      "source": "qq",
+      "msg_type": "group",
+      "sender_id": 1523878699,
+      "sender_name": "佳",
+      "group_name": "二元3队"
+    }
+  },
+  {
+    "role": "user",
+    "content": " 给 点赞",
+    "timestamp": "2026-03-01T14:31:34.356391",
+    "session_id": "group_579433934",
+    "images": [],
+    "agent_id": "miya_default",
+    "metadata": {
+      "source": "qq",
+      "msg_type": "group",
+      "sender_id": 1523878699,
+      "sender_name": "佳",
+      "group_name": "二元3队"
+    }
+  },
+  {
+    "role": "user",
+    "content": " 给 点赞",
+    "timestamp": "2026-03-01T14:34:19.430882",
+    "session_id": "group_579433934",
+    "images": [],
+    "agent_id": "miya_default",
+    "metadata": {
+      "source": "qq",
+      "msg_type": "group",
+      "sender_id": 1523878699,
+      "sender_name": "佳",
+      "group_name": "二元3队"
+    }
+  },
+  {
+    "role": "user",
+    "content": " 给 点赞",
+    "timestamp": "2026-03-01T14:37:24.173528",
+    "session_id": "group_579433934",
+    "images": [],
+    "agent_id": "miya_default",
+    "metadata": {
+      "source": "qq",
+      "msg_type": "group",
+      "sender_id": 1523878699,
+      "sender_name": "佳",
+      "group_name": "二元3队"
+    }
+  }
+]

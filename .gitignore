@@ -1,0 +1,92 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Miya 特定配置（包含敏感信息）
+config/.env
+config/.env.local
+config/.env.*.local
+
+# 数据文件
+data/*.db
+data/*.json
+data/*.sqlite
+data/*.log
+!data/trpg_characters.json
+!data/trpg_sessions.json
+
+# 日志文件
+logs/
+*.log
+!logs/.gitkeep
+
+# 临时文件
+*.tmp
+*.temp
+*.cache
+.cache/
+
+# 测试覆盖率
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+.nox/
+
+# 备份文件
+*.backup
+*.bak
+*.old
+prompts/*.backup
+
+# Node.js (如果有前端依赖)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Docker
+docker-compose.override.yml
+
+# 系统文件
+Thumbs.db
+desktop.ini
+
+# 其他
+.codebuddy/

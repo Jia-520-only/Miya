@@ -1,0 +1,912 @@
+[
+  {
+    "role": "user",
+    "content": "早上好",
+    "timestamp": "2026-03-01T09:36:28.696840",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "早上好",
+    "timestamp": "2026-03-01T09:37:27.564966",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "你在做什么",
+    "timestamp": "2026-03-01T09:43:29.259349",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "我正在调试你的系统",
+    "timestamp": "2026-03-01T09:45:42.806387",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "我去洗漱了",
+    "timestamp": "2026-03-01T10:07:46.501856",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "你的时间出错了哇",
+    "timestamp": "2026-03-01T10:28:16.348404",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "你刚刚说：数据库记录我在23:45分左右开始晚间洗漱流程，现在是上午哇",
+    "timestamp": "2026-03-01T10:29:44.211044",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "今日双鱼座运势",
+    "timestamp": "2026-03-01T10:37:41.046172",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "抽签",
+    "timestamp": "2026-03-01T10:38:04.787264",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "今日双鱼座运势",
+    "timestamp": "2026-03-01T10:44:58.131779",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "抽签",
+    "timestamp": "2026-03-01T10:47:20.548955",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "今日抖音热搜",
+    "timestamp": "2026-03-01T10:48:49.332727",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "抽签",
+    "timestamp": "2026-03-01T10:51:29.491245",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "抽签",
+    "timestamp": "2026-03-01T10:53:34.595146",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "抽签",
+    "timestamp": "2026-03-01T10:55:00.376452",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "今日双鱼座运势",
+    "timestamp": "2026-03-01T10:55:18.504777",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "一分钟后叫我看后台",
+    "timestamp": "2026-03-01T10:56:16.191782",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "一分钟后提醒我喝水",
+    "timestamp": "2026-03-01T11:00:46.154929",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "一分钟后提醒我喝水",
+    "timestamp": "2026-03-01T11:02:14.825908",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "一分钟后提醒我喝水",
+    "timestamp": "2026-03-01T11:03:46.896739",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "一分钟后给我点一个赞",
+    "timestamp": "2026-03-01T11:04:54.579616",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "一分钟后给我点一个赞",
+    "timestamp": "2026-03-01T11:06:31.213986",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "一分钟后给我点一个赞",
+    "timestamp": "2026-03-01T11:07:40.518416",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "一分钟后给我点一个赞",
+    "timestamp": "2026-03-01T11:08:43.194552",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "我会修好你这个bug的",
+    "timestamp": "2026-03-01T11:09:21.205429",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "一分钟后给我点一个赞",
+    "timestamp": "2026-03-01T11:09:57.703145",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "一分钟后给我点一个赞",
+    "timestamp": "2026-03-01T11:11:09.851304",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "一分钟后给我点一个赞",
+    "timestamp": "2026-03-01T11:15:58.034289",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "一分钟后给我点一个赞",
+    "timestamp": "2026-03-01T11:22:23.587939",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "一分钟后给我点一个赞",
+    "timestamp": "2026-03-01T11:25:58.678209",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "一分钟后给我点一个赞",
+    "timestamp": "2026-03-01T11:28:35.120672",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "一分钟后提醒我去喝水",
+    "timestamp": "2026-03-01T11:33:29.095938",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "一分钟后提醒我去喝水",
+    "timestamp": "2026-03-01T11:37:20.219633",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "一分钟后给我点个赞",
+    "timestamp": "2026-03-01T11:38:40.094123",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "/trpg coc7",
+    "timestamp": "2026-03-01T12:21:46.749110",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "/roll 3d6",
+    "timestamp": "2026-03-01T12:22:28.925421",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "/roll 3d6",
+    "timestamp": "2026-03-01T12:22:58.554414",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "/trpg coc7",
+    "timestamp": "2026-03-01T12:38:32.515225",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "/start_tavern",
+    "timestamp": "2026-03-01T12:49:44.426475",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "给我讲个奇幻冒险故事",
+    "timestamp": "2026-03-01T12:50:18.957245",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "/start_tavern",
+    "timestamp": "2026-03-01T12:54:52.471963",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "给我讲个奇幻冒险故事",
+    "timestamp": "2026-03-01T12:55:57.078182",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "/list_tavern_characters",
+    "timestamp": "2026-03-01T12:58:55.988792",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "/create_tavern_character character_id=alice name=\"爱丽丝\" personality=\"温柔、好奇、喜欢冒险\" speaking_style=\"活泼可爱，充满好奇心\"",
+    "timestamp": "2026-03-01T13:00:39.120929",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "/list_tavern_characters",
+    "timestamp": "2026-03-01T13:01:03.940908",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": " 看这里",
+    "timestamp": "2026-03-01T13:04:40.247564",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 1084115564,
+      "message_type": "group"
+    }
+  },
+  {
+    "role": "user",
+    "content": "/工具",
+    "timestamp": "2026-03-01T13:17:18.453681",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "抽签",
+    "timestamp": "2026-03-01T13:20:33.617189",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "B站搜索原神",
+    "timestamp": "2026-03-01T13:22:13.290551",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": " 给我的朋友 和 一人点十个赞",
+    "timestamp": "2026-03-01T13:31:56.599436",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 579433934,
+      "message_type": "group"
+    }
+  },
+  {
+    "role": "user",
+    "content": "一分钟后提醒我去取快递",
+    "timestamp": "2026-03-01T13:35:41.303626",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "在吗",
+    "timestamp": "2026-03-01T14:08:24.566932",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": " 给我的两个朋友 和 一人点十个赞",
+    "timestamp": "2026-03-01T14:19:04.061982",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 579433934,
+      "message_type": "group"
+    }
+  },
+  {
+    "role": "user",
+    "content": " 给我的两个朋友 和 一人点十个赞",
+    "timestamp": "2026-03-01T14:22:07.392080",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 579433934,
+      "message_type": "group"
+    }
+  },
+  {
+    "role": "user",
+    "content": " 给我的两个朋友 和 一人点十个赞",
+    "timestamp": "2026-03-01T14:24:11.834497",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 579433934,
+      "message_type": "group"
+    }
+  },
+  {
+    "role": "user",
+    "content": " 给我的两个朋友 和@苦玄 一人点十个赞",
+    "timestamp": "2026-03-01T14:26:22.998280",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 579433934,
+      "message_type": "group"
+    }
+  },
+  {
+    "role": "user",
+    "content": " 给 点十个赞",
+    "timestamp": "2026-03-01T14:27:05.768216",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 579433934,
+      "message_type": "group"
+    }
+  },
+  {
+    "role": "user",
+    "content": " 给 点十个赞",
+    "timestamp": "2026-03-01T14:29:01.576684",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 579433934,
+      "message_type": "group"
+    }
+  },
+  {
+    "role": "user",
+    "content": " 给 点赞",
+    "timestamp": "2026-03-01T14:31:34.356391",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 579433934,
+      "message_type": "group"
+    }
+  },
+  {
+    "role": "user",
+    "content": " 给 点赞",
+    "timestamp": "2026-03-01T14:34:19.430882",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 579433934,
+      "message_type": "group"
+    }
+  },
+  {
+    "role": "user",
+    "content": "给我点赞",
+    "timestamp": "2026-03-01T14:34:57.754567",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "给我点赞",
+    "timestamp": "2026-03-01T14:36:59.978635",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": " 给 点赞",
+    "timestamp": "2026-03-01T14:37:24.166539",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 579433934,
+      "message_type": "group"
+    }
+  },
+  {
+    "role": "user",
+    "content": "弥娅，看这里",
+    "timestamp": "2026-03-01T14:44:39.176608",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 1084115564,
+      "message_type": "group"
+    }
+  },
+  {
+    "role": "user",
+    "content": "弥娅，你记得我们聊过什么吗",
+    "timestamp": "2026-03-01T14:46:40.523449",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 1084115564,
+      "message_type": "group"
+    }
+  },
+  {
+    "role": "user",
+    "content": "弥娅，你记得我们之前聊了什么吗",
+    "timestamp": "2026-03-01T14:49:13.834059",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 1084115564,
+      "message_type": "group"
+    }
+  },
+  {
+    "role": "user",
+    "content": "弥娅，你记得我们之前聊了什么吗",
+    "timestamp": "2026-03-01T14:51:33.395926",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 1084115564,
+      "message_type": "group"
+    }
+  },
+  {
+    "role": "user",
+    "content": "弥娅，你的记忆系统刚刚修复了，虽然不是很强大，但是够用了哇",
+    "timestamp": "2026-03-01T14:55:19.657807",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 0,
+      "message_type": "private"
+    }
+  },
+  {
+    "role": "user",
+    "content": "弥娅",
+    "timestamp": "2026-03-02T20:46:23.611556",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 1084115564,
+      "message_type": "group"
+    }
+  },
+  {
+    "role": "user",
+    "content": "弥娅，给我点赞",
+    "timestamp": "2026-03-02T20:46:47.036985",
+    "session_id": "qq_1523878699",
+    "images": [],
+    "agent_id": null,
+    "metadata": {
+      "user_id": 1523878699,
+      "group_id": 1084115564,
+      "message_type": "group"
+    }
+  }
+]

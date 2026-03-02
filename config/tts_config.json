@@ -1,0 +1,45 @@
+{
+  "enabled": true,
+  "qq_default_mode": "text",
+  "qq_message_split": true,
+  "qq_max_message_length": 200,
+  "local_playback_enabled": true,
+  "local_playback_volume": 1.0,
+  "streaming_enabled": false,
+  "engines": {
+    "system_tts": {
+      "enabled": false,
+      "is_default": false,
+      "voice_id": "",
+      "speed": 1.0,
+      "volume": 0.8
+    },
+    "gpt_sovits": {
+      "enabled": true,
+      "is_default": true,
+      "api_url": "http://127.0.0.1:9880",
+      "reference_audio": "D:/AIvoice/voice/遐蝶/v2ProPlus/遐蝶/reference_audios/中文/emotions/【开心】作为助讲的风堇小姐…真是那刻夏老师的克星呀。.wav",
+      "reference_text": "作为助讲的风堇小姐…真是那刻夏老师的克星呀。",
+      "language": "zh",
+      "speed": 1.0,
+      "top_k": 15,
+      "top_p": 1.0,
+      "temperature": 1.0,
+      "ref_free": false,
+      "filter_brackets": true,
+      "filter_special_chars": true,
+      "streaming": false,
+      "chunk_size": 1024
+    },
+    "api_tts": {
+      "enabled": false,
+      "is_default": false,
+      "api_type": "openai",
+      "api_url": "https://api.openai.com/v1/audio/speech",
+      "api_key": "",
+      "voice": "alloy",
+      "speed": 1.0,
+      "format": "mp3"
+    }
+  }
+}

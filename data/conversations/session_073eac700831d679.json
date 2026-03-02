@@ -1,0 +1,20 @@
+[
+  {
+    "role": "user",
+    "content": "你好，弥娅！",
+    "timestamp": "2026-02-28T22:04:19.372163",
+    "session_id": "test_session_001",
+    "images": [],
+    "agent_id": "miya_default",
+    "metadata": {}
+  },
+  {
+    "role": "assistant",
+    "content": "你好！我是弥娅，很高兴见到你。",
+    "timestamp": "2026-02-28T22:04:19.379713",
+    "session_id": "test_session_001",
+    "images": [],
+    "agent_id": "miya_default",
+    "metadata": {}
+  }
+]

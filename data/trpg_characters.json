@@ -1,0 +1,28 @@
+[
+  {
+    "player_id": 123456,
+    "character_name": "亚瑟",
+    "rule_system": "coc7",
+    "strength": 85,
+    "dexterity": 60,
+    "constitution": 145,
+    "appearance": 120,
+    "intelligence": 60,
+    "power": 95,
+    "luck": 75,
+    "education": 40,
+    "dnd_strength": 10,
+    "dnd_dexterity": 10,
+    "dnd_constitution": 10,
+    "dnd_intelligence": 10,
+    "dnd_wisdom": 10,
+    "dnd_charisma": 10,
+    "skills": {},
+    "inventory": [],
+    "shared_across_groups": false,
+    "allowed_groups": [],
+    "group_states": {},
+    "created_at": "2026-03-01T12:19:56.271101",
+    "updated_at": "2026-03-01T12:19:56.271101"
+  }
+]

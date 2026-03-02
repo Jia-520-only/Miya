@@ -1,0 +1,30 @@
+[
+  {
+    "session_id": "session_987654321",
+    "group_id": 987654321,
+    "kp_mode": "independent",
+    "kp_id": 0,
+    "allowed_groups": [],
+    "shared_kp_id": 0,
+    "global_kp_id": 0,
+    "rule_system": "coc7",
+    "session_name": "迷雾图书馆",
+    "players": [],
+    "created_at": "2026-03-01T12:38:38.073728",
+    "updated_at": "2026-03-01T12:38:38.073728"
+  },
+  {
+    "session_id": "session_1523878699",
+    "group_id": 1523878699,
+    "kp_mode": "independent",
+    "kp_id": 0,
+    "allowed_groups": [],
+    "shared_kp_id": 0,
+    "global_kp_id": 0,
+    "rule_system": "coc7",
+    "session_name": "克苏鲁的呼唤第七版跑团",
+    "players": [],
+    "created_at": "2026-03-01T12:38:38.073728",
+    "updated_at": "2026-03-01T12:38:38.073728"
+  }
+]

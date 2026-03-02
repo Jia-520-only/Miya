@@ -1,0 +1,38 @@
+{
+  "config": {
+    "description": "语义组配置示例 - 请根据实际情况修改后重命名为 semantic_groups.json",
+    "version": "1.0"
+  },
+  "groups": {
+    "日常": {
+      "words": ["吃饭", "睡觉", "起床", "洗澡", "散步", "休息"],
+      "auto_learned": [],
+      "weight": 1.0,
+      "vector_id": null
+    },
+    "工作": {
+      "words": ["代码", "开发", "项目", "会议", "文档", "bug", "需求"],
+      "auto_learned": [],
+      "weight": 1.2,
+      "vector_id": null
+    },
+    "情感": {
+      "words": ["开心", "难过", "生气", "担心", "焦虑", "期待"],
+      "auto_learned": [],
+      "weight": 1.0,
+      "vector_id": null
+    },
+    "学习": {
+      "words": ["阅读", "学习", "教程", "课程", "笔记", "理解"],
+      "auto_learned": [],
+      "weight": 1.1,
+      "vector_id": null
+    },
+    "健康": {
+      "words": ["运动", "跑步", "健身", "身体", "健康", "疾病"],
+      "auto_learned": [],
+      "weight": 1.0,
+      "vector_id": null
+    }
+  }
+}
