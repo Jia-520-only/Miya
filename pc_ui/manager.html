@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>弥娅 - PC端统一管理面板</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="app">
+        <!-- 顶部导航栏 -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <span class="logo-icon">🧠</span>
+                    <span class="logo-text">弥娅 MIYA</span>
+                </div>
+                <div class="header-info">
+                    <span class="status-indicator" id="systemStatus">
+                        <span class="status-dot"></span>
+                        <span class="status-text">连接中...</span>
+                    </span>
+                    <span class="last-update" id="lastUpdate">--:--:--</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- 主内容区 -->
+        <main class="main">
+            <!-- 左侧边栏导航 -->
+            <nav class="sidebar">
+                <ul class="nav-menu">
+                    <li class="nav-item active" data-section="dashboard">
+                        <span class="nav-icon">📊</span>
+                        <span class="nav-text">系统状态</span>
+                    </li>
+                    <li class="nav-item" data-section="endpoints">
+                        <span class="nav-icon">🎮</span>
+                        <span class="nav-text">交互端管理</span>
+                    </li>
+                    <li class="nav-item" data-section="agents">
+                        <span class="nav-icon">🤖</span>
+                        <span class="nav-text">Agent管理</span>
+                    </li>
+                    <li class="nav-item" data-section="memory">
+                        <span class="nav-icon">🧠</span>
+                        <span class="nav-text">记忆系统</span>
+                    </li>
+                    <li class="nav-item" data-section="queue">
+                        <span class="nav-icon">📈</span>
+                        <span class="nav-text">队列统计</span>
+                    </li>
+                    <li class="nav-item" data-section="config">
+                        <span class="nav-icon">⚙️</span>
+                        <span class="nav-text">配置管理</span>
+                    </li>
+                </ul>
+            </nav>
+
+            <!-- 右侧内容区 -->
+            <div class="content">
+                <!-- 系统状态面板 -->
+                <section class="section active" id="section-dashboard">
+                    <h2 class="section-title">📊 系统状态</h2>
+                    
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon">🎮</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="statEndpoints">0</div>
+                                <div class="stat-label">交互端</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">🤖</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="statAgents">0</div>
+                                <div class="stat-label">Agent</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">📝</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="statTasks">0</div>
+                                <div class="stat-label">队列任务</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">⚡</div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="statUptime">0s</div>
+                                <div class="stat-label">运行时间</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="system-info">
+                        <h3>系统信息</h3>
+                        <div class="info-grid">
+                            <div class="info-item">
+                                <span class="info-label">版本:</span>
+                                <span class="info-value" id="infoVersion">--</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">状态:</span>
+                                <span class="info-value" id="infoStatus">--</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">启动时间:</span>
+                                <span class="info-value" id="infoStartTime">--</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">API地址:</span>
+                                <span class="info-value" id="infoApiUrl">--</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 交互端管理面板 -->
+                <section class="section" id="section-endpoints">
+                    <h2 class="section-title">🎮 交互端管理</h2>
+                    
+                    <div class="toolbar">
+                        <button class="btn btn-primary" onclick="refreshEndpoints()">
+                            <span>🔄</span> 刷新
+                        </button>
+                        <div class="search-box">
+                            <input type="text" placeholder="搜索交互端..." id="endpointSearch">
+                        </div>
+                    </div>
+
+                    <div class="endpoints-list" id="endpointsList">
+                        <!-- 交互端卡片将通过JS动态生成 -->
+                    </div>
+                </section>
+
+                <!-- Agent管理面板 -->
+                <section class="section" id="section-agents">
+                    <h2 class="section-title">🤖 Agent管理</h2>
+                    
+                    <div class="toolbar">
+                        <button class="btn btn-primary" onclick="refreshAgents()">
+                            <span>🔄</span> 刷新
+                        </button>
+                        <button class="btn btn-secondary" onclick="showAgentStats()">
+                            <span>📊</span> 统计
+                        </button>
+                    </div>
+
+                    <div class="agents-stats" id="agentsStats">
+                        <!-- Agent统计将通过JS动态生成 -->
+                    </div>
+
+                    <div class="agents-list" id="agentsList">
+                        <!-- Agent卡片将通过JS动态生成 -->
+                    </div>
+                </section>
+
+                <!-- 记忆系统面板 -->
+                <section class="section" id="section-memory">
+                    <h2 class="section-title">🧠 认知记忆系统</h2>
+                    
+                    <div class="memory-search">
+                        <input type="text" placeholder="搜索记忆事件..." id="memorySearchInput">
+                        <button class="btn btn-primary" onclick="searchMemory()">
+                            <span>🔍</span> 搜索
+                        </button>
+                    </div>
+
+                    <div class="memory-tabs">
+                        <button class="tab-btn active" data-tab="events">事件</button>
+                        <button class="tab-btn" data-tab="profiles">侧写</button>
+                    </div>
+
+                    <div class="memory-content" id="memoryContent">
+                        <!-- 记忆内容将通过JS动态生成 -->
+                    </div>
+                </section>
+
+                <!-- 队列统计面板 -->
+                <section class="section" id="section-queue">
+                    <h2 class="section-title">📈 队列统计</h2>
+                    
+                    <div class="queue-stats-grid" id="queueStatsGrid">
+                        <!-- 队列统计卡片将通过JS动态生成 -->
+                    </div>
+
+                    <div class="queue-details">
+                        <h3>队列详情</h3>
+                        <div class="queue-table" id="queueTable">
+                            <!-- 队列表格将通过JS动态生成 -->
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 配置管理面板 -->
+                <section class="section" id="section-config">
+                    <h2 class="section-title">⚙️ 配置管理</h2>
+                    
+                    <div class="config-status">
+                        <div class="config-item">
+                            <span class="config-label">热更新:</span>
+                            <span class="config-value" id="hotReloadStatus">--</span>
+                        </div>
+                        <div class="config-item">
+                            <span class="config-label">配置文件:</span>
+                            <span class="config-value" id="configFile">--</span>
+                        </div>
+                        <div class="config-item">
+                            <span class="config-label">最后更新:</span>
+                            <span class="config-value" id="configLastUpdate">--</span>
+                        </div>
+                    </div>
+
+                    <div class="config-actions">
+                        <button class="btn btn-primary" onclick="reloadConfig()">
+                            <span>🔄</span> 重载配置
+                        </button>
+                        <button class="btn btn-secondary" onclick="showConfig()">
+                            <span>📄</span> 查看配置
+                        </button>
+                    </div>
+                </section>
+            </div>
+        </main>
+
+        <!-- Toast提示 -->
+        <div class="toast-container" id="toastContainer"></div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
