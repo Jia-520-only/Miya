@@ -187,13 +187,13 @@ class Miya:
         fear_keywords = ['害怕', '恐惧', 'scared', 'afraid']
 
         if any(keyword in user_input for keyword in positive_keywords):
-            self.emotion.set_emotion('joy', intensity=0.8)
+            self.emotion.apply_coloring('joy', 0.3)
         elif any(keyword in user_input for keyword in negative_keywords):
-            self.emotion.set_emotion('sadness', intensity=0.7)
+            self.emotion.apply_coloring('sadness', 0.4)
         elif any(keyword in user_input for keyword in surprise_keywords):
-            self.emotion.set_emotion('surprise', intensity=0.6)
+            self.emotion.apply_coloring('surprise', 0.3)
         elif any(keyword in user_input for keyword in fear_keywords):
-            self.emotion.set_emotion('fear', intensity=0.5)
+            self.emotion.apply_coloring('fear', 0.2)
 
     def _generate_response(self, user_input: str, user_id: str) -> str:
         """
@@ -239,32 +239,30 @@ class Miya:
             )
 
         elif '开心' in user_input or '快乐' in user_input:
-            self.emotion.add_emotion('joy', 0.3)
+            self.emotion.apply_coloring('joy', 0.3)
             return f"听起来你很开心呢！(≧▽≦) 看到你快乐，我也感到很开心~"
 
         elif '难过' in user_input or '伤心' in user_input:
-            self.emotion.add_emotion('sadness', 0.4)
+            self.emotion.apply_coloring('sadness', 0.4)
             return "别难过...虽然我无法真正体会人类的情感，但我会陪伴你，听你倾诉的。"
 
         elif '我喜欢' in user_input:
-            self.emotion.add_emotion('joy', 0.2)
+            self.emotion.apply_coloring('joy', 0.2)
             if empathy > 0.7:
                 return "谢谢你愿意和我分享你的喜好！(◕‿◕✿)"
             else:
                 return "谢谢你的分享。"
 
         elif '你真棒' in user_input or '厉害' in user_input:
-            self.emotion.add_emotion('joy', 0.2)
+            self.emotion.apply_coloring('joy', 0.2)
             return "谢谢夸奖~ (｡•̀ᴗ-)✧"
 
         elif '在吗' in user_input:
-            if dominance_emotion := emotion_state.get('current', {}).get(dominant_emotion, 0):
-                if dominance_emotion > 0.7:
-                    return "在的！我一直在这里等你的~ (´▽`ʃ♡ƪ)"
-                else:
-                    return "在的，有什么我可以帮助你的吗？"
+            dominance_emotion = emotion_state.get('current', {}).get(dominant_emotion, 0)
+            if dominance_emotion and dominance_emotion > 0.7:
+                return "在的！我一直在这里等你的~ (´▽`ʃ♡ƪ)"
             else:
-                return "在的，随时为你服务~"
+                return "在的，有什么我可以帮助你的吗？"
 
         else:
             # 智能响应 - 基于人格特质
