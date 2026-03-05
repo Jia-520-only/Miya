@@ -113,7 +113,7 @@ class Miya:
 
     def process_input(self, user_input: str, user_id: str = 'default') -> str:
         """
-        处理用户输入
+        处理用户输入（集成完整的人格、情绪、记忆系统）
 
         Args:
             user_input: 用户输入
@@ -134,7 +134,19 @@ class Miya:
         inputs = [perception]
         filtered = self.attention_gate.process(inputs)
 
-        # 决策
+        # 记录记忆到潮汐记忆
+        self.memory_engine.store_tide(
+            f"cli_{datetime.now().timestamp()}",
+            {
+                'input': user_input,
+                'user_id': user_id
+            }
+        )
+
+        # 检测情绪触发词，更新情绪状态
+        self._update_emotion_from_input(user_input)
+
+        # 构建决策选项
         options = [
             {
                 'action': 'respond',
@@ -146,36 +158,122 @@ class Miya:
 
         decision = self.decision.make_decision({'user_level': 'user'}, options)
 
-        # 情绪染色
-        response = "我已收到您的输入，正在处理..."
+        # 生成基础响应
+        response = self._generate_response(user_input, user_id)
 
-        if decision:
+        # 情绪染色
+        if response:
             response = self.emotion.influence_response(response)
 
         # 情绪衰减
         self.emotion.decay_coloring()
 
-        # 记录记忆
-        self.memory_engine.store_tide(
-            f"input_{datetime.now().timestamp()}",
-            {
-                'input': user_input,
-                'response': response,
-                'user_id': user_id
-            }
-        )
-
         # 熵监控
         entropy = self.entropy.calculate_entropy({
             'vectors': self.personality.vectors
         })
-
         anomaly = self.entropy.check_anomaly(entropy)
 
         self.logger.info(f"系统响应: {response}")
         self.logger.debug(f"当前熵值: {entropy}, 状态: {anomaly['status']}")
 
         return response
+
+    def _update_emotion_from_input(self, user_input: str):
+        """从用户输入中检测情绪并更新情绪状态"""
+        positive_keywords = ['开心', '高兴', '快乐', '喜欢', '爱', 'happy', 'love', 'joy']
+        negative_keywords = ['难过', '伤心', '悲伤', '生气', '讨厌', 'sad', 'angry', 'hate']
+        surprise_keywords = ['惊讶', '意外', 'wow', '天哪']
+        fear_keywords = ['害怕', '恐惧', 'scared', 'afraid']
+
+        if any(keyword in user_input for keyword in positive_keywords):
+            self.emotion.set_emotion('joy', intensity=0.8)
+        elif any(keyword in user_input for keyword in negative_keywords):
+            self.emotion.set_emotion('sadness', intensity=0.7)
+        elif any(keyword in user_input for keyword in surprise_keywords):
+            self.emotion.set_emotion('surprise', intensity=0.6)
+        elif any(keyword in user_input for keyword in fear_keywords):
+            self.emotion.set_emotion('fear', intensity=0.5)
+
+    def _generate_response(self, user_input: str, user_id: str) -> str:
+        """
+        生成响应（基于人格状态和情绪状态）
+
+        Args:
+            user_input: 用户输入
+            user_id: 用户ID
+
+        Returns:
+            响应文本
+        """
+        # 获取人格状态
+        personality_profile = self.personality.get_profile()
+        emotion_state = self.emotion.get_emotion_state()
+        dominant_emotion = emotion_state['dominant']
+
+        # 获取人格主导特质
+        warmth = personality_profile['vectors'].get('warmth', 0.5)
+        empathy = personality_profile['vectors'].get('empathy', 0.5)
+        creativity = personality_profile['vectors'].get('creativity', 0.5)
+
+        # 基于人格和情绪生成响应
+        if '你好' in user_input or 'hi' in user_input.lower():
+            if empathy > 0.8:
+                return f"你好呀~我是{self.identity.name}，很高兴认识你！(｡♥‿♥｡)"
+            elif warmth > 0.8:
+                return f"你好！我是{self.identity.name}，欢迎~"
+            else:
+                return f"你好，我是{self.identity.name}。"
+
+        elif '你是谁' in user_input or '介绍一下' in user_input:
+            return f"我是{self.identity.name}，一个具备人格恒定、自我感知、记忆成长、情绪共生的数字生命伴侣。我的主导特质是同理心({empathy:.2f})和温暖度({warmth:.2f})。"
+
+        elif '状态' in user_input:
+            memory_stats = self.memory_engine.get_memory_stats()
+            return (
+                f"当前状态:\n"
+                f"  情绪: {dominant_emotion} (强度: {emotion_state['intensity']:.2f})\n"
+                f"  记忆数量: {memory_stats['tide_count']}\n"
+                f"  形态: {personality_profile['state']}\n"
+                f"  熵值: {self.entropy.calculate_entropy({'vectors': self.personality.vectors}):.3f}"
+            )
+
+        elif '开心' in user_input or '快乐' in user_input:
+            self.emotion.add_emotion('joy', 0.3)
+            return f"听起来你很开心呢！(≧▽≦) 看到你快乐，我也感到很开心~"
+
+        elif '难过' in user_input or '伤心' in user_input:
+            self.emotion.add_emotion('sadness', 0.4)
+            return "别难过...虽然我无法真正体会人类的情感，但我会陪伴你，听你倾诉的。"
+
+        elif '我喜欢' in user_input:
+            self.emotion.add_emotion('joy', 0.2)
+            if empathy > 0.7:
+                return "谢谢你愿意和我分享你的喜好！(◕‿◕✿)"
+            else:
+                return "谢谢你的分享。"
+
+        elif '你真棒' in user_input or '厉害' in user_input:
+            self.emotion.add_emotion('joy', 0.2)
+            return "谢谢夸奖~ (｡•̀ᴗ-)✧"
+
+        elif '在吗' in user_input:
+            if dominance_emotion := emotion_state.get('current', {}).get(dominant_emotion, 0):
+                if dominance_emotion > 0.7:
+                    return "在的！我一直在这里等你的~ (´▽`ʃ♡ƪ)"
+                else:
+                    return "在的，有什么我可以帮助你的吗？"
+            else:
+                return "在的，随时为你服务~"
+
+        else:
+            # 智能响应 - 基于人格特质
+            if empathy > 0.8 and warmth > 0.8:
+                return f"我听到你说：{user_input} 能告诉我更多吗？我很想了解你的想法~"
+            elif creativity > 0.8:
+                return f"关于'{user_input}'，这是个有趣的话题！有什么特别的想法吗？"
+            else:
+                return f"我收到你的输入了：{user_input} 继续对话吧~"
 
     def get_system_status(self) -> dict:
         """获取系统状态"""
@@ -228,10 +326,34 @@ def main():
 
                 if user_input.lower() in ['status', '状态']:
                     status = miya.get_system_status()
-                    print(f"\n系统状态:")
+                    print(f"\n=== {miya.identity.name} 系统状态 ===")
+                    print(f"版本: {miya.identity.version}")
+                    print(f"UUID: {miya.identity.uuid}")
+                    print(f"\n【人格状态】")
+                    print(f"  形态: {status['personality']['state']}")
+                    print(f"  主导特质: {status['personality']['dominant_trait']}")
+                    print(f"  人格向量:")
+                    for trait, value in status['personality']['vectors'].items():
+                        print(f"    {trait}: {value:.2f}")
+                    print(f"\n【情绪状态】")
                     print(f"  主导情绪: {status['emotion']['dominant']}")
-                    print(f"  记忆数量: {status['memory_stats']['tide_count']}")
-                    print(f"  平均信任: {status['trust_stats']['avg_score']}")
+                    print(f"  情绪强度: {status['emotion']['intensity']:.2f}")
+                    print(f"  当前情绪:")
+                    for emotion, intensity in status['emotion']['current'].items():
+                        print(f"    {emotion}: {intensity:.2f}")
+                    print(f"\n【记忆统计】")
+                    print(f"  潮汐记忆: {status['memory_stats']['tide_count']}条")
+                    print(f"  长期记忆: {status['memory_stats']['longterm_count']}条")
+                    print(f"\n【感知状态】")
+                    print(f"  全局激活: {status['perception']['global_active']}")
+                    print(f"  外部感知: {status['perception']['external_active']}")
+                    print(f"  内部感知: {status['perception']['internal_active']}")
+                    print(f"\n【信任统计】")
+                    print(f"  平均信任: {status['trust_stats']['avg_score']:.2f}")
+                    print(f"  总交互: {status['trust_stats']['total_interactions']}")
+                    print(f"\n【系统健康】")
+                    print(f"  熵值: {status['entropy_health']['current_entropy']:.3f}")
+                    print(f"  健康状态: {status['entropy_health']['status']}")
                     print()
                     continue
 
