@@ -19,7 +19,7 @@
       "enabled": true,
       "is_default": true,
       "api_url": "http://127.0.0.1:9880",
-      "reference_audio": "D:/AIvoice/voice/遐蝶/v2ProPlus/遐蝶/reference_audios/中文/emotions/【开心】作为助讲的风堇小姐…真是那刻夏老师的克星呀。.wav",
+      "reference_audio": "/path/to/your/reference/audio.wav",
       "reference_text": "作为助讲的风堇小姐…真是那刻夏老师的克星呀。",
       "language": "zh",
       "speed": 1.0,
@@ -37,7 +37,7 @@
       "is_default": false,
       "api_type": "openai",
       "api_url": "https://api.openai.com/v1/audio/speech",
-      "api_key": "",
+      "api_key": "your-openai-api-key-here",
       "voice": "alloy",
       "speed": 1.0,
       "format": "mp3"

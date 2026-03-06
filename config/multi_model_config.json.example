@@ -4,7 +4,7 @@
       "name": "deepseek-chat",
       "provider": "deepseek",
       "base_url": "https://api.deepseek.com/v1",
-      "api_key": "sk-15346aa170c442c69d726d8e95cabca3",
+      "api_key": "your-deepseek-api-key-here",
       "capabilities": [
         "simple_chat",
         "chinese_understanding",
@@ -22,7 +22,7 @@
       "name": "Qwen/Qwen2.5-7B-Instruct",
       "provider": "openai",
       "base_url": "https://api.siliconflow.cn/v1",
-      "api_key": "sk-lbybyiqrbaxasvwmspsoxulfkrprzibertsjanyaurcxbird",
+      "api_key": "your-siliconflow-api-key-here",
       "capabilities": [
         "simple_chat",
         "chinese_understanding",
@@ -40,7 +40,7 @@
       "name": "Qwen/Qwen2.5-7B-Instruct",
       "provider": "openai",
       "base_url": "https://api.siliconflow.cn/v1",
-      "api_key": "sk-lbybyiqrbaxasvwmspsoxulfkrprzibertsjanyaurcxbird",
+      "api_key": "your-siliconflow-api-key-here",
       "capabilities": [
         "simple_chat",
         "summarization",
@@ -57,7 +57,7 @@
       "name": "deepseek-chat",
       "provider": "deepseek",
       "base_url": "https://api.deepseek.com/v1",
-      "api_key": "sk-15346aa170c442c69d726d8e95cabca3",
+      "api_key": "your-deepseek-api-key-here",
       "capabilities": [
         "tool_calling",
         "multimodal",
@@ -74,7 +74,7 @@
       "name": "deepseek-chat",
       "provider": "deepseek",
       "base_url": "https://api.deepseek.com/v1",
-      "api_key": "sk-15346aa170c442c69d726d8e95cabca3",
+      "api_key": "your-deepseek-api-key-here",
       "capabilities": [
         "complex_reasoning",
         "code_analysis",
@@ -91,7 +91,7 @@
       "name": "deepseek-chat",
       "provider": "deepseek",
       "base_url": "https://api.deepseek.com/v1",
-      "api_key": "sk-15346aa170c442c69d726d8e95cabca3",
+      "api_key": "your-deepseek-api-key-here",
       "capabilities": [
         "code_generation",
         "code_analysis"

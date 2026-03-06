@@ -50,6 +50,14 @@ volumes/
 .env.*.local
 config/.env.local
 
+# Sensitive config files (use .example versions instead)
+config/multi_model_config.json
+config/terminal_config.json
+config/advanced_config.json
+config/tts_config.json
+config/web_search_config.json
+config/terminal_whitelist.json
+
 # Cache
 .pytest_cache/
 .coverage

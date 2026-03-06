@@ -6,14 +6,14 @@
     },
     "bing": {
       "enabled": false,
-      "api_key": "",
+      "api_key": "your-bing-api-key-here",
       "description": "Bing Search API（需要 API Key）",
       "api_url": "https://www.microsoft.com/cognitive-services/en-us/subscriptions"
     },
     "google": {
       "enabled": false,
-      "api_key": "",
-      "cse_id": "",
+      "api_key": "your-google-api-key-here",
+      "cse_id": "your-cse-id-here",
       "description": "Google Custom Search API（需要 API Key 和 CSE ID）",
       "api_url": "https://developers.google.com/custom-search/v1/overview"
     }
