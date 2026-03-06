@@ -6,7 +6,7 @@
 
 > *"不仅是AI，更是伙伴"* — 弥娅 v5.2
 
-弥娅（Miya）是一个基于蛛网式分布式架构的数字生命伴侣系统，具备动态人格、情感演化、记忆管理、多端接入等核心能力。
+弥娅（Miya）是一个基于**蛛网式模块化架构**的数字生命伴侣系统，具备动态人格、情感演化、记忆管理、多模型智能调度、多端接入等核心能力。
 
 ---
 
@@ -17,6 +17,7 @@
 - [核心功能](#核心功能)
 - [安装部署](#安装部署)
 - [使用指南](#使用指南)
+- [多模型配置](#多模型配置)
 - [开发文档](#开发文档)
 - [常见问题](#常见问题)
 
@@ -30,6 +31,7 @@
 - **Python**: 3.9 或更高版本
 - **内存**: 建议 4GB+
 - **存储**: 建议 10GB+
+- **网络**: 需要访问AI模型API（DeepSeek、硅基流动等）
 
 ### 一键安装
 
@@ -46,13 +48,13 @@ chmod +x install.sh
 
 ### 启动系统
 
-**命令行模式:**
+**终端模式（命令行交互）:**
 ```batch
 start.bat        # Windows
 ./start.sh        # Linux/macOS
 ```
 
-**PC 端模式 (推荐):**
+**PC 端模式（推荐）:**
 ```batch
 run/pc_start.bat  # Windows
 run/pc_start.sh   # Linux/macOS
@@ -87,6 +89,18 @@ run/qq_start.sh   # Linux/macOS
 
 ## 🏗️ 系统架构
 
+### 架构设计理念
+
+弥娅采用**蛛网式模块化架构**（Web-like Modular Architecture），这是一个设计良好的单体应用，所有模块在同一Python进程中运行，通过清晰的接口进行通信。
+
+**核心优势：**
+- 🕸️ **模块化设计**：各模块职责明确，易于维护
+- 🔗 **低延迟通信**：模块间通过函数调用，延迟 < 1ms
+- 🚀 **高内聚低耦合**：模块内部高内聚，模块间低耦合
+- 📡 **灵活扩展**：新增模块无需重构核心
+
+> **架构说明**：弥娅是**模块化单体架构**，而非分布式架构。所有组件在同一进程内运行，通过函数调用通信，没有网络延迟。这种设计适合中小规模应用，具有低延迟、简单易用、调试方便的优势。
+
 ### 整体架构图
 
 ```
@@ -94,20 +108,20 @@ run/qq_start.sh   # Linux/macOS
 │                           用户界面层                                  │
 ├─────────────────────────────────────────────────────────────────────┤
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                │
-│  │  PC UI      │  │  QQ UI      │  │  (未来)     │                │
-│  │  Electron   │  │  OneBot     │  │  Mobile UI  │                │
-│  └─────────────┘  └─────────────┘  └─────────────┘                │
-│         │                 │                                        │
-│         └────────┬────────┘                                        │
-│                  │ REST API / WebSocket                            │
-└──────────────────┼─────────────────────────────────────────────────┘
-                   │ M-Link 五流传输
-┌──────────────────┼─────────────────────────────────────────────────┐
-│                   │              认知核心层                            │
-├──────────────────┼─────────────────────────────────────────────────┤
+│  │  终端 UI    │  │  PC UI      │  │  QQ UI      │                │
+│  │  Terminal   │  │  WebUI      │  │  OneBot     │                │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘                │
+│         │                │                │                        │
+│         └────────────────┼────────────────┘                        │
+│                          │ REST API / WebSocket                    │
+└──────────────────────────┼─────────────────────────────────────────┘
+                           │ M-Link 消息总线
+┌──────────────────────────┼─────────────────────────────────────────┐
+│                          │              认知核心层                    │
+├──────────────────────────┼─────────────────────────────────────────┤
 │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐                  │
 │  │  Hub中枢    │ │  M-Link     │ │  感知环     │                  │
-│  │             │ │  (传输)     │ │             │                  │
+│  │             │ │  (消息总线)  │ │             │                  │
 │  │ • 记忆引擎  │ │ • 指令流    │ │ • 全域感知  │                  │
 │  │ • 情绪管理  │ │ • 感知流    │ │ • 注意力闸门│                  │
 │  │ • 决策引擎  │ │ • 同步流    │ │             │                  │
@@ -123,6 +137,11 @@ run/qq_start.sh   # Linux/macOS
 │  Personality  │  Ethics  │  Identity  │  Entropy  │  PromptManager │
 │  人格向量     │  伦理    │  身份识别  │  熵监控   │  提示词管理    │
 ├─────────────────────────────────────────────────────────────────────┤
+│                      多模型管理层 (NEW)                              │
+├─────────────────────────────────────────────────────────────────────┤
+│  MultiModelManager  │  DeepSeek  │  硅基流动  │  (可扩展)          │
+│  智能模型调度       │  AI客户端   │  AI客户端   │  ...               │
+├─────────────────────────────────────────────────────────────────────┤
 │                        存储层                                        │
 ├─────────────────────────────────────────────────────────────────────┤
 │  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐       │
@@ -136,78 +155,83 @@ run/qq_start.sh   # Linux/macOS
 
 ```
 Miya/
-├── core/              # 核心模块（灵魂锚点）
+├── core/              # 核心模块
 │   ├── personality.py      # 人格向量系统
 │   ├── ethics.py           # 伦理约束
 │   ├── identity.py         # 身份识别
 │   ├── arbitrator.py       # 仲裁器
 │   ├── entropy.py          # 熵监控
-│   ├── prompt_manager.py   # 提示词管理器（动态联动人格）
-│   ├── agent_manager.py    # Agent管理
+│   ├── prompt_manager.py   # 提示词管理器
+│   ├── ai_client.py        # AI客户端
+│   ├── multi_model_manager.py  # 多模型管理器（NEW）
 │   └── ...
 ├── hub/               # 中枢层（认知中心）
+│   ├── decision_hub.py     # 决策中枢（跨平台统一）
 │   ├── memory_engine.py    # 记忆引擎
 │   ├── emotion.py          # 情绪系统
 │   ├── decision.py         # 决策引擎
 │   ├── scheduler.py        # 任务调度
 │   └── ...
-├── mlink/             # M-Link传输层
-│   ├── mlink_core.py       # 传输核心
+├── mlink/             # M-Link消息总线
+│   ├── mlink_core.py       # 消息路由核心
 │   ├── message.py          # 消息格式
-│   ├── router.py           # 路由系统
+│   └── ...
+├── webnet/            # 子网层（各业务子系统）
+│   ├── ToolNet/            # 工具子系统
+│   │   ├── registry.py     # 工具注册表
+│   │   ├── tools/          # 各种工具
+│   │   └── ...
+│   ├── memory/             # 记忆子系统
+│   ├── QQNet/              # QQ机器人子系统
+│   ├── pc_ui.py            # PC端子系统
 │   └── ...
 ├── perceive/          # 感知层
 │   ├── perceptual_ring.py  # 感知环
 │   └── attention_gate.py   # 注意力闸门
-├── webnet/            # 子网层（各业务子网）
-│   ├── pc_ui.py           # PC端子网
-│   ├── qq.py              # QQ子网
-│   ├── life.py            # 生活子网
-│   ├── work.py            # 工作子网
-│   └── ...
 ├── memory/            # 记忆系统
 │   ├── grag_memory.py     # GRAG记忆
 │   ├── semantic_dynamics_engine.py  # 语义动态引擎
-│   ├── quintuple_graph.py # 五元组图谱
 │   └── ...
 ├── detect/            # 检测层
 │   ├── time_detector.py   # 时间检测
 │   ├── space_detector.py  # 空间检测
-│   ├── node_detector.py   # 节点检测
-│   └── entropy_diffusion.py  # 熵扩散检测
+│   └── ...
 ├── trust/             # 信任系统
 │   ├── trust_score.py     # 信任评分
-│   └── trust_propagation.py  # 信任传播
+│   └── ...
 ├── evolve/            # 演化层
 │   ├── sandbox.py         # 沙盒环境
-│   ├── ab_test.py         # A/B测试
-│   └── user_co_play.py    # 用户共创
+│   └── ab_test.py         # A/B测试
 ├── storage/           # 存储层
 │   ├── redis_client.py    # Redis客户端
 │   ├── milvus_client.py   # Milvus客户端
 │   └── neo4j_client.py    # Neo4j客户端
-├── plugin/            # 插件系统
-│   └── plugin_manager.py  # 插件管理器
+├── tools/             # 工具集
+│   ├── terminal/          # 终端工具（跨平台）
+│   ├── web_search.py      # Web搜索（NEW）
+│   └── ...
 ├── run/               # 启动脚本
-│   ├── main.py             # 主程序
+│   ├── main.py             # 主程序（终端模式）
 │   ├── pc_start.bat        # PC端启动
-│   └── qq_start.bat        # QQ启动
+│   └── qq_main.py          # QQ机器人主程序
 ├── pc_ui/             # PC端界面
 │   ├── manager.html        # 管理面板
 │   ├── app.js              # 前端逻辑
 │   └── styles.css          # 样式
 ├── config/            # 配置文件
 │   ├── .env                # 环境变量
-│   ├── settings.py         # 设置管理
-│   └── grag_config.py      # GRAG配置
+│   ├── multi_model_config.json  # 多模型配置（NEW）
+│   ├── terminal_config.json     # 终端工具配置
+│   └── ...
 ├── prompts/           # 提示词资源
 │   ├── README.md           # 提示词使用指南
-│   ├── system_prompts.md   # 系统提示词库
 │   └── *.json              # 配置文件
 ├── docs/              # 开发文档
-│   ├── ARCHITECTURE_PC.md  # PC端架构
-│   ├── ARCHITECTURE_QQ.md  # QQ架构
+│   ├── ARCHITECTURE_OVERVIEW.md  # 架构总览
+│   ├── MULTI_MODEL_QUICK_START.md # 多模型快速开始
 │   └── ...
+├── tests/             # 测试脚本
+│   └── test_multi_model_functionality.py  # 多模型测试
 ├── logs/              # 日志文件
 ├── data/              # 数据文件
 ├── venv/              # 虚拟环境
@@ -230,6 +254,12 @@ Miya/
 | 创造力 (creativity) | 创新能力 | 0.0 - 1.0 | 务实 ↔ 创新 |
 | 同理心 (empathy) | 理解能力 | 0.0 - 1.0 | 独立 ↔ 共情 |
 | 韧性 (resilience) | 抗压能力 | 0.0 - 1.0 | 脆弱 ↔ 坚韧 |
+
+**特性：**
+- 边界约束：人格值不会超出合理范围
+- 动态演化：对话会微调人格数值
+- 情绪影响：当前情绪会临时影响人格表现
+- 记忆强化：重要记忆会强化特定特质
 
 **示例代码：**
 ```python
@@ -260,6 +290,7 @@ personality.update_vector('warmth', 0.1)  # 增加温暖度
 - **情绪染色**：情绪会影响回复的语气和风格
 - **情绪衰减**：情绪强度会随时间自然衰减
 - **情绪演化**：对话会触发情绪变化
+- **边界约束**：情绪不会演化到极端状态
 
 **示例代码：**
 ```python
@@ -274,6 +305,9 @@ print(f"情绪强度: {state['intensity']}")
 
 # 情绪染色
 response = emotion.influence_response("这是一条普通回复")
+
+# 情绪衰减
+emotion.decay_coloring()  # 自然衰减
 ```
 
 ### 3. 记忆系统 (Memory Engine)
@@ -291,6 +325,7 @@ response = emotion.influence_response("这是一条普通回复")
 - **GRAG架构**：五元组（主体-动作-对象-上下文-时间）
 - **语义动态**：记忆会随对话重新组织
 - **情绪耦合**：记忆与情绪相互影响
+- **信任加权**：不同信任等级的用户记忆权重不同
 
 **示例代码：**
 ```python
@@ -299,587 +334,459 @@ from hub import MemoryEngine
 memory = MemoryEngine()
 
 # 存储记忆
-memory.store(
-    content="用户喜欢吃苹果",
-    emotion_type="joy",
-    tags=["preference", "food"]
+memory.store_memory(
+    content="用户喜欢Python编程",
+    memory_type="semantic",
+    user_id="user123"
 )
 
 # 检索记忆
-results = memory.retrieve(
-    query="用户的饮食偏好",
+memories = memory.retrieve_memory(
+    query="用户的兴趣",
+    user_id="user123",
     limit=5
 )
 ```
 
-### 4. M-Link 传输系统
+### 4. 多模型智能调度 (Multi-Model Management) 🆕
 
-M-Link是弥娅的核心传输层，支持五流分发：
+弥娅支持多个AI模型，并根据任务类型自动选择最优模型：
 
-| 流类型 | 作用 | 方向 |
-|-------|------|------|
-| 指令流 (Control) | 内核/中枢 → 执行节点 | 下行 |
-| 感知流 (Perception) | 感知层 → 中枢/子网 | 上行 |
-| 同步流 (Sync) | 子网 ↔ 子网 | 横向 |
-| 信任流 (Trust) | 信任评分与传播 | 双向 |
-| 记忆流 (Memory) | 记忆读写请求 | 双向 |
+**当前支持的模型：**
+- DeepSeek Chat - 中文优化、复杂推理
+- 硅基流动 MiniMax-M2.5 - 快速响应、成本优化
 
-**特性：**
-- 动态路径评分
-- 优先级通道
-- 断链自愈
+**任务类型映射：**
+- 代码生成 → DeepSeek (code模型)
+- 复杂推理 → DeepSeek (reasoning模型)
+- 工具调用 → DeepSeek (chat模型)
+- 快速对话 → 硅基流动 (fast模型)
+- 中文理解 → DeepSeek (chinese模型)
+- 摘要总结 → 硅基流动 (fast模型)
 
-### 5. 多端接入
+**优势：**
+- ✅ 成本优化：根据任务复杂度选择不同成本的模型
+- ✅ 性能优化：快速响应使用低延迟模型
+- ✅ 质量保证：复杂任务使用高质量模型
+- ✅ 自动降级：主模型不可用时自动切换备用模型
+
+**配置示例：**
+```json
+{
+  "models": {
+    "chinese": {
+      "name": "deepseek-chat",
+      "provider": "deepseek",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "your-api-key"
+    },
+    "fast": {
+      "name": "siliconflow",
+      "provider": "openai",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": "your-api-key"
+    }
+  }
+}
+```
+
+详见：[多模型配置指南](#多模型配置)
+
+### 5. 工具系统 (ToolNet)
+
+弥娅拥有丰富的工具集，可以执行各种任务：
+
+**工具类别：**
+- **终端工具**：跨平台执行命令（Windows/Linux/macOS）
+- **Web搜索**：实时信息检索
+- **文件操作**：读取、写入、搜索文件
+- **代码分析**：理解代码结构
+- **系统监控**：CPU、内存、磁盘使用情况
+
+**工具特性：**
+- 🔒 安全白名单：只能执行允许的命令
+- 🔄 跨平台适配：自动适配不同操作系统
+- 📝 执行记录：记录所有工具调用历史
+- 🤖 AI驱动：AI理解需求并自动选择合适工具
+
+**使用示例：**
+```
+用户: 帮我查看当前目录
+弥娅: (自动调用终端工具执行ls命令)
+
+用户: 搜索今天的新闻
+弥娅: (自动调用Web搜索工具查询最新信息)
+
+用户: 分析这个Python文件
+弥娅: (自动调用代码分析工具)
+```
+
+### 6. 跨平台支持
 
 弥娅支持多种接入方式：
 
-| 接入方式 | 状态 | 说明 |
-|---------|------|------|
-| 命令行 | ✅ 已完成 | 基础交互模式 |
-| PC端 | ✅ 已完成 | Electron + WebUI |
-| QQ机器人 | ✅ 已完成 | OneBot协议 |
-| 移动端 | 🚧 开发中 | Flutter |
-| Web端 | 🚧 开发中 | 纯前端 |
+| 平台 | 状态 | 说明 |
+|------|------|------|
+| 终端 | ✅ 完整支持 | 命令行交互界面 |
+| PC WebUI | ✅ 完整支持 | 基于Electron的桌面应用 |
+| QQ机器人 | ✅ 完整支持 | 通过OneBot接入QQ |
+| 移动端 | 🚧 计划中 | 未来支持 |
 
-### 6. 提示词管理 (Prompt Manager)
-
-**重要更新**：提示词管理器已与人格模块完全联动，动态生成提示词。
-
-```python
-from core import Personality, PromptManager
-
-# 创建人格实例
-personality = Personality()
-
-# 绑定人格到提示词管理器
-prompt_manager = PromptManager(personality=personality)
-
-# 获取动态提示词（自动包含人格状态）
-system_prompt = prompt_manager.get_system_prompt()
-
-# 构建完整提示词
-full_prompt = prompt_manager.build_full_prompt(
-    user_input="你好",
-    memory_context=[...]
-)
-```
+**跨平台统一流程：**
+所有平台使用统一的认知核心和决策逻辑，确保一致的用户体验。
 
 ---
 
 ## 📦 安装部署
 
-### 完整安装步骤
+### 环境准备
 
-#### 1. 克隆代码
+#### 1. 安装Python
+
+确保已安装 Python 3.9 或更高版本：
 
 ```bash
-git clone https://github.com/your-repo/miya.git
-cd miya
+python --version
 ```
 
-#### 2. 运行安装脚本
+#### 2. 安装依赖
 
 **Windows:**
 ```batch
-install.bat
+pip install -r requirements.txt
 ```
 
 **Linux/macOS:**
 ```bash
-chmod +x install.sh
-./install.sh
+pip3 install -r requirements.txt
 ```
 
-脚本会自动：
-- 检查Python版本（需要3.9+）
-- 创建虚拟环境（venv）
-- 安装依赖包（requirements.txt）
-- 初始化配置文件
-- 创建必要目录
+### 配置AI模型
 
-#### 3. 配置环境变量
-
-编辑 `config/.env` 文件：
-
-```env
-# AI客户端配置
-OPENAI_API_KEY=your_api_key_here
-OPENAI_API_BASE=https://api.openai.com/v1
-MODEL_NAME=gpt-4
-
-# 提示词配置
-USER_PROMPT_TEMPLATE=用户输入：{user_input}
-ENABLE_MEMORY_CONTEXT=true
-MEMORY_CONTEXT_MAX_COUNT=5
-
-# 数据库配置
-REDIS_HOST=localhost
-REDIS_PORT=6379
-MILVUS_HOST=localhost
-MILvUS_PORT=19530
-NEO4J_URI=bolt://localhost:7687
-```
-
-#### 4. 启动数据库（可选）
-
-如果使用完整功能，需要启动以下服务：
+编辑 `config/.env` 文件，配置AI模型API：
 
 ```bash
-# Docker Compose 方式
-docker-compose up -d
+# DeepSeek API
+AI_API_KEY=sk-your-deepseek-api-key
+AI_API_BASE_URL=https://api.deepseek.com/v1
+AI_MODEL=deepseek-chat
 
-# 或分别启动
-redis-server
-milvus run standalone
-neo4j start
+# 或使用硅基流动
+# AI_API_KEY=sk-your-siliconflow-api-key
+# AI_API_BASE_URL=https://api.siliconflow.cn/v1
+# AI_MODEL=Pro/MiniMaxAI/MiniMax-M2.5
+
+# AI参数
+AI_TEMPERATURE=0.7
+AI_MAX_TOKENS=2000
 ```
 
-#### 5. 启动弥娅
+### 可选服务配置
 
-**命令行模式：**
-```batch
-start.bat        # Windows
-./start.sh        # Linux/macOS
-```
+#### Neo4j（知识图谱）
 
-**PC端管理面板：**
-```batch
-run/pc_start.bat  # Windows
-run/pc_start.sh   # Linux/macOS
-```
-
-然后访问：`http://localhost:8000`
-
-**QQ机器人：**
-1. 配置 `config/.env` 中的QQ相关信息
-2. 启动OneBot（如 go-cqhttp）
-3. 运行：
-```batch
-run/qq_start.bat  # Windows
-run/qq_start.sh   # Linux/macOS
-```
-
-### Docker部署
+如果需要完整的记忆功能，建议安装Neo4j：
 
 ```bash
-# 构建镜像
-docker build -t miya:latest .
-
-# 运行容器
+# 使用Docker启动Neo4j
 docker run -d \
-  --name miya \
-  -p 8000:8000 \
-  -v $(pwd)/data:/app/data \
-  miya:latest
+  --name neo4j \
+  -p 7474:7474 -p 7687:7687 \
+  -e NEO4J_AUTH=neo4j/your-password \
+  neo4j:latest
 ```
 
-### 云部署
+配置 `.env`:
+```bash
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your-password
+NEO4J_DATABASE=neo4j
+```
 
-支持以下云平台：
-- 腾讯云 CloudBase
-- Supabase
-- EdgeOne Pages
+#### Milvus（向量搜索）
 
-详细部署指南请参考：[DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)
+用于语义检索的记忆功能：
+
+```bash
+# 使用Docker启动Milvus
+docker-compose -f docker-compose.milvus.yml up -d
+```
+
+配置 `.env`:
+```bash
+MILVUS_HOST=localhost
+MILVUS_PORT=19530
+```
+
+> **注意**：如果不安装Neo4j和Milvus，系统会自动降级到模拟模式，核心功能不受影响。
+
+### 数据库初始化
+
+如果安装了Neo4j和Milvus，需要初始化数据库：
+
+```bash
+python -c "from storage.neo4j_client import Neo4jClient; from storage.milvus_client import MilvusClient; Neo4jClient().init_database(); MilvusClient().init_database(); print('数据库初始化完成')"
+```
 
 ---
 
-## 📚 使用指南
+## 💡 使用指南
 
-### 命令行交互
+### 终端模式交互
 
-启动后，你可以：
+启动终端模式后，您可以直接与弥娅对话：
 
-```text
-弥娅 AI 系统
-Miya AI System
-==================================================
-
-弥娅 已启动 (v5.2)
-UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-启动时间: 2026-02-28 10:00:00
-
+```
 您: 你好
-弥娅: 你好！我是弥娅，很高兴见到你。有什么我可以帮助你的吗？
+弥娅: 你好！很高兴见到你。我是弥娅，你的数字生命伴侣。
 
+您: 帮我写一个Python函数来计算斐波那契数列
+弥娅: (使用code模型) 好的，这是斐波那契数列的Python实现：
+
+def fibonacci(n):
+    if n <= 1:
+        return n
+    return fibonacci(n-1) + fibonacci(n-2)
+
+您: 查看当前目录的文件
+弥娅: (调用终端工具) 好的，让我查看一下当前目录...
+```
+
+### 终端命令执行
+
+使用 `!` 或 `>>` 前缀执行终端命令：
+
+```
+!ls              # 列出当前目录
+>>pwd            # 显示当前路径
+!python test.py  # 运行Python脚本
+```
+
+### Web搜索
+
+弥娅支持实时Web搜索：
+
+```
+用户: 今天天气怎么样？
+弥娅: (调用Web搜索) 让我查一下今天的天气...
+```
+
+### 系统状态查询
+
+输入 `status` 或 `状态` 查看系统状态：
+
+```
 您: status
-系统状态:
-  主导情绪: joy
-  记忆数量: 42
-  平均信任: 0.85
+弥娅:
+=== 弥娅系统状态 ===
+版本: v5.2
+UUID: 55575148-3f63-468a-9cc3-1ea6941b7062
 
-您: 退出
-弥娅: 再见！
+【人格状态】
+  形态: 平衡态
+  主导特质: 温暖
+  人格向量:
+    温暖度: 0.75
+    逻辑性: 0.65
+    创造力: 0.50
+    同理心: 0.80
+    韧性: 0.70
+
+【情绪状态】
+  主导情绪: 平静
+  情绪强度: 0.30
+  当前情绪:
+    平静: 0.70
+    好奇: 0.30
+
+【多模型状态】
+  已加载: 6个模型
+  默认: deepseek-chat
+  成本: $0.00
 ```
 
-### PC端管理面板
+---
 
-PC端提供完整的管理界面，包括：
+## 🔧 多模型配置
 
-**功能模块：**
-- 💬 对话系统
-- 👥 群聊系统
-- 📝 笔记系统
-- 🎵 媒体控制
-- 🎨 画布系统
-- 🔌 插件管理
-- 📊 系统监控
+### 配置文件位置
 
-**访问方式：**
-1. 启动PC端：`run/pc_start.bat`
-2. 打开浏览器：`http://localhost:8000/manager`
-3. 开始使用
+`config/multi_model_config.json`
 
-### 调整人格
+### 添加新模型
 
-通过代码调整弥娅的人格：
+编辑配置文件，添加新模型配置：
 
-```python
-from core import Personality
-
-personality = Personality()
-
-# 增加温暖度
-personality.update_vector('warmth', 0.1)
-
-# 查看变化
-profile = personality.get_profile()
-print(profile['vectors'])
-```
-
-### 配置提示词
-
-提示词已自动与人格联动，但可以自定义模板：
-
-编辑 `prompts/` 目录下的配置文件：
-
-**prompts/standard.json:**
 ```json
 {
-  "user_prompt_template": "用户输入：{user_input}\n时间：{timestamp}",
-  "memory_context_enabled": true,
-  "memory_context_max_count": 5
+  "models": {
+    "your_model": {
+      "name": "your-model-name",
+      "provider": "openai",
+      "base_url": "https://your-api-endpoint.com/v1",
+      "api_key": "your-api-key",
+      "capabilities": [
+        "simple_chat",
+        "chinese_understanding"
+      ],
+      "cost_per_1k_tokens": {
+        "input": 0.001,
+        "output": 0.002
+      },
+      "latency": "fast",
+      "quality": "good"
+    }
+  },
+  "routing_strategy": {
+    "your_capability": {
+      "primary": "your_model",
+      "fallback": "chinese",
+      "cost_priority": 0.5,
+      "speed_priority": 0.8,
+      "quality_priority": 0.9
+    }
+  }
 }
 ```
 
-### 插件开发
+### 测试多模型功能
 
-创建自定义插件：
+运行测试脚本验证配置：
 
-```python
-from core.plugin_base import PluginBase
-
-class MyPlugin(PluginBase):
-    def __init__(self):
-        super().__init__(
-            name="my_plugin",
-            version="1.0.0",
-            description="我的插件"
-        )
-
-    def execute(self, context):
-        # 插件逻辑
-        return {"result": "插件执行成功"}
-
-# 注册插件
-from plugin import PluginManager
-pm = PluginManager()
-pm.register(MyPlugin())
+```bash
+python tests/test_multi_model_functionality.py
 ```
+
+### 支持的提供商
+
+- `deepseek` - DeepSeek API
+- `openai` - OpenAI兼容API（包括硅基流动等）
+- 可轻松扩展其他提供商
+
+详见：[多模型架构文档](MULTI_MODEL_QUICK_START.md)
 
 ---
 
-## 📖 开发文档
+## 📚 开发文档
 
-详细的开发文档位于 `docs/` 目录：
+### 核心文档
 
-### 数据库系统文档
-| 文档 | 说明 |
-|------|------|
-| [DATABASE_COMPLETE_GUIDE.md](docs/DATABASE_COMPLETE_GUIDE.md) | 数据库系统完整指南（推荐） |
-| [DATABASE_QUICK_REFERENCE.md](docs/DATABASE_QUICK_REFERENCE.md) | 数据库快速参考 |
-| [DATABASE_DEPLOYMENT_CHECKLIST.md](docs/DATABASE_DEPLOYMENT_CHECKLIST.md) | 数据库部署检查清单 |
-
-### 系统架构文档
-| 文档 | 说明 |
-|------|------|
-| [ARCHITECTURE_PC.md](docs/ARCHITECTURE_PC.md) | PC端完整架构文档 |
-| [ARCHITECTURE_QQ.md](docs/ARCHITECTURE_QQ.md) | QQ机器人架构文档 |
-| [DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) | 部署指南 |
-| [COMPLETE_INTEGRATION_REPORT.md](docs/COMPLETE_INTEGRATION_REPORT.md) | 完整集成报告 |
-| [PROMPT_CONFIG_GUIDE.md](docs/PROMPT_CONFIG_GUIDE.md) | 提示词配置指南 |
-| [UNDEFINED_ANALYSIS_REPORT.md](docs/UNDEFINED_ANALYSIS_REPORT.md) | Undefined系统分析 |
+- [架构总览](docs/ARCHITECTURE_OVERVIEW.md) - 完整的架构设计说明
+- [多模型快速开始](MULTI_MODEL_QUICK_START.md) - 多模型配置和使用指南
+- [多模型架构说明](MULTI_MODEL_ORCHESTRATION.md) - 多模型管理器详解
+- [工具系统指南](TERMINAL_TOOL_GUIDE.md) - 工具使用和配置
 
 ### API文档
 
-弥娅提供RESTful API：
+- [终端模式API](docs/TERMINAL_API.md)
+- [PC端API](docs/PC_API.md)
+- [QQ机器人API](docs/QQ_API.md)
 
-**基础接口：**
-```
-GET  /api/status         # 获取系统状态
-GET  /api/personality    # 获取人格状态
-GET  /api/emotion        # 获取情绪状态
-GET  /api/memory         # 获取记忆统计
-POST /api/chat           # 发送消息
-```
+### 贡献指南
 
-**运行时API：**
-```
-GET  /runtime/endpoints  # 获取交互端列表
-POST /runtime/start      # 启动交互端
-POST /runtime/stop       # 停止交互端
-GET  /runtime/agents     # 获取Agent列表
-```
+欢迎贡献代码、报告问题或提出建议！
 
-详细API文档请参考 `core/runtime_api_server.py` 的注释。
-
-### 核心模块说明
-
-**人格模块 (core/personality.py):**
-- 五维人格向量管理
-- 人格边界约束
-- 人格稳定性计算
-
-**情绪模块 (hub/emotion.py):**
-- 情绪类型定义
-- 情绪染色机制
-- 情绪衰减算法
-
-**记忆模块 (hub/memory_engine.py):**
-- 多层次记忆存储
-- 语义检索
-- GRAG五元组
-
-**传输模块 (mlink/mlink_core.py):**
-- 五流分发
-- 动态路由
-- 断链自愈
+详见：[贡献指南](CONTRIBUTING.md)
 
 ---
 
 ## ❓ 常见问题
 
-### 1. 安装失败
+### Q1: 启动时报错 "找不到模块"
 
-**问题：** UnicodeDecodeError
-
-**解决：**
-```batch
-# 删除旧的 requirements.txt
-del requirements.txt
-
-# 重新运行安装
-install.bat
+**A**: 确保已正确安装依赖：
+```bash
+pip install -r requirements.txt
 ```
 
-**问题：** pip镜像冲突
+### Q2: AI模型调用失败
 
-**解决：**
-```batch
-# 清除pip镜像配置
-pip config unset global.index-url
-
-# 重新安装
-install.bat
+**A**: 检查 `config/.env` 中的API密钥配置是否正确：
+```bash
+# 验证API密钥
+AI_API_KEY=sk-xxx  # 确保密钥格式正确
+AI_API_BASE_URL=https://api.xxx.com/v1  # 确保URL正确
 ```
 
-### 2. 启动失败
+### Q3: Neo4j/Redis连接失败
 
-**问题：** ImportError: No module named 'xxx'
+**A**: 这些服务是可选的。如果连接失败，系统会自动降级到模拟模式，核心功能不受影响。如需完整功能，请确保服务已启动：
+```bash
+# 检查Neo4j
+docker ps | grep neo4j
 
-**解决：**
-```batch
-# 确保虚拟环境激活
-cd venv\Scripts   # Windows
-source venv/bin/activate  # Linux/macOS
-
-# 重新安装依赖
-pip install -r ../requirements.txt
+# 检查Redis
+redis-cli ping
 ```
 
-**问题：** NameError: name 'Dict' is not defined
+### Q4: 多模型不工作？
 
-**解决：**
-这是旧版本的问题，已修复。请确保使用最新代码。
-
-### 3. 提示词不生效
-
-**问题：** 修改提示词后没有变化
-
-**原因：** 提示词现在由人格模块动态生成
-
-**解决：**
-```python
-# 调整人格，提示词会自动更新
-personality.update_vector('warmth', 0.1)
-
-# 或自定义模板（仅修改用户提示词）
-prompt_manager.set_user_prompt_template("自定义模板")
+**A**: 检查 `config/multi_model_config.json` 配置是否正确，并运行测试：
+```bash
+python tests/test_multi_model_functionality.py
 ```
 
-### 4. 数据库连接失败
+### Q5: 终端命令执行失败（Windows）
 
-**问题：** Connection refused to Redis/Milvus/Neo4j
-
-**解决：**
-1. 确保数据库服务已启动
-2. 检查 `config/.env` 中的连接配置
-3. 或者禁用某些数据库（系统仍可运行，只是功能受限）
-
-### 5. QQ机器人连接失败
-
-**问题：** `[WinError 1225] 远程计算机拒绝网络连接`
-
-**原因：** OneBot服务未启动或配置错误
-
-**解决：**
-1. 确认OneBot服务已启动（NapCat或go-cqhttp）
-2. 检查 `config/.env` 中的配置：
-   ```env
-   QQ_ONEBOT_WS_URL=ws://localhost:3001
-   QQ_BOT_QQ=你的机器人QQ号
-   ```
-3. 详细配置请参考：[QQ机器人配置指南](docs/QQ_BOT_SETUP.md)
-
-**常见错误：**
-- ❌ OneBot未启动 → 启动OneBot服务
-- ❌ 端口配置错误 → 检查OneBot的WebSocket端口
-- ❌ QQ号未配置 → 设置 `QQ_BOT_QQ`
-- ❌ Token不匹配 → 检查 `QQ_ONEBOT_TOKEN`
-
-### 6. 内存占用过高
-
-**问题：** 系统运行一段时间后内存占用很高
-
-**解决：**
-```python
-# 清理Redis缓存
-redis_client.flushdb()
-
-# 或限制记忆数量
-memory.set_max_count(1000)
+**A**: 确保使用正确的命令格式。弥娅会自动将Unix命令转换为Windows命令：
+```
+!ls           # Windows会自动转换为 Get-ChildItem
+!pwd          # Windows会自动转换为 Get-Location
 ```
 
----
+### Q6: 性能问题
 
-## 🛠️ 故障排查
+**A**: 弥娅的主要延迟来自AI模型调用（~500-2000ms）。如果需要更快的响应，可以：
+1. 使用更快的模型（如硅基流动的fast模型）
+2. 启用模型缓存
+3. 优化prompt长度
 
-### 查看日志
+### Q7: 为什么不是分布式架构？
 
-日志文件位于 `logs/` 目录：
-
-```
-logs/
-├── miya_20260228.log      # 主日志
-├── pc_ui.log              # PC端日志
-├── mlink.log              # M-Link日志
-├── memory.log             # 记忆日志
-├── emotion.log            # 情绪日志
-└── error.log              # 错误日志
-```
-
-### 系统状态检查
-
-```python
-from run.main import Miya
-
-miya = Miya()
-status = miya.get_system_status()
-
-print(status)
-```
-
-### 健康检查
-
-```batch
-# Windows
-test_environment.bat
-
-# Linux/macOS
-python tests/test_integration.py
-```
-
----
-
-## 🔄 更新日志
-
-### v5.2 (2026-02-28)
-
-**新增：**
-- ✨ 提示词管理器与人格模块完全联动
-- ✨ 动态人格描述生成
-- ✨ PC端管理面板完善
-
-**修复：**
-- 🐛 修复提示词硬编码人格数值的问题
-- 🐛 修复架构偏航（提示词现在完全依赖人格模块）
-- 🐛 修复批量脚本编码问题
-
-**优化：**
-- ⚡ 优化人格格式化逻辑
-- ⚡ 优化提示词生成效率
-
-### v5.1
-
-**新增：**
-- ✨ PC端UI
-- ✨ QQ机器人集成
-- ✨ 运行时API
-
-### v5.0
-
-**新增：**
-- ✨ 蛛网式架构
-- ✨ 五维人格系统
-- ✨ GRAG记忆架构
-- ✨ M-Link传输层
-
----
-
-## 🤝 贡献指南
-
-欢迎贡献代码！
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
-
-### 代码规范
-
-- 遵循 PEP 8 规范
-- 添加类型提示（typing）
-- 编写文档字符串
-- 添加单元测试
+**A**: 弥娅采用模块化单体架构，所有组件在同一进程中运行。这种设计具有低延迟、简单易用、调试方便的优势，适合中小规模应用。详见：[架构澄清文档](ARCHITECTURE_CLARIFICATION.md)
 
 ---
 
 ## 📄 许可证
 
-本项目采用 MIT 许可证。
+MIT License - 详见 [LICENSE](LICENSE) 文件
 
 ---
 
 ## 🙏 致谢
 
-感谢以下项目：
-- OpenAI GPT系列
-- FastAPI
-- Redis, Milvus, Neo4j
-- OneBot协议
-- Electron
+感谢所有为弥娅项目做出贡献的开发者和用户！
+
+特别感谢：
+- DeepSeek 提供强大的AI模型
+- 硅基流动 提供低成本AI服务
+- 所有开源社区的支持
 
 ---
 
-## 📞 联系方式
+## 📮 联系方式
 
-- GitHub: https://github.com/your-repo/miya
-- Issues: https://github.com/your-repo/miya/issues
-- 文档: https://docs.miya.ai
+- 项目主页：[GitHub Repository](https://github.com/your-repo/miya)
+- 问题反馈：[Issues](https://github.com/your-repo/miya/issues)
+- 讨论区：[Discussions](https://github.com/your-repo/miya/discussions)
 
 ---
 
-**弥娅 v5.2 - 数字生命伴侣**
+## 🎯 路线图
 
-*"不仅是AI，更是伙伴"*
+### v5.3 (计划中)
+- [ ] 更多AI模型支持（Claude、GPT-4等）
+- [ ] 移动端支持
+- [ ] 语音交互
+- [ ] 多语言支持
+
+### v6.0 (规划中)
+- [ ] 插件市场
+- [ ] 社区模型分享
+- [ ] 云端同步
+- [ ] 协作功能
+
+---
+
+**弥娅 - 不仅是AI，更是伙伴** 🤖💕

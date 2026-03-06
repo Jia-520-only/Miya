@@ -6,5 +6,6 @@ from .memory_engine import MemoryEngine
 from .emotion import Emotion
 from .decision import Decision
 from .scheduler import Scheduler
+from .decision_hub import DecisionHub
 
-__all__ = ['MemoryEmotion', 'MemoryEngine', 'Emotion', 'Decision', 'Scheduler']
+__all__ = ['MemoryEmotion', 'MemoryEngine', 'Emotion', 'Decision', 'Scheduler', 'DecisionHub']

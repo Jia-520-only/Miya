@@ -136,6 +136,7 @@ class ToolRegistry:
     def load_all_tools(self):
         """加载所有工具"""
         self._load_basic_tools()
+        self._load_terminal_tools()  # 新增：加载终端命令工具
         self._load_message_tools()
         self._load_group_tools()
         self._load_memory_tools()
@@ -147,6 +148,7 @@ class ToolRegistry:
         self._load_tavern_tools()
         self._load_game_mode_tools()
         self._load_lifenet_tools()
+        self._load_web_search_tools()  # 新增：加载 Web 搜索工具
         # 注意：查询工具已在 _load_entertainment_tools() 中加载
 
     def _load_basic_tools(self):
@@ -158,6 +160,12 @@ class ToolRegistry:
         self.register(GetCurrentTime())
         self.register(GetUserInfo())
         self.register(PythonInterpreter())
+
+    def _load_terminal_tools(self):
+        """加载终端命令工具"""
+        from webnet.TerminalNet.tools.terminal_command import TerminalCommandTool
+
+        self.register(TerminalCommandTool())
 
     def _load_message_tools(self):
         """加载消息工具"""
@@ -191,11 +199,13 @@ class ToolRegistry:
         from webnet.MemoryNet.tools.memory_list import MemoryList
         from webnet.MemoryNet.tools.memory_update import MemoryUpdate
         from webnet.MemoryNet.tools.memory_delete import MemoryDelete
+        from webnet.MemoryNet.tools.auto_extract_memory import AutoExtractMemory
 
         self.register(MemoryAdd())
         self.register(MemoryList())
         self.register(MemoryUpdate())
         self.register(MemoryDelete())
+        self.register(AutoExtractMemory())
         logger.info("已加载记忆工具（统一记忆接口）")
 
     def _load_knowledge_tools(self):
@@ -369,6 +379,19 @@ class ToolRegistry:
             self.logger.info("已加载游戏模式工具")
         except Exception as e:
             self.logger.warning(f"加载游戏模式工具失败: {e}")
+
+    def _load_web_search_tools(self):
+        """加载 Web 搜索工具"""
+        try:
+            from webnet.WebSearchNet.tools.web_search import WebSearch, GetAvailableSearchEngines, GetSearchHistory
+
+            self.register(WebSearch())
+            self.register(GetAvailableSearchEngines())
+            self.register(GetSearchHistory())
+
+            self.logger.info("已加载 Web 搜索工具")
+        except Exception as e:
+            self.logger.warning(f"加载 Web 搜索工具失败: {e}")
 
     def _load_lifenet_tools(self):
         """加载 LifeNet 记忆管理工具"""

@@ -1,0 +1,10 @@
+{
+  "patterns": [],
+  "strategy": "balanced",
+  "metrics": {
+    "total_patterns": 0,
+    "high_confidence_patterns": 0,
+    "optimization_cycles": 0,
+    "last_optimization": null
+  }
+}

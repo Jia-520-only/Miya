@@ -1,0 +1,192 @@
+{
+  "models": {
+    "chinese": {
+      "name": "deepseek-chat",
+      "provider": "deepseek",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "sk-15346aa170c442c69d726d8e95cabca3",
+      "capabilities": [
+        "simple_chat",
+        "chinese_understanding",
+        "task_planning",
+        "tool_calling"
+      ],
+      "cost_per_1k_tokens": {
+        "input": 0.00014,
+        "output": 0.00028
+      },
+      "latency": "fast",
+      "quality": "excellent"
+    },
+    "siliconflow": {
+      "name": "Qwen/Qwen2.5-7B-Instruct",
+      "provider": "openai",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": "sk-lbybyiqrbaxasvwmspsoxulfkrprzibertsjanyaurcxbird",
+      "capabilities": [
+        "simple_chat",
+        "chinese_understanding",
+        "task_planning",
+        "tool_calling"
+      ],
+      "cost_per_1k_tokens": {
+        "input": 0.0001,
+        "output": 0.0002
+      },
+      "latency": "fast",
+      "quality": "excellent"
+    },
+    "fast": {
+      "name": "Qwen/Qwen2.5-7B-Instruct",
+      "provider": "openai",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": "sk-lbybyiqrbaxasvwmspsoxulfkrprzibertsjanyaurcxbird",
+      "capabilities": [
+        "simple_chat",
+        "summarization",
+        "task_classification"
+      ],
+      "cost_per_1k_tokens": {
+        "input": 0.0001,
+        "output": 0.0002
+      },
+      "latency": "fast",
+      "quality": "excellent"
+    },
+    "chat": {
+      "name": "deepseek-chat",
+      "provider": "deepseek",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "sk-15346aa170c442c69d726d8e95cabca3",
+      "capabilities": [
+        "tool_calling",
+        "multimodal",
+        "code_analysis"
+      ],
+      "cost_per_1k_tokens": {
+        "input": 0.00014,
+        "output": 0.00028
+      },
+      "latency": "fast",
+      "quality": "excellent"
+    },
+    "reasoning": {
+      "name": "deepseek-chat",
+      "provider": "deepseek",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "sk-15346aa170c442c69d726d8e95cabca3",
+      "capabilities": [
+        "complex_reasoning",
+        "code_analysis",
+        "creative_writing"
+      ],
+      "cost_per_1k_tokens": {
+        "input": 0.00014,
+        "output": 0.00028
+      },
+      "latency": "fast",
+      "quality": "excellent"
+    },
+    "code": {
+      "name": "deepseek-chat",
+      "provider": "deepseek",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "sk-15346aa170c442c69d726d8e95cabca3",
+      "capabilities": [
+        "code_generation",
+        "code_analysis"
+      ],
+      "cost_per_1k_tokens": {
+        "input": 0.00014,
+        "output": 0.00028
+      },
+      "latency": "fast",
+      "quality": "excellent"
+    }
+  },
+  "routing_strategy": {
+    "simple_chat": {
+      "primary": "fast",
+      "fallback": "chinese",
+      "cost_priority": 1.0,
+      "speed_priority": 0.9,
+      "quality_priority": 0.7
+    },
+    "complex_reasoning": {
+      "primary": "reasoning_pro",
+      "fallback": "reasoning",
+      "cost_priority": 0.5,
+      "speed_priority": 0.4,
+      "quality_priority": 1.0
+    },
+    "code_analysis": {
+      "primary": "reasoning",
+      "secondary": "code",
+      "cost_priority": 0.6,
+      "speed_priority": 0.7,
+      "quality_priority": 0.9
+    },
+    "code_generation": {
+      "primary": "code",
+      "fallback": "reasoning",
+      "cost_priority": 0.2,
+      "speed_priority": 0.8,
+      "quality_priority": 0.85
+    },
+    "tool_calling": {
+      "primary": "chat",
+      "fallback": "reasoning",
+      "cost_priority": 0.8,
+      "speed_priority": 0.6,
+      "quality_priority": 0.95
+    },
+    "creative_writing": {
+      "primary": "reasoning_pro",
+      "secondary": "reasoning",
+      "cost_priority": 0.5,
+      "speed_priority": 0.4,
+      "quality_priority": 1.0
+    },
+    "chinese_understanding": {
+      "primary": "chinese",
+      "fallback": "fast",
+      "cost_priority": 0.1,
+      "speed_priority": 0.9,
+      "quality_priority": 0.85
+    },
+    "summarization": {
+      "primary": "fast",
+      "fallback": "chat",
+      "cost_priority": 0.2,
+      "speed_priority": 0.8,
+      "quality_priority": 0.9
+    },
+    "multimodal": {
+      "primary": "chat",
+      "fallback": "reasoning_pro",
+      "cost_priority": 1.0,
+      "speed_priority": 0.5,
+      "quality_priority": 1.0
+    },
+    "task_planning": {
+      "primary": "chinese",
+      "secondary": "chat",
+      "cost_priority": 0.3,
+      "speed_priority": 0.7,
+      "quality_priority": 0.9
+    }
+  },
+  "budget_control": {
+    "daily_budget_usd": 10.0,
+    "monthly_budget_usd": 300.0,
+    "alert_threshold": 0.8,
+    "stop_threshold": 0.95
+  },
+  "performance_settings": {
+    "enable_caching": true,
+    "cache_ttl_seconds": 3600,
+    "enable_parallel_execution": true,
+    "max_parallel_models": 3,
+    "consensus_threshold": 0.7
+  }
+}

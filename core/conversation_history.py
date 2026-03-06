@@ -1,6 +1,7 @@
 """
 对话历史持久化系统
 """
+import asyncio
 import json
 import logging
 import aiofiles
@@ -59,6 +60,10 @@ class ConversationHistoryManager:
         # 统计信息
         self._session_counts: Dict[str, int] = {}
 
+        # 保存任务跟踪（防止任务被销毁）
+        self._save_tasks: Dict[str, asyncio.Task] = {}
+        self._save_lock = asyncio.Lock()  # 防止并发保存
+
     def _get_session_file(self, session_id: str) -> Path:
         """获取会话历史文件路径"""
         # 使用session_id的hash避免文件名过长
@@ -77,12 +82,17 @@ class ConversationHistoryManager:
         try:
             async with aiofiles.open(file_path, 'r', encoding=Encoding.UTF8) as f:
                 content = await f.read()
+                if not content or not content.strip():
+                    return []
                 data = json.loads(content)
 
             messages = [ConversationMessage(**m) for m in data]
             logger.debug(f"从磁盘加载会话 {session_id}: {len(messages)} 条消息")
             return messages
 
+        except json.JSONDecodeError as e:
+            logger.warning(f"会话历史文件JSON格式错误 {session_id}: {e}")
+            return []
         except Exception as e:
             logger.error(f"加载会话历史失败 {session_id}: {e}")
             return []
@@ -91,16 +101,30 @@ class ConversationHistoryManager:
         """保存会话历史到磁盘"""
         file_path = self._get_session_file(session_id)
 
-        try:
-            data = [asdict(m) for m in messages]
-            async with aiofiles.open(file_path, 'w', encoding=Encoding.UTF8) as f:
-                await f.write(json.dumps(data, ensure_ascii=False, indent=2))
+        # 使用锁防止并发保存
+        async with self._save_lock:
+            try:
+                # 取消之前的保存任务（如果还在运行）
+                if session_id in self._save_tasks:
+                    old_task = self._save_tasks[session_id]
+                    if not old_task.done():
+                        old_task.cancel()
+                        try:
+                            await old_task
+                        except asyncio.CancelledError:
+                            pass
 
-            self._session_counts[session_id] = len(messages)
-            logger.debug(f"保存会话历史 {session_id}: {len(messages)} 条消息")
+                data = [asdict(m) for m in messages]
+                async with aiofiles.open(file_path, 'w', encoding=Encoding.UTF8) as f:
+                    await f.write(json.dumps(data, ensure_ascii=False, indent=2))
 
-        except Exception as e:
-            logger.error(f"保存会话历史失败 {session_id}: {e}")
+                self._session_counts[session_id] = len(messages)
+                logger.debug(f"保存会话历史 {session_id}: {len(messages)} 条消息")
+
+            except asyncio.CancelledError:
+                logger.debug(f"保存任务被取消: {session_id}")
+            except Exception as e:
+                logger.error(f"保存会话历史失败 {session_id}: {e}", exc_info=True)
 
     async def add_message(
         self,
@@ -142,8 +166,16 @@ class ConversationHistoryManager:
         if len(self._memory_cache[session_id]) > self.max_messages_per_session:
             self._memory_cache[session_id] = self._memory_cache[session_id][-self.max_messages_per_session:]
 
-        # 异步保存到磁盘
-        asyncio.create_task(self._save_session_to_disk(session_id, self._memory_cache[session_id]))
+        # 创建保存任务并跟踪（避免任务被销毁）
+        async def _save_with_cleanup():
+            try:
+                await self._save_session_to_disk(session_id, self._memory_cache[session_id])
+            finally:
+                # 清理任务引用
+                self._save_tasks.pop(session_id, None)
+
+        task = asyncio.create_task(_save_with_cleanup())
+        self._save_tasks[session_id] = task
 
         logger.debug(f"添加消息到会话 {session_id}: {role} - {content[:50]}...")
 
@@ -304,6 +336,24 @@ class ConversationHistoryManager:
 
         logger.info(f"清理完成，删除 {deleted_count} 个旧会话历史文件")
 
+    async def close(self):
+        """关闭管理器，等待所有保存任务完成"""
+        if self._save_tasks:
+            logger.info(f"等待 {len(self._save_tasks)} 个保存任务完成...")
+
+            # 等待所有任务完成或取消
+            tasks = list(self._save_tasks.values())
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+            self._save_tasks.clear()
+            logger.info("所有保存任务已完成")
+
+    async def flush(self):
+        """立即刷新所有未完成的保存任务"""
+        if self._save_tasks:
+            logger.debug(f"刷新 {len(self._save_tasks)} 个未完成的保存任务")
+            await asyncio.gather(*self._save_tasks.values(), return_exceptions=True)
+
 
 # 全局单例
 _global_manager: Optional[ConversationHistoryManager] = None
@@ -325,6 +375,5 @@ def reset_conversation_history_manager():
     _global_manager = None
 
 
-# 异步导入
-import asyncio
+# 常量导入
 from core.constants import Encoding

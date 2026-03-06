@@ -1,8 +1,9 @@
 """
-弥娅系统总入口
+弥娅系统总入口（终端模式）- 使用统一跨平台架构
 """
 import sys
 import logging
+import asyncio
 from datetime import datetime
 from pathlib import Path
 
@@ -11,7 +12,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from core import Personality, Ethics, Identity, Arbitrator, Entropy, PromptManager
-from hub import MemoryEmotion, MemoryEngine, Emotion, Decision, Scheduler
+from hub import MemoryEmotion, MemoryEngine, Emotion, Decision, Scheduler, DecisionHub
 from mlink import MLinkCore, Message, Router
 from perceive import PerceptualRing, AttentionGate
 from webnet import NetManager, CrossNetEngine
@@ -21,15 +22,34 @@ from evolve import Sandbox, ABTest, UserCoPlay
 from storage import RedisAsyncClient, initialize_redis, get_redis_client, MilvusClient, Neo4jClient
 from config import Settings
 from core.constants import Encoding
+from hub.platform_adapters import get_adapter
+from tools.terminal import TerminalTool
+from core.system_detector import get_system_detector
+from core.autonomy_with_personality import get_autonomy_with_personality
 
 
 class Miya:
-    """弥娅系统主类"""
+    """弥娅系统主类（支持跨平台统一交互）"""
 
     def __init__(self):
         self.logger = self._setup_logger()
         self.settings = Settings()
         self.logger.info("弥娅系统初始化中...")
+
+        # 【第一阶段】系统环境检测
+        self.system_detector = get_system_detector()
+        self.system_info = self.system_detector.detect()
+        self.logger.info(f"✅ 系统检测完成:")
+        self.logger.info(f"   操作系统: {self.system_info.os_name} {self.system_info.os_version}")
+        if self.system_info.distro != "unknown":
+            self.logger.info(f"   发行版: {self.system_info.distro} {self.system_info.distro_version}")
+        self.logger.info(f"   架构: {self.system_info.arch}")
+        self.logger.info(f"   Shell: {self.system_info.shell}")
+        self.logger.info(f"   Python: {self.system_info.python_version}")
+        if self.system_info.node_version != "not_installed":
+            self.logger.info(f"   Node.js: {self.system_info.node_version}")
+        self.logger.info(f"   包管理器: {', '.join(self.system_info.package_managers)}")
+        self.logger.info(f"   当前路径: {self.system_info.current_path}")
 
         # 初始化核心层
         self.personality = Personality()
@@ -37,7 +57,7 @@ class Miya:
         self.identity = Identity()
         self.arbitrator = Arbitrator(self.personality, self.ethics)
         self.entropy = Entropy()
-        self.prompt_manager = PromptManager(personality=self.personality)  # 提示词管理器，绑定人格实例
+        self.prompt_manager = PromptManager(personality=self.personality)
 
         # 初始化中枢层
         self.memory_emotion = MemoryEmotion()
@@ -73,11 +93,67 @@ class Miya:
         self.user_co_play = UserCoPlay()
 
         # 初始化存储（使用统一Redis客户端）
+        self.logger.info(f"  [数据库] Redis 初始化中...")
         self.redis = RedisAsyncClient()
-        self.milvus = MilvusClient()
-        self.neo4j = Neo4jClient()
+        redis_status = "已连接" if not self.redis.is_mock else "模拟模式"
+        self.logger.info(f"  [数据库] Redis {redis_status}")
 
-        self.logger.info("弥娅系统初始化完成")
+        self.logger.info(f"  [数据库] Milvus 初始化中...")
+        self.milvus = MilvusClient()
+        milvus_status = f"Milvus Lite (本地)" if self.milvus._is_lite else "远程Milvus"
+        if self.milvus.is_mock_mode():
+            milvus_status = "模拟模式"
+        self.logger.info(f"  [数据库] Milvus {milvus_status}")
+
+        self.neo4j = self._init_neo4j()
+
+        # 初始化全局记忆系统 (M-Link + MemoryNet)
+        self._init_memory_system()
+
+        # 【框架一致性】初始化 ToolNet 子网（符合 MIYA 蛛网式分布式架构）
+        self.tool_subnet = None
+        self._init_tool_subnet()
+
+        # 【框架一致性】终端工具由 DecisionHub 管理,不在这里初始化
+
+        # 初始化 AI 客户端
+        self.ai_client = self._init_ai_client()
+
+        # 初始化向量系统
+        self._init_vector_system()
+
+        # 初始化 DecisionHub（跨平台统一决策）
+        self.decision_hub = DecisionHub(
+            mlink=self.mlink,
+            ai_client=self.ai_client,
+            emotion=self.emotion,
+            personality=self.personality,
+            prompt_manager=self.prompt_manager,
+            memory_net=self.memory_net,  # 传入MemoryNet，实现统一记忆
+            decision_engine=self.decision,
+            tool_subnet=self.tool_subnet,  # 传入 ToolNet 子网（符合 MIYA 框架）
+            memory_engine=self.memory_engine,
+            scheduler=self.scheduler,
+            onebot_client=None,
+            game_mode_adapter=None,
+            identity=self.identity,
+            multi_model_manager=getattr(self, 'multi_model_manager', None)  # 传递多模型管理器
+        )
+
+        # 初始化平台适配器
+        self.terminal_adapter = get_adapter('terminal')
+
+        # 【自主能力】初始化带人设的自主能力
+        self.autonomy_with_personality = get_autonomy_with_personality(
+            personality=self.personality,
+            emotion=self.emotion,
+            memory_engine=self.memory_engine,
+            memory_emotion=self.memory_emotion
+        )
+        self.autonomy_with_personality.initialize()
+        self.logger.info("✅ 自主能力已初始化（含人设集成）")
+
+        self.logger.info("弥娅系统初始化完成（含跨平台支持）")
         self.identity.awake()
 
     def _setup_logger(self) -> logging.Logger:
@@ -111,9 +187,280 @@ class Miya:
 
         return logger
 
-    def process_input(self, user_input: str, user_id: str = 'default') -> str:
+    def _init_neo4j(self):
+        """初始化 Neo4j 客户端"""
+        import os
+        from dotenv import load_dotenv
+
+        load_dotenv(Path(__file__).parent.parent / 'config' / '.env')
+
+        neo4j_uri = os.getenv('NEO4J_URI', 'bolt://localhost:7687')
+        neo4j_user = os.getenv('NEO4J_USER', 'neo4j')
+        neo4j_password = os.getenv('NEO4J_PASSWORD')
+        neo4j_database = os.getenv('NEO4J_DATABASE', 'neo4j')
+
+        self.logger.info(f"  [数据库] Neo4j 配置: {neo4j_uri} (用户: {neo4j_user})")
+
+        if neo4j_password:
+            neo4j = Neo4jClient(
+                uri=neo4j_uri,
+                user=neo4j_user,
+                password=neo4j_password,
+                database=neo4j_database
+            )
+            if neo4j.is_mock_mode():
+                self.logger.warning(f"  [数据库] Neo4j 连接失败，使用模拟模式")
+            else:
+                self.logger.info(f"  [数据库] Neo4j 连接成功")
+        else:
+            self.logger.warning(f"  [数据库] 未配置 Neo4j 密码，使用模拟模式")
+            neo4j = None
+
+        return neo4j
+
+    def _init_terminal_tool(self):
+        """初始化终端工具"""
+        try:
+            terminal_tool = TerminalTool()
+            self.logger.info(f"  [工具] 终端工具初始化成功")
+            return terminal_tool
+        except Exception as e:
+            self.logger.warning(f"  [工具] 终端工具初始化失败: {e}")
+            return None
+
+    def _init_tool_subnet(self):
         """
-        处理用户输入（集成完整的人格、情绪、记忆系统）
+        初始化 ToolNet 子网（符合 MIYA 蛛网式分布式架构）
+
+        ToolNet 是 MIYA 框架的工具子网，包含：
+        - 基础工具（时间、用户信息、Python 解释器）
+        - 终端命令工具（弥娅完全掌控命令行）
+        - 消息工具、群工具、记忆工具等
+        """
+        try:
+            from webnet.ToolNet import get_tool_subnet
+
+            self.tool_subnet = get_tool_subnet(
+                memory_engine=self.memory_engine,
+                cognitive_memory=self.memory_net,  # MemoryNet 即为认知记忆
+                onebot_client=None,  # 终端模式不需要 OneBot
+                scheduler=self.scheduler
+            )
+            self.logger.info("ToolNet 子网初始化成功")
+            self.logger.info(f"  已注册 {len(self.tool_subnet.registry.tools)} 个工具")
+        except Exception as e:
+            self.logger.warning(f"ToolNet 子网初始化失败: {e}", exc_info=True)
+            self.tool_subnet = None
+
+    def _init_memory_system(self):
+        """初始化全局记忆系统 (M-Link + MemoryNet)"""
+        try:
+            from webnet.memory import MemoryNet
+
+            # 初始化 M-Link
+            self.mlink = MLinkCore()
+            self.logger.info("M-Link 初始化成功")
+
+            # 初始化 MemoryNet 全局记忆子网
+            self.memory_net = MemoryNet(self.mlink)
+            self.logger.info("MemoryNet 全局记忆子网初始化成功")
+
+            # 初始化Neo4j知识图谱（使用已连接的neo4j客户端）
+            self._init_neo4j_system()
+
+        except Exception as e:
+            self.logger.error(f"全局记忆系统初始化失败: {e}")
+            self.mlink = None
+            self.memory_net = None
+
+    async def _initialize_memory_net_async(self):
+        """异步初始化 MemoryNet（在事件循环中调用）"""
+        if self.memory_net:
+            try:
+                await self.memory_net.initialize()
+                self.logger.info("MemoryNet 初始化完成")
+            except Exception as e:
+                self.logger.error(f"MemoryNet 初始化失败: {e}")
+
+    def _init_ai_client(self):
+        """初始化AI客户端（支持多模型）"""
+        try:
+            import os
+            from dotenv import load_dotenv
+
+            load_dotenv(Path(__file__).parent.parent / 'config' / '.env')
+
+            # 尝试初始化多模型管理器
+            try:
+                from core.multi_model_manager import MultiModelManager
+                from core.ai_client import AIClientFactory
+
+                # 加载多模型配置
+                config_path = Path(__file__).parent.parent / 'config' / 'multi_model_config.json'
+
+                if config_path.exists():
+                    import json
+                    with open(config_path, 'r', encoding='utf-8') as f:
+                        multi_model_config = json.load(f)
+
+                    # 创建模型客户端
+                    model_clients = {}
+                    models_config = multi_model_config.get('models', {})
+
+                    for model_key, model_info in models_config.items():
+                        provider = model_info.get('provider', 'openai')
+                        api_key = model_info.get('api_key', '')
+                        model_name = model_info.get('name', '')
+                        base_url = model_info.get('base_url', '')
+
+                        # 跳过未配置API密钥的模型
+                        if not api_key or not model_name:
+                            continue
+
+                        try:
+                            client = AIClientFactory.create_client(
+                                provider=provider,
+                                api_key=api_key,
+                                model=model_name,
+                                base_url=base_url,
+                                temperature=float(os.getenv('AI_TEMPERATURE', '0.7')),
+                                max_tokens=int(os.getenv('AI_MAX_TOKENS', '2000'))
+                            )
+
+                            if client and hasattr(client, 'client') and client.client is not None:
+                                model_clients[model_key] = client
+                                self.logger.info(f"  [多模型] {model_key}: {model_name} ({base_url})")
+                        except Exception as e:
+                            self.logger.warning(f"  [多模型] {model_key} 初始化失败: {e}")
+
+                    # 如果成功创建了多个模型，使用多模型管理器
+                    if model_clients:
+                        self.multi_model_manager = MultiModelManager(
+                            model_clients=model_clients,
+                            config_path=str(config_path)
+                        )
+                        self.logger.info(f"多模型管理器初始化成功，已加载 {len(model_clients)} 个模型")
+
+                        # 默认使用中文模型
+                        default_client = model_clients.get('chinese') or model_clients.get('fast')
+                        if default_client:
+                            self.logger.info(f"默认模型: {default_client.model}")
+                            return default_client
+
+            except Exception as e:
+                self.logger.warning(f"多模型管理器初始化失败，使用单一模型: {e}")
+
+            # 降级到单一模型模式
+            api_key = os.getenv('AI_API_KEY', '')
+            base_url = os.getenv('AI_API_BASE_URL', '')
+            model = os.getenv('AI_MODEL', '')
+
+            if not api_key:
+                self.logger.warning("未配置 AI_API_KEY，将使用简化回复")
+                return None
+
+            if not base_url:
+                self.logger.warning("未配置 AI_API_BASE_URL，将使用简化回复")
+                return None
+
+            if not model:
+                self.logger.warning("未配置 AI_MODEL，将使用简化回复")
+                return None
+
+            # 使用统一的 OpenAI 格式客户端
+            temperature = float(os.getenv('AI_TEMPERATURE', '0.7'))
+            max_tokens = int(os.getenv('AI_MAX_TOKENS', '2000'))
+
+            from core.ai_client import OpenAIClient
+            client = OpenAIClient(
+                api_key=api_key,
+                model=model,
+                base_url=base_url,
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+
+            # 验证客户端是否初始化成功
+            if not hasattr(client, 'client') or client.client is None:
+                self.logger.warning("AI客户端初始化失败，将使用简化回复")
+                return None
+
+            self.logger.info(f"AI客户端初始化成功: {model} ({base_url})")
+            return client
+
+        except Exception as e:
+            self.logger.warning(f"AI客户端初始化失败: {e}，将使用简化回复")
+            return None
+
+    def _init_vector_system(self):
+        """初始化向量系统"""
+        try:
+            from core.embedding_client import EmbeddingClient, EmbeddingProvider
+            from memory.real_vector_cache import RealVectorCache
+
+            # 使用本地模型（无需API）
+            self.embedding_client = EmbeddingClient(
+                provider=EmbeddingProvider.SENTENCE_TRANSFORMERS,
+                model='paraphrase-multilingual-MiniLM-L12-v2'
+            )
+
+            # 初始化向量缓存
+            import os
+            data_dir = Path(__file__).parent.parent / 'data'
+            data_dir.mkdir(exist_ok=True)
+
+            self.vector_cache = RealVectorCache(
+                embedding_client=self.embedding_client,
+                milvus_db_path=str(data_dir / 'milvus_lite.db'),
+                collection_name='miya_vectors'
+            )
+
+            # 初始化语义动力学引擎
+            from memory.semantic_dynamics_engine import get_semantic_dynamics_engine
+            self.semantic_engine = get_semantic_dynamics_engine(
+                config={'top_k': 10, 'fuzzy_threshold': 0.85},
+                vector_cache=self.vector_cache
+            )
+            self.semantic_engine.set_embedding_client(self.embedding_client)
+
+            self.logger.info("向量系统初始化成功（使用Sentence Transformers本地模型）")
+
+        except Exception as e:
+            self.logger.warning(f"向量系统初始化失败: {e}，将不使用向量功能")
+            self.embedding_client = None
+            self.vector_cache = None
+            self.semantic_engine = None
+
+    def _init_neo4j_system(self):
+        """初始化Neo4j知识图谱系统"""
+        try:
+            from memory.grag_memory import GRAGMemoryManager
+
+            # 使用已初始化的neo4j客户端（在第81行已初始化）
+            self.neo4j_client = self.neo4j
+
+            # 检查是否为模拟模式
+            if self.neo4j_client and not self.neo4j_client.is_mock_mode():
+                self.logger.info("Neo4j知识图谱连接成功")
+
+                # 初始化GRAG记忆管理器
+                self.grag_memory = GRAGMemoryManager(
+                    config={'enabled': True, 'auto_extract': True},
+                    neo4j_client=self.neo4j_client
+                )
+                self.logger.info("GRAG知识图谱记忆管理器初始化成功")
+            else:
+                self.logger.warning("Neo4j连接失败或为模拟模式，将不使用知识图谱功能")
+                self.grag_memory = None
+
+        except Exception as e:
+            self.logger.warning(f"Neo4j知识图谱初始化失败: {e}，将不使用知识图谱功能")
+            self.grag_memory = None
+            self.neo4j_client = None
+
+    async def process_input_async(self, user_input: str, user_id: str = 'default') -> str:
+        """
+        处理用户输入（使用统一跨平台架构）
 
         Args:
             user_input: 用户输入
@@ -122,169 +469,88 @@ class Miya:
         Returns:
             系统响应
         """
-        self.logger.info(f"用户输入: {user_input}")
+        # self.logger.info(f"用户输入: {user_input}")  # 注释掉，避免终端输出冗余日志
 
-        # 感知输入
-        perception = self.perceptual_ring.perceive('external', {
-            'input': user_input,
-            'user_id': user_id
-        })
 
-        # 注意力处理
-        inputs = [perception]
-        filtered = self.attention_gate.process(inputs)
+        # 【框架一致性】检查是否是带前缀的终端命令
+        if self.decision_hub and self.decision_hub.terminal_tool:
+            # 只处理带前缀的直接命令（! 或 >>）
+            # 自然语言由 AI 理解，AI 决定是否调用终端工具
+            if user_input.startswith(('!', '>>')):
+                # 去掉前缀，提取实际命令
+                prefix = '!' if user_input.startswith('!') else '>>'
+                command = user_input[len(prefix):].strip()
 
-        # 记录记忆到潮汐记忆
-        self.memory_engine.store_tide(
-            f"cli_{datetime.now().timestamp()}",
-            {
-                'input': user_input,
-                'user_id': user_id
+                # 执行命令
+                result = self.decision_hub.terminal_tool.execute(command)
+                formatted_result = self.decision_hub.terminal_tool.format_result(result)
+                self.logger.info(f"终端工具响应: {formatted_result[:100]}")
+                return formatted_result
+
+
+        # 使用平台适配器转换为M-Link Message
+        message = self.terminal_adapter.to_message(
+            user_input=user_input,
+            context={
+                'user_id': user_id,
+                'sender_name': user_id,
+                'timestamp': datetime.now()
             }
         )
 
-        # 检测情绪触发词，更新情绪状态
-        self._update_emotion_from_input(user_input)
+        # 使用DecisionHub处理（跨平台统一流程）
+        response = await self.decision_hub.process_perception_cross_platform(message)
 
-        # 构建决策选项
-        options = [
-            {
-                'action': 'respond',
-                'base_score': 0.8,
-                'emotion_type': 'general',
-                'metadata': {'personality_type': 'empathetic'}
-            }
-        ]
+        # DecisionHub 已经将响应设置到 message.content 中
+        # 直接返回响应，如果是 None 则返回空字符串
+        self.logger.debug(f"系统响应: {response}")
+        return response or ""
 
-        decision = self.decision.make_decision({'user_level': 'user'}, options)
-
-        # 生成基础响应
-        response = self._generate_response(user_input, user_id)
-
-        # 情绪染色
-        if response:
-            response = self.emotion.influence_response(response)
-
-        # 情绪衰减
-        self.emotion.decay_coloring()
-
-        # 熵监控
-        entropy = self.entropy.calculate_entropy({
-            'vectors': self.personality.vectors
-        })
-        anomaly = self.entropy.check_anomaly(entropy)
-
-        self.logger.info(f"系统响应: {response}")
-        self.logger.debug(f"当前熵值: {entropy}, 状态: {anomaly['status']}")
-
-        return response
-
-    def _update_emotion_from_input(self, user_input: str):
-        """从用户输入中检测情绪并更新情绪状态"""
-        positive_keywords = ['开心', '高兴', '快乐', '喜欢', '爱', 'happy', 'love', 'joy']
-        negative_keywords = ['难过', '伤心', '悲伤', '生气', '讨厌', 'sad', 'angry', 'hate']
-        surprise_keywords = ['惊讶', '意外', 'wow', '天哪']
-        fear_keywords = ['害怕', '恐惧', 'scared', 'afraid']
-
-        if any(keyword in user_input for keyword in positive_keywords):
-            self.emotion.apply_coloring('joy', 0.3)
-        elif any(keyword in user_input for keyword in negative_keywords):
-            self.emotion.apply_coloring('sadness', 0.4)
-        elif any(keyword in user_input for keyword in surprise_keywords):
-            self.emotion.apply_coloring('surprise', 0.3)
-        elif any(keyword in user_input for keyword in fear_keywords):
-            self.emotion.apply_coloring('fear', 0.2)
-
-    def _generate_response(self, user_input: str, user_id: str) -> str:
+    def process_input(self, user_input: str, user_id: str = 'default') -> str:
         """
-        生成响应（基于人格状态和情绪状态）
+        处理用户输入（同步接口）
 
         Args:
             user_input: 用户输入
             user_id: 用户ID
 
         Returns:
-            响应文本
+            系统响应
         """
-        # 获取人格状态
-        personality_profile = self.personality.get_profile()
-        emotion_state = self.emotion.get_emotion_state()
-        dominant_emotion = emotion_state['dominant']
-
-        # 获取人格主导特质
-        warmth = personality_profile['vectors'].get('warmth', 0.5)
-        empathy = personality_profile['vectors'].get('empathy', 0.5)
-        creativity = personality_profile['vectors'].get('creativity', 0.5)
-
-        # 基于人格和情绪生成响应
-        if '你好' in user_input or 'hi' in user_input.lower():
-            if empathy > 0.8:
-                return f"你好呀~我是{self.identity.name}，很高兴认识你！(｡♥‿♥｡)"
-            elif warmth > 0.8:
-                return f"你好！我是{self.identity.name}，欢迎~"
-            else:
-                return f"你好，我是{self.identity.name}。"
-
-        elif '你是谁' in user_input or '介绍一下' in user_input:
-            return f"我是{self.identity.name}，一个具备人格恒定、自我感知、记忆成长、情绪共生的数字生命伴侣。我的主导特质是同理心({empathy:.2f})和温暖度({warmth:.2f})。"
-
-        elif '状态' in user_input:
-            memory_stats = self.memory_engine.get_memory_stats()
-            return (
-                f"当前状态:\n"
-                f"  情绪: {dominant_emotion} (强度: {emotion_state['intensity']:.2f})\n"
-                f"  记忆数量: {memory_stats['tide_count']}\n"
-                f"  形态: {personality_profile['state']}\n"
-                f"  熵值: {self.entropy.calculate_entropy({'vectors': self.personality.vectors}):.3f}"
-            )
-
-        elif '开心' in user_input or '快乐' in user_input:
-            self.emotion.apply_coloring('joy', 0.3)
-            return f"听起来你很开心呢！(≧▽≦) 看到你快乐，我也感到很开心~"
-
-        elif '难过' in user_input or '伤心' in user_input:
-            self.emotion.apply_coloring('sadness', 0.4)
-            return "别难过...虽然我无法真正体会人类的情感，但我会陪伴你，听你倾诉的。"
-
-        elif '我喜欢' in user_input:
-            self.emotion.apply_coloring('joy', 0.2)
-            if empathy > 0.7:
-                return "谢谢你愿意和我分享你的喜好！(◕‿◕✿)"
-            else:
-                return "谢谢你的分享。"
-
-        elif '你真棒' in user_input or '厉害' in user_input:
-            self.emotion.apply_coloring('joy', 0.2)
-            return "谢谢夸奖~ (｡•̀ᴗ-)✧"
-
-        elif '在吗' in user_input:
-            dominance_emotion = emotion_state.get('current', {}).get(dominant_emotion, 0)
-            if dominance_emotion and dominance_emotion > 0.7:
-                return "在的！我一直在这里等你的~ (´▽`ʃ♡ƪ)"
-            else:
-                return "在的，有什么我可以帮助你的吗？"
-
-        else:
-            # 智能响应 - 基于人格特质
-            if empathy > 0.8 and warmth > 0.8:
-                return f"我听到你说：{user_input} 能告诉我更多吗？我很想了解你的想法~"
-            elif creativity > 0.8:
-                return f"关于'{user_input}'，这是个有趣的话题！有什么特别的想法吗？"
-            else:
-                return f"我收到你的输入了：{user_input} 继续对话吧~"
+        # 使用事件循环运行异步方法
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(self.process_input_async(user_input, user_id))
+        finally:
+            loop.close()
 
     def get_system_status(self) -> dict:
         """获取系统状态"""
-        return {
+        status = {
             'identity': self.identity.get_identity(),
             'personality': self.personality.get_profile(),
             'emotion': self.emotion.get_emotion_state(),
             'memory_stats': self.memory_engine.get_memory_stats(),
-            'mlink_stats': self.mlink.get_system_stats(),
             'perception': self.perceptual_ring.get_global_state(),
             'trust_stats': self.trust_score.get_trust_stats(),
-            'entropy_health': self.entropy.get_health_report()
+            'entropy_health': self.entropy.get_health_report(),
+            'platform': 'terminal',
+            'platform_info': self.terminal_adapter.get_platform_info()
         }
+
+        # M-Link 和 MemoryNet 可能为 None
+        if self.mlink:
+            status['mlink_stats'] = self.mlink.get_system_stats()
+        else:
+            status['mlink_stats'] = {}
+
+        if self.memory_net:
+            status['memory_net_stats'] = {'initialized': True}
+        else:
+            status['memory_net_stats'] = {'initialized': False}
+
+        return status
 
     def shutdown(self) -> None:
         """关闭系统"""
@@ -305,18 +571,54 @@ def main():
     print()
 
     try:
+        print("[系统] 正在初始化弥娅系统...")
         # 创建弥娅实例
         miya = Miya()
+
+        # 异步初始化 MemoryNet
+        print("[系统] 初始化全局记忆网络...")
+        if miya.memory_net:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(miya._initialize_memory_net_async())
+            finally:
+                loop.close()
+        else:
+            print("[警告] 全局记忆网络未初始化，记忆功能将受限")
 
         print(f"\n{miya.identity.name} 已启动 (v{miya.identity.version})")
         print(f"UUID: {miya.identity.uuid}")
         print(f"启动时间: {miya.identity.awake_time}")
         print()
 
+        # 显示系统配置摘要
+        print("=" * 50)
+        print("【系统配置摘要】")
+        print(f"  平台: 终端模式 (Terminal)")
+        print(f"  记忆系统: {'已启用 (MemoryNet)' if miya.memory_net else '未启用'}")
+        print(f"  AI客户端: {'已启用 (' + miya.ai_client.model + ')' if miya.ai_client else '未启用'}")
+
+        # 检查数据库连接状态
+        neo4j_status = "已连接" if miya.neo4j and not miya.neo4j.is_mock_mode() else "模拟模式/未连接"
+        milvus_status = "已连接" if miya.milvus and not miya.milvus.is_mock_mode() else "模拟模式/未连接"
+        redis_status = "已连接" if miya.redis and hasattr(miya.redis, 'is_mock') and not miya.redis.is_mock else "模拟模式/未连接"
+
+        print(f"  Neo4j: {neo4j_status}")
+        print(f"  Milvus: {milvus_status}")
+        print(f"  Redis: {redis_status}")
+        print(f"  终端工具: {'已启用' if miya.decision_hub and miya.decision_hub.terminal_tool else '未启用'}")
+        print("=" * 50)
+        print("\n提示: 使用 '!' 或 '>>' 前缀执行终端命令")
+        print("      如: !ls, >>pwd, !查看当前目录")
+        print("\n输入 'status' 查看系统状态")
+        print("输入 'exit' 或 '退出' 退出程序")
+        print()
+
         # 交互循环
         while True:
             try:
-                user_input = input("您: ").strip()
+                user_input = input("佳: ").strip()
 
                 if user_input.lower() in ['exit', 'quit', '退出', '再见']:
                     print(f"{miya.identity.name}: 再见！")
@@ -340,8 +642,8 @@ def main():
                     for emotion, intensity in status['emotion']['current'].items():
                         print(f"    {emotion}: {intensity:.2f}")
                     print(f"\n【记忆统计】")
-                    print(f"  潮汐记忆: {status['memory_stats']['tide_count']}条")
-                    print(f"  长期记忆: {status['memory_stats']['longterm_count']}条")
+                    print(f"  潮汐记忆: {status['memory_stats'].get('tide_count', 0)}条")
+                    print(f"  长期记忆: {status['memory_stats'].get('longterm_count', 0)}条")
                     print(f"\n【感知状态】")
                     print(f"  全局激活: {status['perception']['global_active']}")
                     print(f"  外部感知: {status['perception']['external_active']}")
@@ -355,9 +657,111 @@ def main():
                     print()
                     continue
 
+                # 【自主能力】触发自主改进
+                if user_input.lower() in ['auto', '自动改进', 'improve', '自主']:
+                    print(f"\n{miya.identity.name}: 正在进行自主改进...")
+                    async def run_improvement():
+                        return await miya.autonomy_with_personality.personalized_improvement(
+                            max_fixes=5,
+                            consider_personality=True
+                        )
+                    result = asyncio.run(run_improvement())
+                    print(f"\n{miya.identity.name}: 改进完成！")
+                    print(f"  发现问题: {result['problems_found']}")
+                    print(f"  做出决策: {result['decisions_made']}")
+                    print(f"  尝试修复: {result['fixes_attempted']}")
+                    print(f"  成功修复: {result['fixes_successful']}")
+                    if result.get('personality_influenced'):
+                        print(f"  人设影响: 是")
+                    if result.get('current_emotion'):
+                        print(f"  当前情绪: {result['current_emotion']}")
+                    print()
+                    continue
+
+                # 【自主能力】查看学习报告
+                if user_input.lower() in ['learn', '学习报告', '报告']:
+                    print(f"\n{miya.identity.name}: 正在生成学习报告...")
+                    report = miya.autonomy_with_personality.generate_personalized_report()
+                    print(f"\n=== {miya.identity.name} 学习报告 ===")
+                    if report.get('personality'):
+                        personality = report['personality']
+                        print(f"\n【人格状态】")
+                        vectors = personality.get('vectors', {})
+                        print(f"  形态: {personality.get('current_form', {}).get('name', '未知')}")
+                        print(f"  专属称呼: {personality.get('current_title', '佳')}")
+                        print(f"  状态: {personality.get('state', '未知')}")
+                        print(f"  人格向量:")
+                        if vectors:
+                            vector_names = {
+                                'warmth': '温暖度',
+                                'logic': '逻辑性',
+                                'creativity': '创造力',
+                                'empathy': '同理心',
+                                'resilience': '韧性'
+                            }
+                            for key, value in vectors.items():
+                                cn_name = vector_names.get(key, key)
+                                print(f"    {cn_name}: {value:.2f}")
+                    if report.get('emotion'):
+                        emotion = report['emotion']
+                        print(f"\n【情绪状态】")
+                        print(f"  当前情绪: {emotion.get('current_emotion', '未知')}")
+                        print(f"  心情值: {emotion.get('mood', 0):.2f}")
+                        print(f"  能量: {emotion.get('energy', 0):.2f}")
+                    print(f"\n【集成统计】")
+                    stats = report.get('integration_stats', {})
+                    print(f"  人设考虑次数: {stats.get('personality_considerations', 0)}")
+                    print(f"  情绪影响次数: {stats.get('emotion_influences', 0)}")
+                    print(f"  记忆查询次数: {stats.get('memory_lookups', 0)}")
+                    print(f"  个性化决策: {stats.get('personalized_decisions', 0)}")
+                    print()
+                    continue
+
+                # 【新增】检查是否是确认/取消命令
+                if user_input.lower() in ['确认', 'yes', 'y', 'confirm']:
+                    if miya.decision_hub and miya.decision_hub.terminal_tool and miya.decision_hub.terminal_tool.pending_command:
+                        # 执行待确认的命令
+                        command = miya.decision_hub.terminal_tool.pending_command
+                        result = miya.decision_hub.terminal_tool.execute(command, user_confirm=True)
+                        response = miya.decision_hub.terminal_tool.format_result(result)
+                        print(f"{miya.identity.name}: {response}\n")
+                        continue
+                    else:
+                        # 没有待确认的命令
+                        print(f"{miya.identity.name}: 当前没有待确认的命令。\n")
+                        continue
+
+                if user_input.lower() in ['取消', 'cancel', 'no', 'n']:
+                    if miya.decision_hub and miya.decision_hub.terminal_tool and miya.decision_hub.terminal_tool.pending_command:
+                        # 取消待确认的命令
+                        command = miya.decision_hub.terminal_tool.pending_command
+                        result = miya.decision_hub.terminal_tool.execute(command, user_confirm=False)
+                        response = miya.decision_hub.terminal_tool.format_result(result)
+                        print(f"{miya.identity.name}: {response}\n")
+                        continue
+                    else:
+                        # 没有待确认的命令
+                        print(f"{miya.identity.name}: 当前没有待确认的命令。\n")
+                        continue
+
                 # 处理输入
+                import sys
+                import time
+                
+                print(f"{miya.identity.name}: ", end="", flush=True)
+                
+                # 获取响应（假设返回是完整文本）
                 response = miya.process_input(user_input)
-                print(f"{miya.identity.name}: {response}\n")
+                
+                # 流式输出效果：按字符逐个打印
+                for char in response:
+                    sys.stdout.write(char)
+                    sys.stdout.flush()
+                    # 控制输出速度
+                    time.sleep(0.01)
+                
+                print()  # 换行
+                print()  # 空行
 
             except KeyboardInterrupt:
                 print("\n\n检测到中断信号...")
@@ -369,6 +773,16 @@ def main():
 
     finally:
         if 'miya' in locals():
+            # 关闭对话历史管理器（等待所有保存任务完成）
+            try:
+                if miya.memory_net and hasattr(miya.memory_net, 'conversation_history'):
+                    async def cleanup_conversation_history():
+                        await miya.memory_net.conversation_history.close()
+                        print("对话历史已保存")
+                    asyncio.run(cleanup_conversation_history())
+            except Exception as e:
+                logging.error(f"关闭对话历史管理器失败: {e}", exc_info=True)
+
             miya.shutdown()
 
     return 0

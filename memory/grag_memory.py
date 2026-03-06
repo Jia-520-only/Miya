@@ -22,12 +22,15 @@ logger = logging.getLogger(__name__)
 class GRAGMemoryManager:
     """GRAG知识图谱记忆管理器（整合语义动力学）"""
 
-    def __init__(self, config: Optional[Dict] = None):
+    def __init__(self, config: Optional[Dict] = None, neo4j_client=None):
         self.config = config or {}
         self.enabled = self.config.get('enabled', True)
         self.auto_extract = self.config.get('auto_extract', True)
         self.context_length = self.config.get('context_length', 20)
         self.similarity_threshold = self.config.get('similarity_threshold', 0.7)
+
+        # Neo4j客户端
+        self.neo4j_client = neo4j_client
 
         # NagaAgent: 五元组提取
         self.recent_context = []

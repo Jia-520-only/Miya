@@ -116,21 +116,33 @@ class MilvusClient:
             self.dimension = dimension
 
         if self._use_mock:
-            logger.info(f"📝 模拟模式：创建集合 {self.collection_name}，维度: {self.dimension}")
+            logger.info(f"模拟模式：创建集合 {self.collection_name}，维度: {self.dimension}")
             return True
 
         try:
             # 检查集合是否存在
             if self.collection_name not in self._milvus_client.list_collections():
+                # 定义schema（兼容新版pymilvus）
+                from pymilvus import MilvusClient
+
+                # 删除旧集合（如果存在）
+                try:
+                    self._milvus_client.drop_collection(collection_name=self.collection_name)
+                    logger.info(f"已删除旧集合: {self.collection_name}")
+                except:
+                    pass
+
+                # 创建新集合
                 self._milvus_client.create_collection(
                     collection_name=self.collection_name,
                     dimension=self.dimension,
                     metric_type="L2",
-                    id_type="string"
+                    id_type="string",
+                    max_length=65535  # 为varChar字段指定max_length
                 )
-                logger.info(f"✅ 创建Milvus集合成功: {self.collection_name} (维度: {self.dimension})")
+                logger.info(f"创建Milvus集合成功: {self.collection_name} (维度: {self.dimension})")
             else:
-                logger.info(f"✅ 集合已存在: {self.collection_name}")
+                logger.info(f"集合已存在: {self.collection_name}")
             return True
         except Exception as e:
             logger.error(f"创建Milvus集合失败: {e}")
@@ -177,8 +189,12 @@ class MilvusClient:
                 data=data
             )
 
-            # 刷新以确保数据可搜索
-            self._milvus_client.flush(self.collection_name)
+            # 刷新以确保数据可搜索（Milvus Lite可能没有flush方法）
+            try:
+                if hasattr(self._milvus_client, 'flush'):
+                    self._milvus_client.flush(self.collection_name)
+            except:
+                pass  # 忽略flush错误
 
             logger.info(f"✅ 插入 {len(vectors)} 个向量到Milvus")
             return ids

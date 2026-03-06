@@ -42,30 +42,37 @@ class SemanticDynamicsEngine:
     """
     语义动力学记忆引擎
 
-    核心原理（来自VCPToolBox浪潮RAG V3）：
-
-    1. **向量是单程票**：信息损失不可逆
-    2. **逻辑在运动中**：单一状态无法捕捉过程
-    3. **记忆≠知识**：动力学才是核心
+    核心功能：
+    1. **向量相似度检索**：使用Embedding API生成向量，在Milvus Lite中搜索
+    2. **上下文向量聚合**：融合当前对话上下文
+    3. **语义组增强**：基于关键词的语义分组
+    4. **时域解析**：中文时间表达式解析
 
     系统架构：
-    - ContextVectorManager: 上下文向量衰减聚合
+    - ContextVectorManager: 上下文向量管理
     - MetaThinkingManager: 元思考递归推理链
-    - SemanticGroupManager: 语义组增强
+    - SemanticGroupManager: 语义组管理
     - TimeExpressionParser: 时域解析
+    - RealVectorCache: 真正的向量缓存系统（Milvus Lite）
     """
 
     def __init__(
         self,
-        config: Optional[Dict] = None
+        config: Optional[Dict] = None,
+        vector_cache: Optional[object] = None
     ):
         """
         初始化语义动力学引擎
 
         Args:
             config: 配置字典
+            vector_cache: 向量缓存实例（RealVectorCache或VectorCacheManager）
         """
         self.config = config or {}
+        self.vector_cache = vector_cache
+
+        # Embedding客户端（内部实现）
+        self._embedding_client = None
 
         # 初始化子模块
         self.context_manager = get_context_manager(
@@ -79,34 +86,23 @@ class SemanticDynamicsEngine:
         self.semantic_groups = get_semantic_group_manager()
 
         self.time_parser = ChineseTimeExpressionParser(
-            timezone=self.config.get('timezone', 'Asia/Shanghai')
+            timezone_str=self.config.get('timezone', 'Asia/Shanghai')
         )
 
-        # 嵌入函数（需要外部设置）
-        self.get_embedding_func = None
-
-        # 检索函数（需要外部设置）
-        self.retrieve_func = None
-
-        # AI记忆处理函数（需要外部设置）
-        self.ai_memo_func = None
+        # Embedding函数（内部实现）
+        self._embedding_client = None
 
         logger.info("[SemanticDynamicsEngine] 初始化完成")
 
-    def set_embedding_func(self, func: callable):
-        """设置嵌入函数"""
-        self.get_embedding_func = func
-        logger.info("[SemanticDynamicsEngine] 嵌入函数已设置")
+    def set_embedding_client(self, client):
+        """设置Embedding客户端"""
+        self._embedding_client = client
+        logger.info("[SemanticDynamicsEngine] Embedding客户端已设置")
 
-    def set_retrieve_func(self, func: callable):
-        """设置检索函数"""
-        self.retrieve_func = func
-        logger.info("[SemanticDynamicsEngine] 检索函数已设置")
-
-    def set_ai_memo_func(self, func: callable):
-        """设置AI记忆处理函数"""
-        self.ai_memo_func = func
-        logger.info("[SemanticDynamicsEngine] AI记忆函数已设置")
+    def set_vector_cache(self, vector_cache):
+        """设置向量缓存"""
+        self.vector_cache = vector_cache
+        logger.info("[SemanticDynamicsEngine] 向量缓存已设置")
 
     async def initialize(self):
         """初始化引擎"""
@@ -157,7 +153,7 @@ class SemanticDynamicsEngine:
         # 1. 更新上下文向量
         assistant_vectors, user_vectors = self.context_manager.update_context(
             messages,
-            self.get_embedding_func
+            self._safe_embedding
         )
 
         context_influence = len(assistant_vectors + user_vectors) / max(
@@ -290,14 +286,14 @@ class SemanticDynamicsEngine:
 
     async def _safe_embedding(self, text: str) -> Optional[List[float]]:
         """安全地获取向量（带异常处理）"""
-        if not self.get_embedding_func:
-            return None
+        if self._embedding_client:
+            try:
+                return await self._embedding_client.embed(text)
+            except Exception as e:
+                logger.error(f"[SemanticDynamicsEngine] 获取向量失败: {e}")
+                return None
 
-        try:
-            return await self.get_embedding_func(text)
-        except Exception as e:
-            logger.error(f"[SemanticDynamicsEngine] 获取向量失败: {e}")
-            return None
+        return None
 
     def _fuse_vectors(
         self,
@@ -373,10 +369,17 @@ _engine_instance = None
 
 
 def get_semantic_dynamics_engine(
-    config: Optional[Dict] = None
+    config: Optional[Dict] = None,
+    vector_cache: Optional[object] = None
 ) -> SemanticDynamicsEngine:
-    """获取语义动力学引擎单例"""
+    """
+    获取语义动力学引擎单例
+
+    Args:
+        config: 配置字典
+        vector_cache: 向量缓存实例
+    """
     global _engine_instance
     if _engine_instance is None:
-        _engine_instance = SemanticDynamicsEngine(config)
+        _engine_instance = SemanticDynamicsEngine(config, vector_cache)
     return _engine_instance

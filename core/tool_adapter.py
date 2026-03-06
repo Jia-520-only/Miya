@@ -120,8 +120,24 @@ class ToolAdapter:
             if self.unified_memory:
                 context['unified_memory'] = self.unified_memory
 
+            # 过滤掉 ToolContext 不支持的参数
+            # ToolContext 支持的字段: qq_net, onebot_client, send_like_callback,
+            # memory_engine, unified_memory, memory_net, emotion, personality,
+            # scheduler, lifenet, request_id, group_id, user_id, message_type,
+            # sender_name, is_at_bot, at_list, game_mode, game_mode_manager,
+            # game_mode_adapter, bot_qq, superadmin
+            supported_fields = {
+                'qq_net', 'onebot_client', 'send_like_callback',
+                'memory_engine', 'unified_memory', 'memory_net', 'emotion',
+                'personality', 'scheduler', 'lifenet', 'request_id',
+                'group_id', 'user_id', 'message_type', 'sender_name',
+                'is_at_bot', 'at_list', 'game_mode', 'game_mode_manager',
+                'game_mode_adapter', 'bot_qq', 'superadmin'
+            }
+            filtered_context = {k: v for k, v in context.items() if k in supported_fields}
+
             # 创建工具上下文
-            tool_context = ToolContext(**context)
+            tool_context = ToolContext(**filtered_context)
 
             # 根据模式选择执行方式
             if self.enable_native and self.mlink_subnet:
@@ -168,7 +184,18 @@ class ToolAdapter:
         if self.unified_memory:
             context['unified_memory'] = self.unified_memory
 
-        tool_context = ToolContext(**context)
+        # 过滤掉 ToolContext 不支持的参数
+        supported_fields = {
+            'qq_net', 'onebot_client', 'send_like_callback',
+            'memory_engine', 'unified_memory', 'memory_net', 'emotion',
+            'personality', 'scheduler', 'lifenet', 'request_id',
+            'group_id', 'user_id', 'message_type', 'sender_name',
+            'is_at_bot', 'at_list', 'game_mode', 'game_mode_manager',
+            'game_mode_adapter', 'bot_qq', 'superadmin'
+        }
+        filtered_context = {k: v for k, v in context.items() if k in supported_fields}
+
+        tool_context = ToolContext(**filtered_context)
 
         # 原生模式使用批量执行
         if self.enable_native and self.mlink_subnet:

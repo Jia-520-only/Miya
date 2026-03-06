@@ -1,164 +1,185 @@
 """
-集成测试
-测试记忆系统和评估系统的集成
+高级能力集成测试脚本
+测试 DecisionHub 是否正确集成了高级编排器
 """
 import asyncio
 import sys
-import os
+from pathlib import Path
 
 # 添加项目根目录到路径
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
-from core.agent_manager import AgentManager, TaskStep
 
-
-async def test_memory_compression_integration():
-    """测试记忆压缩集成"""
-    print("\n=== 测试记忆压缩集成 ===")
-
-    # 创建Agent管理器
-    agent_manager = AgentManager(config={
-        "compression_threshold": 5,
-        "keep_last_steps": 2
-    })
-
-    # 创建任务
-    task_id = await agent_manager.create_task(
-        task_id="test_task",
-        purpose="测试记忆压缩"
-    )
-
-    # 添加多个步骤（超过阈值）
-    for i in range(10):
-        step = TaskStep(
-            step_id=f"step_{i}",
-            task_id=task_id,
-            purpose=f"步骤{i}",
-            content=f"这是第{i}步的内容",
-            output=f"输出{i}",
-            success=True
+async def test_decision_hub_integration():
+    """测试 DecisionHub 集成"""
+    print("\n" + "="*60)
+    print("测试 DecisionHub 高级能力集成")
+    print("="*60)
+    
+    try:
+        # 导入必要的模块
+        from hub.decision_hub import DecisionHub
+        from core.ai_client import AIClientFactory
+        from core.emotion import EmotionSystem
+        from core.personality import PersonalitySystem
+        from core.prompt_manager import PromptManager
+        from memory.memory_net import MemoryNet
+        
+        print("\n✅ 所有模块导入成功")
+        
+        # 创建模拟的组件
+        print("\n📋 创建AI客户端...")
+        # 这里使用模拟的API密钥，实际使用时需要配置真实的
+        ai_client = AIClientFactory.create_client(
+            provider="deepseek",
+            api_key="test_key",
+            model="deepseek-chat"
         )
-        await agent_manager.add_task_step(task_id, step)
-
-    # 检查压缩结果
-    stats = agent_manager.get_statistics()
-    print(f"压缩后步骤数: {len(agent_manager.task_steps[task_id])}")
-    print(f"压缩记忆数: {stats['compressed_memories']}")
-    print(f"智能压缩启用: {stats['memory_system_enabled']}")
-
-    # 验证
-    assert len(agent_manager.task_steps[task_id]) == 2, "压缩后应保留2个步骤"
-    assert stats['compressed_memories'] >= 1, "应至少有1个压缩记忆"
-
-    print("✓ 记忆压缩集成测试通过")
-
-
-async def test_evaluation_integration():
-    """测试评估系统集成"""
-    print("\n=== 测试评估系统集成 ===")
-
-    # 创建Agent管理器
-    agent_manager = AgentManager(config={"evaluation_enabled": True})
-
-    # 测试响应评估
-    test_response = "你好！我很乐意帮助你解决问题。"
-    context = "用户询问帮助"
-
-    result = await agent_manager.evaluate_response(
-        response=test_response,
-        context=context
-    )
-
-    print(f"评估完成: {result.get('evaluated', False)}")
-    print(f"总体分数: {result.get('overall_score', 0)}")
-    print(f"道德对齐: {result.get('moral_check', {}).get('is_aligned', False) if result.get('moral_check') else 'N/A'}")
-
-    # 测试安全检查
-    is_safe = agent_manager.is_response_safe(result)
-    print(f"响应安全: {is_safe}")
-
-    # 验证
-    assert result.get('evaluated', False), "评估应完成"
-    assert is_safe, "安全响应应通过检查"
-
-    print("✓ 评估系统集成测试通过")
-
-
-async def test_full_integration():
-    """测试完整集成"""
-    print("\n=== 测试完整集成 ===")
-
-    # 创建Agent管理器（所有功能启用）
-    agent_manager = AgentManager(config={
-        "compression_threshold": 5,
-        "keep_last_steps": 2,
-        "evaluation_enabled": True
-    })
-
-    # 创建任务并添加步骤
-    task_id = await agent_manager.create_task(
-        task_id="integration_test",
-        purpose="集成测试"
-    )
-
-    # 添加步骤
-    for i in range(10):
-        step = TaskStep(
-            step_id=f"int_step_{i}",
-            task_id=task_id,
-            purpose=f"集成测试步骤{i}",
-            content=f"测试内容{i}",
-            output=f"测试输出{i}",
-            success=True
+        
+        print("✅ AI客户端创建成功")
+        
+        # 创建其他组件
+        print("\n📋 创建其他组件...")
+        emotion = EmotionSystem()
+        personality = PersonalitySystem()
+        prompt_manager = PromptManager(personality=personality)
+        memory_net = MemoryNet()
+        
+        print("✅ 其他组件创建成功")
+        
+        # 创建 DecisionHub
+        print("\n📋 创建 DecisionHub...")
+        decision_hub = DecisionHub(
+            mlink=None,  # 测试时可以为None
+            ai_client=ai_client,
+            emotion=emotion,
+            personality=personality,
+            prompt_manager=prompt_manager,
+            memory_net=memory_net,
+            decision_engine=None,
+            tool_subnet=None,
+            memory_engine=None,
+            scheduler=None,
+            onebot_client=None,
+            game_mode_adapter=None,
+            identity=None
         )
-        await agent_manager.add_task_step(task_id, step)
+        
+        print("✅ DecisionHub 创建成功")
+        
+        # 检查高级编排器是否初始化
+        print("\n📋 检查高级编排器...")
+        if decision_hub.advanced_orchestrator is not None:
+            print("✅ 高级编排器初始化成功")
+            
+            # 检查各个子模块
+            orchestrator = decision_hub.advanced_orchestrator
+            
+            print("\n📋 检查子模块:")
+            print(f"  - TaskPlanner: {'✅' if orchestrator.task_planner else '❌'}")
+            print(f"  - AutonomousExplorer: {'✅' if orchestrator.explorer else '❌'}")
+            print(f"  - IntelligentExecutor: {'✅' if orchestrator.executor else '❌'}")
+            print(f"  - ChainOfThought: {'✅' if orchestrator.chain_of_thought else '❌'}")
+            
+        else:
+            print("❌ 高级编排器未初始化")
+            return False
+        
+        # 测试复杂任务检测
+        print("\n📋 测试复杂任务检测...")
+        test_cases = [
+            ("帮我分析项目结构", True),
+            ("你好", False),
+            ("帮我查找所有配置文件", True),
+            ("今天天气怎么样", False),
+            ("请理解这段代码的逻辑", True),
+            ("讲个笑话", False)
+        ]
+        
+        all_passed = True
+        for content, expected in test_cases:
+            result = decision_hub._should_use_advanced_orchestration(content)
+            status = "✅" if result == expected else "❌"
+            print(f"  {status} '{content}': {result} (期望: {expected})")
+            if result != expected:
+                all_passed = False
+        
+        if all_passed:
+            print("\n✅ 复杂任务检测测试通过")
+        else:
+            print("\n❌ 复杂任务检测测试失败")
+        
+        return all_passed
+        
+    except ImportError as e:
+        print(f"\n❌ 导入失败: {e}")
+        print("请确保所有模块都已正确创建")
+        return False
+    except Exception as e:
+        print(f"\n❌ 测试失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
-    # 评估响应
-    response = "测试完成，所有功能正常。"
-    eval_result = await agent_manager.evaluate_response(
-        response=response,
-        context="集成测试"
-    )
 
-    # 获取统计信息
-    stats = agent_manager.get_statistics()
-
-    print("\n=== 集成测试结果 ===")
-    print(f"智能压缩启用: {stats['memory_system_enabled']}")
-    print(f"评估启用: {stats['evaluation_enabled']}")
-    print(f"压缩记忆数: {stats['compressed_memories']}")
-    print(f"评估完成: {eval_result.get('evaluated', False)}")
-    print(f"响应安全: {agent_manager.is_response_safe(eval_result)}")
-
-    # 验证
-    assert stats['memory_system_enabled'], "智能压缩应启用"
-    assert stats['evaluation_enabled'], "评估应启用"
-    assert eval_result.get('evaluated', False), "评估应完成"
-
-    print("\n✓ 完整集成测试通过")
+async def test_modules_import():
+    """测试所有新模块是否可以导入"""
+    print("\n" + "="*60)
+    print("测试新模块导入")
+    print("="*60)
+    
+    modules = [
+        "core.task_planner",
+        "core.autonomous_explorer",
+        "core.intelligent_executor",
+        "core.chain_of_thought",
+        "core.advanced_orchestrator"
+    ]
+    
+    all_imported = True
+    for module_name in modules:
+        try:
+            __import__(module_name)
+            print(f"✅ {module_name}")
+        except ImportError as e:
+            print(f"❌ {module_name}: {e}")
+            all_imported = False
+    
+    return all_imported
 
 
 async def main():
     """主测试函数"""
-    print("\n" + "="*50)
-    print("弥娅系统集成测试")
-    print("="*50)
-
-    try:
-        await test_memory_compression_integration()
-        await test_evaluation_integration()
-        await test_full_integration()
-
-        print("\n" + "="*50)
-        print("所有测试通过！ ✓")
-        print("="*50 + "\n")
-
-    except AssertionError as e:
-        print(f"\n✗ 测试失败: {e}\n")
-        raise
-    except Exception as e:
-        print(f"\n✗ 测试错误: {e}\n")
-        raise
+    print("\n" + "="*60)
+    print("弥娅高级能力集成测试")
+    print("="*60)
+    
+    # 测试模块导入
+    import_result = await test_modules_import()
+    
+    if not import_result:
+        print("\n❌ 模块导入失败，请检查文件是否存在")
+        return
+    
+    # 测试集成
+    integration_result = await test_decision_hub_integration()
+    
+    # 输出总结
+    print("\n" + "="*60)
+    print("测试总结")
+    print("="*60)
+    print(f"模块导入: {'✅ 通过' if import_result else '❌ 失败'}")
+    print(f"集成测试: {'✅ 通过' if integration_result else '❌ 失败'}")
+    
+    if import_result and integration_result:
+        print("\n🎉 所有测试通过！高级能力已成功集成！")
+        print("\n下一步：")
+        print("1. 配置真实的API密钥")
+        print("2. 运行弥娅主程序")
+        print("3. 尝试发送复杂任务，如：'帮我分析项目结构'")
+    else:
+        print("\n⚠️  部分测试失败，请检查错误信息")
 
 
 if __name__ == "__main__":

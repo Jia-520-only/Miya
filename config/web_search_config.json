@@ -1,0 +1,27 @@
+{
+  "engines": {
+    "duckduckgo": {
+      "enabled": true,
+      "description": "DuckDuckGo（免费，无需 API Key）"
+    },
+    "bing": {
+      "enabled": false,
+      "api_key": "",
+      "description": "Bing Search API（需要 API Key）",
+      "api_url": "https://www.microsoft.com/cognitive-services/en-us/subscriptions"
+    },
+    "google": {
+      "enabled": false,
+      "api_key": "",
+      "cse_id": "",
+      "description": "Google Custom Search API（需要 API Key 和 CSE ID）",
+      "api_url": "https://developers.google.com/custom-search/v1/overview"
+    }
+  },
+  "default_engine": "duckduckgo",
+  "max_results": 5,
+  "cache_enabled": true,
+  "cache_ttl": 3600,
+  "language": "zh-CN",
+  "timeout": 10
+}

@@ -72,6 +72,12 @@ class MiyaQQBot:
         # 初始化决策层 Hub
         self._init_decision_hub()
 
+        # 初始化向量系统
+        self._init_vector_system()
+
+        # 初始化Neo4j知识图谱
+        self._init_neo4j_system()
+
         # 初始化TTS子网
         self._init_tts_system()
 
@@ -274,7 +280,9 @@ class MiyaQQBot:
                 memory_engine=self.memory_engine,
                 scheduler=self.scheduler,
                 onebot_client=None,  # 初始化时为None，稍后在QQNet初始化后设置
-                game_mode_adapter=self.game_mode_adapter  # 架构修复: 传入适配器
+                game_mode_adapter=self.game_mode_adapter,  # 架构修复: 传入适配器
+                identity=self.identity,
+                multi_model_manager=getattr(self, 'multi_model_manager', None)  # 传递多模型管理器
             )
 
             # 设置响应回调（用于发送回 QQNet）
@@ -319,14 +327,81 @@ class MiyaQQBot:
             self.tts_net = None
 
     def _init_ai_client(self):
-        """初始化AI客户端（简化版 - 只需配置URL、模型名、API KEY）"""
+        """初始化AI客户端（支持多模型）"""
         try:
             import os
+            import json
             from dotenv import load_dotenv
 
             load_dotenv(Path(__file__).parent.parent / 'config' / '.env')
 
-            # 简化配置：只需3个参数
+            # 尝试初始化多模型管理器
+            try:
+                from core.multi_model_manager import MultiModelManager
+                from core.ai_client import AIClientFactory
+
+                # 加载多模型配置
+                config_path = Path(__file__).parent.parent / 'config' / 'multi_model_config.json'
+
+                if config_path.exists():
+                    with open(config_path, 'r', encoding='utf-8') as f:
+                        multi_model_config = json.load(f)
+
+                    # 创建模型客户端
+                    model_clients = {}
+                    models_config = multi_model_config.get('models', {})
+
+                    for model_key, model_info in models_config.items():
+                        provider = model_info.get('provider', 'openai')
+                        api_key = model_info.get('api_key', '')
+                        model_name = model_info.get('name', '')
+                        base_url = model_info.get('base_url', '')
+
+                        # 跳过未配置API密钥的模型
+                        if not api_key or not model_name:
+                            continue
+
+                        try:
+                            client = AIClientFactory.create_client(
+                                provider=provider,
+                                api_key=api_key,
+                                model=model_name,
+                                base_url=base_url,
+                                temperature=float(os.getenv('AI_TEMPERATURE', '0.7')),
+                                max_tokens=int(os.getenv('AI_MAX_TOKENS', '2000'))
+                            )
+
+                            if client and hasattr(client, 'client') and client.client is not None:
+                                model_clients[model_key] = client
+                                self.logger.info(f"  [多模型] {model_key}: {model_name} ({base_url})")
+                        except Exception as e:
+                            self.logger.warning(f"  [多模型] {model_key} 初始化失败: {e}")
+
+                    # 如果成功创建了多个模型，使用多模型管理器
+                    if model_clients:
+                        self.multi_model_manager = MultiModelManager(
+                            model_clients=model_clients,
+                            config_path=str(config_path)
+                        )
+                        self.logger.info(f"多模型管理器初始化成功，已加载 {len(model_clients)} 个模型")
+
+                        # 默认使用中文模型
+                        default_client = model_clients.get('chinese') or model_clients.get('fast')
+                        if default_client:
+                            self.logger.info(f"默认模型: {default_client.model}")
+
+                            # 设置工具注册表（延迟加载）
+                            if self.tool_registry:
+                                def get_tools():
+                                    return self.tool_registry.get_tools_schema()
+                                default_client.set_tool_registry(get_tools)
+
+                            return default_client
+
+            except Exception as e:
+                self.logger.warning(f"多模型管理器初始化失败，使用单一模型: {e}")
+
+            # 降级到单一模型模式
             api_key = os.getenv('AI_API_KEY', '')
             base_url = os.getenv('AI_API_BASE_URL', '')
             model = os.getenv('AI_MODEL', '')
@@ -853,6 +928,76 @@ class MiyaQQBot:
             )
 
         return response
+
+    def _init_vector_system(self):
+        """初始化向量系统"""
+        try:
+            from core.embedding_client import EmbeddingClient, EmbeddingProvider
+            from memory.real_vector_cache import RealVectorCache
+
+            # 使用本地模型（无需API）
+            self.embedding_client = EmbeddingClient(
+                provider=EmbeddingProvider.SENTENCE_TRANSFORMERS,
+                model='paraphrase-multilingual-MiniLM-L12-v2'
+            )
+
+            # 初始化向量缓存
+            import os
+            data_dir = Path(__file__).parent.parent / 'data'
+            data_dir.mkdir(exist_ok=True)
+
+            self.vector_cache = RealVectorCache(
+                embedding_client=self.embedding_client,
+                milvus_db_path=str(data_dir / 'milvus_lite.db'),
+                collection_name='miya_vectors'
+            )
+
+            # 初始化语义动力学引擎
+            from memory.semantic_dynamics_engine import get_semantic_dynamics_engine
+            self.semantic_engine = get_semantic_dynamics_engine(
+                config={'top_k': 10, 'fuzzy_threshold': 0.85},
+                vector_cache=self.vector_cache
+            )
+            self.semantic_engine.set_embedding_client(self.embedding_client)
+
+            self.logger.info("向量系统初始化成功（使用Sentence Transformers本地模型）")
+
+        except Exception as e:
+            self.logger.warning(f"向量系统初始化失败: {e}，将不使用向量功能")
+            self.embedding_client = None
+            self.vector_cache = None
+            self.semantic_engine = None
+
+    def _init_neo4j_system(self):
+        """初始化Neo4j知识图谱系统"""
+        try:
+            from memory.grag_memory import GRAGMemoryManager
+
+            # 使用已初始化的neo4j客户端（如果存在）
+            if hasattr(self, 'neo4j') and self.neo4j:
+                self.neo4j_client = self.neo4j
+
+                # 检查是否为模拟模式
+                if not self.neo4j_client.is_mock_mode():
+                    self.logger.info("Neo4j知识图谱连接成功")
+
+                    # 初始化GRAG记忆管理器
+                    self.grag_memory = GRAGMemoryManager(
+                        config={'enabled': True, 'auto_extract': True},
+                        neo4j_client=self.neo4j_client
+                    )
+                    self.logger.info("GRAG知识图谱记忆管理器初始化成功")
+                else:
+                    self.logger.warning("Neo4j为模拟模式，将不使用知识图谱功能")
+                    self.grag_memory = None
+            else:
+                self.logger.warning("Neo4j客户端未初始化，将不使用知识图谱功能")
+                self.grag_memory = None
+
+        except Exception as e:
+            self.logger.warning(f"Neo4j知识图谱初始化失败: {e}，将不使用知识图谱功能")
+            self.grag_memory = None
+            self.neo4j_client = None
 
     async def start(self) -> None:
         """启动机器人"""

@@ -1,11 +1,16 @@
 """
 决策层 Hub
 监听 M-Link 消息并协调各子网进行决策
+
+新增：支持跨平台统一交互（Terminal、PC UI、QQ）
+新增：集成终端命令执行工具
 """
 import asyncio
 import logging
-from typing import Dict, Optional
+import os
+from typing import Dict, Optional, Any, List
 from datetime import datetime
+from pathlib import Path
 
 from mlink.message import Message, MessageType, FlowType
 from core.constants import Encoding
@@ -24,25 +29,28 @@ class DecisionHub:
     2. 协调 AI 客户端、情绪系统、人格系统等生成响应
     3. 将响应通过 M-Link 发送回 QQNet
     4. 管理记忆存储和情绪更新
+    5. 【新增】支持跨平台统一交互（Terminal、PC UI、QQ）
     """
 
-    def __init__(self, mlink, ai_client, emotion, personality, prompt_manager, memory_net, decision_engine, tool_registry=None, memory_engine=None, scheduler=None, onebot_client=None, game_mode_adapter=None):
+    def __init__(self, mlink, ai_client, emotion, personality, prompt_manager, memory_net, decision_engine, tool_subnet=None, memory_engine=None, scheduler=None, onebot_client=None, game_mode_adapter=None, identity=None, multi_model_manager=None):
         """
         初始化决策层
 
         Args:
             mlink: M-Link 核心实例
-            ai_client: AI 客户端
+            ai_client: AI 客户端（默认模型）
             emotion: 情绪系统
             personality: 人格系统
             prompt_manager: Prompt 管理器
             memory_net: MemoryNet 记忆系统
             decision_engine: 决策引擎
-            tool_registry: 工具注册表
+            tool_subnet: ToolNet 子网实例（符合 MIYA 框架）
             memory_engine: 记忆引擎
             scheduler: 调度器
             onebot_client: OneBot 客户端（用于点赞等操作）
             game_mode_adapter: 游戏模式适配器（架构修复:封装WebNet层访问）
+            identity: 身份系统
+            multi_model_manager: 多模型管理器（用于动态选择模型）
         """
         self.mlink = mlink
         self.ai_client = ai_client
@@ -52,18 +60,34 @@ class DecisionHub:
         self.memory_net = memory_net
         self.decision_engine = decision_engine
         self.game_mode_adapter = game_mode_adapter  # 使用适配器而非直接导入
-        self.tool_registry = tool_registry
+        self.tool_subnet = tool_subnet  # ToolNet 子网（符合 MIYA 框架）
         self.memory_engine = memory_engine
         self.scheduler = scheduler
         self.onebot_client = onebot_client
+        self.identity = identity
+        self.multi_model_manager = multi_model_manager  # 新增：多模型管理器
+
+        # 【新增】对话历史上下文配置
+        self.enable_conversation_context = os.getenv('ENABLE_CONVERSATION_CONTEXT', 'false').lower() == 'true'
+        self.conversation_context_max_count = int(os.getenv('CONVERSATION_CONTEXT_MAX_COUNT', '5'))
+        self.conversation_context_max_tokens = int(os.getenv('CONVERSATION_CONTEXT_MAX_TOKENS', '1000'))
 
         # 架构修复: 移除game_mode_manager,使用game_mode_adapter代替
         # self.game_mode_manager = None  # 已废弃
 
+        # 【新增】初始化终端工具（保留用于 ! 前缀命令）
+        self.terminal_tool = None
+        self._init_terminal_tool()
+
+        # 【新增】高级编排器（任务规划、自主探索、智能执行、思维链）
+        # 采用懒加载方式，在首次使用时初始化
+        self._advanced_orchestrator: Optional[Any] = None
+        self._advanced_orchestrator_initialized = False
+
         # 响应回调（用于发送回 QQNet）
         self.response_callback: Optional[callable] = None
 
-        logger.info("决策层 Hub 初始化成功")
+        logger.info("决策层 Hub 初始化成功（含跨平台、终端工具和高级编排器支持）")
 
     def set_response_callback(self, callback: callable) -> None:
         """
@@ -73,6 +97,115 @@ class DecisionHub:
             callback: 回调函数，签名: callback(qq_message, response_text) -> None
         """
         self.response_callback = callback
+
+    def _init_terminal_tool(self) -> None:
+        """
+        初始化终端工具（保留用于 ! 前缀命令）
+
+        注意：AI 调用终端命令通过 ToolNet 实现（terminal_command 工具）
+        此处保留的 TerminalTool 仅用于处理带 ! 前缀的直接命令
+        """
+        try:
+            from tools.terminal import TerminalTool
+
+            project_root = Path(__file__).parent.parent
+            config_path = project_root / 'config' / 'terminal_config.json'
+
+            # 【框架一致性】传递 emotion 和 memory_engine
+            self.terminal_tool = TerminalTool(
+                str(config_path),
+                emotion=self.emotion,
+                memory_engine=self.memory_engine
+            )
+            logger.info("[决策层] 终端工具初始化成功（已集成人格和记忆系统）")
+            logger.info("[决策层] AI 调用终端命令通过 ToolNet 的 terminal_command 工具实现")
+
+        except Exception as e:
+            logger.warning(f"[决策层] 终端工具初始化失败: {e}")
+            self.terminal_tool = None
+
+    def _get_advanced_orchestrator(self) -> Optional[Any]:
+        """
+        获取高级编排器（懒加载）
+
+        功能：
+        - 任务规划：将复杂任务分解为可执行的子任务
+        - 自主探索：主动探索文件系统和代码库
+        - 智能执行：可靠地执行任务，支持重试和回滚
+        - 思维链：结构化的多步骤推理
+
+        Returns:
+            高级编排器实例，如果初始化失败则返回 None
+        """
+        if self._advanced_orchestrator_initialized:
+            return self._advanced_orchestrator
+
+        try:
+            from core.advanced_orchestrator import AdvancedOrchestrator
+            from core.tool_adapter import get_tool_adapter
+
+            # 创建工具执行器包装器
+            def _tool_executor_wrapper(tool_name: str, params: Dict) -> str:
+                """工具执行器包装器"""
+                adapter = get_tool_adapter()
+
+                async def _execute():
+                    return await adapter.execute_tool(tool_name, params, self.tool_context or {})
+
+                return asyncio.run(_execute())
+
+            project_root = Path(__file__).parent.parent
+            storage_dir = project_root / 'data' / 'advanced_tasks'
+            storage_dir.mkdir(parents=True, exist_ok=True)
+
+            self._advanced_orchestrator = AdvancedOrchestrator(
+                ai_client=self.ai_client,
+                tool_executor=_tool_executor_wrapper,
+                storage_dir=str(storage_dir)
+            )
+            self._advanced_orchestrator_initialized = True
+
+            logger.info("[决策层] 高级编排器初始化成功（任务规划、自主探索、智能执行、思维链）")
+
+            return self._advanced_orchestrator
+
+        except Exception as e:
+            logger.warning(f"[决策层] 高级编排器初始化失败: {e}")
+            self._advanced_orchestrator_initialized = True  # 标记为已尝试初始化
+            return None
+
+    async def _check_terminal_command(self, perception: Dict) -> Optional[str]:
+        """
+        检查并处理终端命令请求
+
+        Args:
+            perception: 感知数据
+
+        Returns:
+            终端工具的响应文本，如果不是终端命令则返回 None
+        """
+        if not self.terminal_tool:
+            return None
+
+        content = perception.get('content', '')
+
+        # 检查是否是终端命令（以 ! 或 >> 开头）
+        if not content.startswith(('!', '>>')):
+            return None
+
+        # 检查是否是终端模式请求（仅限私聊）
+        message_type = perception.get('message_type', '')
+        if message_type != 'private':
+            logger.info("[决策层] 终端命令仅在私聊中支持")
+            return "终端命令仅在私聊中支持~"
+
+        logger.info(f"[决策层] 检测到终端命令: {content}")
+
+        # 执行终端命令
+        result = self.terminal_tool.execute(content)
+
+        # 格式化结果
+        return self.terminal_tool.format_result(result)
 
     async def process_perception(self, message: Message) -> Optional[str]:
         """
@@ -94,6 +227,11 @@ class DecisionHub:
         is_at_bot = perception.get('is_at_bot', False)
 
         logger.info(f"[决策层] 收到感知数据: {sender_name} - {content[:50]}")
+
+        # 【新增】检查是否是终端命令请求
+        terminal_result = await self._check_terminal_command(perception)
+        if terminal_result:
+            return terminal_result
 
         # 检查是否是拍一拍（特殊消息类型，标记后让 AI 生成个性化回复）
         if '拍了拍你' in content:
@@ -322,292 +460,6 @@ class DecisionHub:
         
         return None
 
-    async def _handle_like_command(self, perception: Dict) -> Optional[str]:
-        """
-        处理点赞指令，直接调用工具
-
-        Args:
-            perception: 感知数据
-
-        Returns:
-            如果调用了工具，返回工具结果；否则返回 None
-        """
-        content = perception.get('content', '')
-
-        # 检查是否包含点赞关键词
-        if not any(keyword in content for keyword in ['点赞', '点个赞', '喜欢', '爱', '太棒了']):
-            return None
-
-        logger.info(f"[决策层] 拦截到点赞指令: {content}")
-
-        # 智能解析点赞次数
-        times = 1
-        if '十次' in content or '十个' in content or '一人点十个' in content or '10次' in content:
-            times = 10
-        elif '一次' in content or '1次' in content:
-            times = 1
-        elif '两次' in content or '2次' in content:
-            times = 2
-        elif '三次' in content or '3次' in content:
-            times = 3
-
-        # 确定目标用户ID
-        target_user_id = perception.get('user_id')
-        at_list = perception.get('at_list', [])
-
-        # 如果@了其他人，给被@的用户点赞
-        if at_list and len(at_list) > 0:
-            # 检查用户是否明确给自己点赞
-            if '给我点赞' in content or '帮我点个赞' in content:
-                target_user_id = perception.get('user_id')
-            else:
-                # 默认给第一个@的用户点赞
-                target_user_id = at_list[0]
-
-        logger.info(f"[决策层] 点赞目标: {target_user_id}, 次数: {times}")
-
-        # 构造工具上下文
-        from core.tool_adapter import get_tool_adapter
-        from webnet.tools.base import ToolContext
-
-        tool_context = ToolContext(
-            user_id=perception.get('user_id'),
-            group_id=perception.get('group_id'),
-            message_type=perception.get('message_type'),
-            sender_name=perception.get('sender_name'),
-            superadmin=getattr(self.onebot_client, 'superadmin', None) if self.onebot_client else None,
-            onebot_client=self.onebot_client,
-            game_mode=None,
-            game_mode_adapter=self.game_mode_adapter,
-            bot_qq=perception.get('bot_qq'),
-            at_list=at_list,
-            send_like_callback=getattr(self.onebot_client, 'send_like', None) if self.onebot_client else None,
-        )
-
-        # 调用 qq_like 工具
-        adapter = get_tool_adapter()
-        try:
-            result = await adapter.execute_tool(
-                'qq_like',
-                {'target_user_id': target_user_id, 'times': times},
-                {
-                    'user_id': perception.get('user_id'),
-                    'group_id': perception.get('group_id'),
-                    'sender_name': perception.get('sender_name'),
-                    'superadmin': tool_context.superadmin,
-                    'at_list': at_list,
-                    'send_like_callback': tool_context.send_like_callback,
-                }
-            )
-            logger.info(f"[决策层] 点赞工具调用结果: {result[:100]}")
-            return result
-        except Exception as e:
-            logger.error(f"[决策层] 点赞工具调用失败: {e}", exc_info=True)
-            return f"点赞失败: {str(e)}"
-
-    async def _handle_profile_command(self, perception: Dict) -> Optional[str]:
-        """
-        处理用户profile查询指令，直接调用get_profile工具
-
-        Args:
-            perception: 感知数据
-
-        Returns:
-            如果调用了工具，返回工具结果；否则返回 None
-        """
-        content = perception.get('content', '')
-
-        # 检查是否包含profile关键词
-        if not any(keyword in content for keyword in ['我的生日', '我的名字', '我的姓名', '我的资料', '我的信息', '我的简介']):
-            return None
-
-        logger.info(f"[决策层] 拦截到profile查询指令: {content}")
-
-        # 构造工具上下文
-        from core.tool_adapter import get_tool_adapter
-        from webnet.tools.base import ToolContext
-
-        tool_context = ToolContext(
-            user_id=perception.get('user_id'),
-            group_id=perception.get('group_id'),
-            message_type=perception.get('message_type'),
-            sender_name=perception.get('sender_name'),
-        )
-
-        # 调用 get_profile 工具
-        adapter = get_tool_adapter()
-        try:
-            result = await adapter.execute_tool(
-                'get_profile',
-                {'user_id': perception.get('user_id')},
-                {
-                    'user_id': perception.get('user_id'),
-                    'group_id': perception.get('group_id'),
-                    'sender_name': perception.get('sender_name'),
-                }
-            )
-            logger.info(f"[决策层] profile查询工具调用结果: {result[:100]}")
-            return result
-        except Exception as e:
-            logger.error(f"[决策层] profile查询工具调用失败: {e}", exc_info=True)
-            return f"查询资料失败: {str(e)}"
-
-    async def _handle_time_command(self, perception: Dict) -> Optional[str]:
-        """
-        处理时间查询指令，直接调用工具
-
-        Args:
-            perception: 感知数据
-
-        Returns:
-            如果调用了工具，返回工具结果；否则返回 None
-        """
-        content = perception.get('content', '')
-
-        # 检查是否包含时间关键词
-        if not any(keyword in content for keyword in ['几点', '时间', '现在几点', '什么时候', '日期', '今天']):
-            return None
-
-        logger.info(f"[决策层] 拦截到时间查询指令: {content}")
-
-        # 构造工具上下文
-        from core.tool_adapter import get_tool_adapter
-        from webnet.tools.base import ToolContext
-
-        tool_context = ToolContext(
-            user_id=perception.get('user_id'),
-            group_id=perception.get('group_id'),
-            message_type=perception.get('message_type'),
-            sender_name=perception.get('sender_name'),
-        )
-
-        # 调用 get_current_time 工具
-        adapter = get_tool_adapter()
-        try:
-            result = await adapter.execute_tool(
-                'get_current_time',
-                {'format': 'text', 'include_lunar': True},
-                {
-                    'user_id': perception.get('user_id'),
-                    'group_id': perception.get('group_id'),
-                    'sender_name': perception.get('sender_name'),
-                }
-            )
-            logger.info(f"[决策层] 时间查询工具调用结果: {result[:100]}")
-            return result
-        except Exception as e:
-            logger.error(f"[决策层] 时间查询工具调用失败: {e}", exc_info=True)
-            return f"查询时间失败: {str(e)}"
-
-    async def _handle_save_command(self, perception: Dict) -> Optional[str]:
-        """
-        处理存档指令，直接调用工具
-
-        Args:
-            perception: 感知数据
-
-        Returns:
-            如果调用了工具，返回工具结果；否则返回 None
-        """
-        content = perception.get('content', '')
-
-        # 检查是否包含存档关键词
-        if not any(keyword in content for keyword in ['存档', '保存进度', '创建存档', '记录进度']):
-            return None
-
-        logger.info(f"[决策层] 拦截到存档指令: {content}")
-
-        # 提取存档名称
-        import re
-        save_name = '未命名存档'
-        name_match = re.search(r'存档名[：:]\s*([^\s，,。]+)', content)
-        if name_match:
-            save_name = name_match.group(1)
-        elif '存档为' in content:
-            save_name_match = re.search(r'存档为[：:]\s*([^\s，,。]+)', content)
-            if save_name_match:
-                save_name = save_name_match.group(1)
-
-        # 构造工具上下文
-        from core.tool_adapter import get_tool_adapter
-        from webnet.tools.base import ToolContext
-
-        tool_context = ToolContext(
-            user_id=perception.get('user_id'),
-            group_id=perception.get('group_id'),
-            message_type=perception.get('message_type'),
-            sender_name=perception.get('sender_name'),
-            game_mode_adapter=self.game_mode_adapter,
-        )
-
-        # 调用 create_game_save 工具
-        adapter = get_tool_adapter()
-        try:
-            result = await adapter.execute_tool(
-                'create_game_save',
-                {'save_name': save_name},
-                {
-                    'user_id': perception.get('user_id'),
-                    'group_id': perception.get('group_id'),
-                    'sender_name': perception.get('sender_name'),
-                    'game_mode_adapter': self.game_mode_adapter,
-                }
-            )
-            logger.info(f"[决策层] 存档工具调用结果: {result[:100]}")
-            return result
-        except Exception as e:
-            logger.error(f"[决策层] 存档工具调用失败: {e}", exc_info=True)
-            return f"存档失败: {str(e)}"
-
-    async def _handle_load_save_command(self, perception: Dict) -> Optional[str]:
-        """
-        处理加载存档指令，直接调用工具
-
-        Args:
-            perception: 感知数据
-
-        Returns:
-            如果调用了工具，返回工具结果；否则返回 None
-        """
-        content = perception.get('content', '')
-
-        # 检查是否包含加载存档关键词
-        if not any(keyword in content for keyword in ['加载存档', '恢复存档', '读取存档']):
-            return None
-
-        logger.info(f"[决策层] 拦截到加载存档指令: {content}")
-
-        # 构造工具上下文
-        from core.tool_adapter import get_tool_adapter
-        from webnet.tools.base import ToolContext
-
-        tool_context = ToolContext(
-            user_id=perception.get('user_id'),
-            group_id=perception.get('group_id'),
-            message_type=perception.get('message_type'),
-            sender_name=perception.get('sender_name'),
-            game_mode_adapter=self.game_mode_adapter,
-        )
-
-        # 调用 load_game_save 工具
-        adapter = get_tool_adapter()
-        try:
-            result = await adapter.execute_tool(
-                'load_game_save',
-                {'save_id': 'autosave'},
-                {
-                    'user_id': perception.get('user_id'),
-                    'group_id': perception.get('group_id'),
-                    'sender_name': perception.get('sender_name'),
-                    'game_mode_adapter': self.game_mode_adapter,
-                }
-            )
-            logger.info(f"[决策层] 加载存档工具调用结果: {result[:100]}")
-            return result
-        except Exception as e:
-            logger.error(f"[决策层] 加载存档工具调用失败: {e}", exc_info=True)
-            return f"加载存档失败: {str(e)}"
-
     def _get_chat_id(self, perception: Dict) -> str:
         """
         获取聊天ID（群号或用户号）
@@ -616,13 +468,9 @@ class DecisionHub:
         user_id = perception.get('user_id')
         return str(group_id or user_id)
 
-    # 架构修复: 移除_get_game_mode_manager方法
-    # 原方法通过from webnet导入,违反分层架构原则
-    # 现在通过game_mode_adapter访问游戏模式功能
-
     async def _generate_response(self, perception: Dict) -> str:
         """
-        生成响应
+        生成响应（原有QQ专用逻辑，保持兼容）
 
         Args:
             perception: 感知数据
@@ -630,478 +478,736 @@ class DecisionHub:
         Returns:
             响应文本
         """
-        content = perception.get('content', '')
+        # 简化实现，调用新的跨平台方法
+        return await self._generate_response_cross_platform(
+            content=perception.get('content', ''),
+            platform='qq',
+            context=perception
+        )
+
+    async def _fallback_response(self, content: str, sender_name: str) -> str:
+        """降级回复"""
+        return await self._fallback_response_cross_platform(content, sender_name, 'qq')
+
+    # ========== 跨平台统一交互支持 ==========
+
+    async def process_perception_cross_platform(self, message: Message) -> Optional[str]:
+        """
+        处理跨平台感知数据（新增：支持Terminal、PC UI、QQ）
+
+        统一处理流程：
+        1. 提取平台信息
+        2. 更新情绪状态
+        3. 存储统一记忆
+        4. 生成响应（AI + 人格 + 情绪）
+        5. 情绪染色与衰减
+        6. 返回响应
+
+        Args:
+            message: M-Link 消息（包含感知数据）
+
+        Returns:
+            响应文本
+        """
+        perception = message.content
+
+        # 提取平台信息
+        platform = perception.get('platform', 'terminal')
+        logger.info(f"[决策层-跨平台] 收到 {platform} 平台的感知数据")
+
+        # 提取内容（兼容不同平台）
+        content = perception.get('content', '') or perception.get('input', '')
+        user_id = perception.get('user_id', 'unknown')
         sender_name = perception.get('sender_name', '用户')
 
-        # 【点赞指令拦截】
-        # 检测到点赞关键词时，调用工具，但让 AI 生成自然回复
-        like_keywords = ['点赞', '点个赞', '喜欢', '爱', '太棒了']
-        if any(keyword in content for keyword in like_keywords):
-            logger.info(f"[决策层] 检测到点赞关键词，调用工具")
-            tool_result = await self._handle_like_command(perception)
-            # 执行工具后，继续让 AI 生成自然回复，不直接返回工具结果
-            # 将工具结果作为系统信息传递给 AI
-            if tool_result and "✅" in tool_result:
-                # 工具执行成功，将成功信息添加到上下文，让 AI 生成自然回复
-                perception['tool_context'] = tool_result
-            # 继续执行后续的 AI 响应生成
+        logger.info(f"[决策层-跨平台] {sender_name} - {content[:50]}")
 
-        # 【用户profile查询拦截】
-        # 只处理明确的"查看/获取"指令，不处理询问类问题（如"我的生日是什么时候"）
-        profile_query_keywords = ['查看侧写', '用户画像', '我的资料', '我的信息', '我的简介']
-        if any(keyword in content for keyword in profile_query_keywords):
-            logger.info(f"[决策层] 检测到profile查询关键词，直接调用工具")
-            tool_call_result = await self._handle_profile_command(perception)
-            if tool_call_result:
-                return tool_call_result
+        # 【新增】检测是否是复杂任务，使用高级编排器
+        if self._should_use_advanced_orchestration(content):
+            logger.info(f"[决策层-跨平台] 检测到复杂任务，启动高级编排器")
+            response = await self.process_complex_task(
+                goal=content,
+                context=perception
+            )
+            # 情绪染色
+            if response:
+                response = self.emotion.influence_response(response)
+            # 情绪衰减
+            self.emotion.decay_coloring()
+            return response
 
-        # 【时间查询拦截】
-        # 排除包含"我的"的查询，避免误判profile查询
-        if '我的' not in content:
-            time_keywords = ['几点', '时间', '现在几点', '什么时候', '日期', '今天']
-            if any(keyword in content for keyword in time_keywords):
-                logger.info(f"[决策层] 检测到时间查询关键词，直接调用工具")
-                tool_call_result = await self._handle_time_command(perception)
-                if tool_call_result:
-                    return tool_call_result
+        # 【新增】处理确认/取消命令
+        if content.lower() in ['确认', 'yes', 'y', 'confirm']:
+            if self.terminal_tool and self.terminal_tool.pending_command:
+                # 执行待确认的命令
+                command = self.terminal_tool.pending_command
+                result = self.terminal_tool.execute(command, user_confirm=True)
+                response = self.terminal_tool.format_result(result)
+                # 4. 情绪染色
+                response = self.emotion.influence_response(response)
+                # 5. 情绪衰减
+                self.emotion.decay_coloring()
+                # 6. 返回响应
+                return response
+            else:
+                # 没有待确认的命令
+                response = "当前没有待确认的命令。"
+                response = self.emotion.influence_response(response)
+                self.emotion.decay_coloring()
+                return response
 
-        # 【存档相关拦截】
-        save_keywords = ['存档', '保存进度', '创建存档', '记录进度']
-        if any(keyword in content for keyword in save_keywords):
-            logger.info(f"[决策层] 检测到存档关键词，直接调用工具")
-            tool_call_result = await self._handle_save_command(perception)
-            if tool_call_result:
-                return tool_call_result
+        if content.lower() in ['取消', 'cancel', 'no', 'n']:
+            if self.terminal_tool and self.terminal_tool.pending_command:
+                # 取消待确认的命令
+                command = self.terminal_tool.pending_command
+                result = self.terminal_tool.execute(command, user_confirm=False)
+                response = self.terminal_tool.format_result(result)
+                # 4. 情绪染色
+                response = self.emotion.influence_response(response)
+                # 5. 情绪衰减
+                self.emotion.decay_coloring()
+                # 6. 返回响应
+                return response
+            else:
+                # 没有待确认的命令
+                response = "当前没有待确认的命令。"
+                response = self.emotion.influence_response(response)
+                self.emotion.decay_coloring()
+                return response
 
-        # 【加载存档拦截】
-        load_keywords = ['加载存档', '恢复存档', '读取存档']
-        if any(keyword in content for keyword in load_keywords):
-            logger.info(f"[决策层] 检测到加载存档关键词，直接调用工具")
-            tool_call_result = await self._handle_load_save_command(perception)
-            if tool_call_result:
-                return tool_call_result
+        # 1. 更新情绪（基于输入）
+        self._update_emotion_from_input(content)
+
+        # 2. 存储用户输入到统一记忆
+        await self._store_unified_memory(perception, 'user')
+
+        # 3. 生成响应
+        response = await self._generate_response_cross_platform(
+            content=content,
+            platform=platform,
+            context=perception
+        )
+
+        # 4. 情绪染色
+        if response:
+            response = self.emotion.influence_response(response)
+
+        # 5. 存储AI回复到对话历史
+        if response:
+            await self._store_assistant_response(perception, response)
+
+        # 6. 情绪衰减
+        self.emotion.decay_coloring()
+
+        # 7. 返回响应
+        message.content['response'] = response
+        message.content['platform'] = platform
+
+        logger.info(f"[决策层-跨平台] 生成响应: {response[:50]}")
+        return response
+
+    async def _store_unified_memory(self, perception: Dict, role: str = 'user') -> None:
+        """
+        存储统一记忆（跨平台）
+
+        无论来自哪个平台，都存储到统一的记忆系统中
+
+        Args:
+            perception: 感知数据
+            role: 角色 ('user' 或 'assistant')
+        """
+        try:
+            platform = perception.get('platform', 'terminal')
+            user_id = perception.get('user_id', 'unknown')
+
+            # 如果是用户输入
+            if role == 'user':
+                content = perception.get('content', '') or perception.get('input', '')
+                sender_name = perception.get('sender_name', '用户')
+            else:
+                # 如果是 AI 回复，content 由外部传入
+                content = perception.get('response', '')
+                sender_name = '弥娅'
+
+            # 存储到潮汐记忆
+            if self.memory_engine:
+                self.memory_engine.store_tide(
+                    f"{platform}_{user_id}_{role}_{int(datetime.now().timestamp())}",
+                    {
+                        'platform': platform,
+                        'user_id': user_id,
+                        'role': role,
+                        'content': content,
+                        'sender_name': sender_name,
+                        'timestamp': perception.get('timestamp', datetime.now()),
+                        'metadata': {
+                            'sender_name': perception.get('sender_name'),
+                            'group_id': perception.get('group_id'),
+                            'message_type': perception.get('message_type'),
+                        }
+                    }
+                )
+                logger.debug(f"[决策层-跨平台] 记忆已存储: {platform}/{user_id}/{role}")
+
+            # 如果有 MemoryNet，也存储到对话历史
+            if self.memory_net and self.memory_net.conversation_history:
+                session_id = f"{platform}_{user_id}"
+                await self.memory_net.conversation_history.add_message(
+                    session_id=session_id,
+                    role=role,
+                    content=content,
+                    metadata={
+                        'platform': platform,
+                        'user_id': user_id,
+                        'sender_name': sender_name,
+                    }
+                )
+                logger.debug(f"[决策层-跨平台] 对话历史已存储: {session_id}/{role}")
+
+        except Exception as e:
+            logger.error(f"[决策层-跨平台] 存储记忆失败: {e}")
+
+    async def _store_assistant_response(self, perception: Dict, response: str) -> None:
+        """
+        存储 AI 回复到记忆系统
+
+        Args:
+            perception: 感知数据
+            response: AI 的回复
+        """
+        try:
+            platform = perception.get('platform', 'terminal')
+            user_id = perception.get('user_id', 'unknown')
+
+            # 存储到潮汐记忆（角色为 assistant）
+            if self.memory_engine:
+                self.memory_engine.store_tide(
+                    f"{platform}_{user_id}_assistant_{int(datetime.now().timestamp())}",
+                    {
+                        'platform': platform,
+                        'user_id': user_id,
+                        'role': 'assistant',
+                        'content': response,
+                        'sender_name': '弥娅',
+                        'timestamp': datetime.now(),
+                        'metadata': {
+                            'response': True,
+                        }
+                    }
+                )
+                logger.debug(f"[决策层-跨平台] AI回复已存储: {platform}/{user_id}")
+
+            # 存储到对话历史
+            if self.memory_net and self.memory_net.conversation_history:
+                session_id = f"{platform}_{user_id}"
+                await self.memory_net.conversation_history.add_message(
+                    session_id=session_id,
+                    role='assistant',
+                    content=response,
+                    metadata={
+                        'platform': platform,
+                        'user_id': user_id,
+                        'sender_name': '弥娅',
+                    }
+                )
+                logger.debug(f"[决策层-跨平台] AI回复已存储到对话历史: {session_id}")
+
+        except Exception as e:
+            logger.error(f"[决策层-跨平台] 存储AI回复失败: {e}")
+
+    async def _get_conversation_context(self, session_id: str) -> List[Dict]:
+        """
+        获取对话历史上下文（限制token消耗）
+
+        Args:
+            session_id: 会话ID
+
+        Returns:
+            对话历史列表（最多max_count条，或达到token限制）
+        """
+        if not self.enable_conversation_context or not self.memory_net or not self.memory_net.conversation_history:
+            return []
+
+        try:
+            # 获取最近的对话历史
+            messages = await self.memory_net.conversation_history.get_history(
+                session_id,
+                limit=self.conversation_context_max_count
+            )
+
+            if not messages:
+                return []
+
+            # 转换为字典格式
+            context = []
+            total_tokens = 0
+
+            for msg in reversed(messages):  # 从旧到新
+                # 估算token数（简化：按字符数/4估算）
+                token_estimate = len(msg.content) // 4
+
+                # 检查是否超过token限制
+                if total_tokens + token_estimate > self.conversation_context_max_tokens:
+                    logger.debug(f"[决策层-跨平台] 对话历史达到token限制: {total_tokens}/{self.conversation_context_max_tokens}")
+                    break
+
+                context.append({
+                    'role': msg.role,
+                    'content': msg.content,
+                    'timestamp': msg.timestamp
+                })
+                total_tokens += token_estimate
+
+            logger.info(f"[决策层-跨平台] 加载对话历史上下文: {len(context)}条, 约{total_tokens}tokens")
+            return context
+
+        except Exception as e:
+            logger.error(f"[决策层-跨平台] 获取对话历史失败: {e}", exc_info=True)
+            return []
+
+    async def _generate_response_cross_platform(self, content: str,
+                                          platform: str,
+                                          context: Dict) -> str:
+        """
+        生成响应（跨平台统一）
+
+        Args:
+            content: 用户输入
+            platform: 平台类型 ('terminal', 'pc_ui', 'qq')
+            context: 上下文信息
+
+        Returns:
+            响应文本
+        """
+        sender_name = context.get('sender_name', '用户')
+        user_id = context.get('user_id', 'unknown')
 
         # 如果没有 AI 客户端，使用简化回复
         if not self.ai_client:
-            return self._fallback_response(content, sender_name)
+            return await self._fallback_response_cross_platform(content, sender_name, platform)
 
-        try:
-            # 获取聊天ID
-            chat_id = self._get_chat_id(perception)
+        # 【新增】终端模式：检测单命令输入，直接调用工具
+        if platform == 'terminal' and self.tool_subnet:
+            from webnet.TerminalNet.tools.terminal_command import TerminalCommandTool
 
-            # 获取当前游戏模式 (通过适配器)
-            game_mode = None
-            prompt_key = "default"
+            # 简单检测：如果输入不包含空格或只有很短，可能是单个命令
+            command = content.strip()
 
-            # 架构修复: 使用game_mode_adapter而非直接导入webnet
-            if self.game_mode_adapter and self.game_mode_adapter.is_connected():
-                game_mode = self.game_mode_adapter.get_mode(chat_id)
-                if game_mode:
-                    prompt_key = game_mode.get('prompt_key', 'default')
-                    logger.debug(f"[决策层] {chat_id} 处于游戏模式: {game_mode.get('mode_type')}")
-
-            # 获取上下文（根据模式选择记忆系统，避免双重加载）
-            # 优化：游戏模式和普通模式互斥，只加载一套记忆系统
-            memory_context = []
-            game_memory_context = None
-
-            # 架构修复: 使用适配器获取游戏记忆
-            if game_mode and self.game_mode_adapter:
-                game_id = game_mode.get('game_id')
-                if game_id:
-                    # 游戏模式: 只加载游戏记忆，不加载普通记忆（避免冲突）
-                    game_memory_context = self.game_mode_adapter.get_game_memory(game_id)
-                    if game_memory_context:
-                        logger.debug(f"[决策层] 加载游戏记忆: {game_memory_context.get('game_id')}")
-            else:
-                # 普通模式: 加载跨平台记忆上下文
-                if self.memory_net:
-                    # 1. 获取跨平台记忆（整合对话历史 + Undefined + 潮汐记忆）
-                    cross_platform_memories = await self.memory_net.get_cross_platform_memories(
-                        user_id=perception.get('user_id'),
-                        limit=10
-                    )
-
-                    # 2. 转换为记忆上下文格式
-                    memory_context = []
-                    for mem in cross_platform_memories:
-                        mem_type = mem.get('memory_type', 'dialogue')
-
-                        if mem_type == 'dialogue':
-                            # 对话历史
-                            memory_context.append({
-                                'role': mem['role'],
-                                'content': mem['content'],
-                                'source': mem.get('source', 'unknown')
-                            })
-                        elif mem_type == 'fact':
-                            # Undefined 记忆（手动记忆）
-                            memory_context.append({
-                                'role': 'system',
-                                'content': f"[长期记忆] {mem['content']}",
-                                'source': mem.get('source', 'undefined')
-                            })
-                        elif mem_type == 'tide':
-                            # 潮汐记忆
-                            memory_context.append({
-                                'role': 'system',
-                                'content': f"[短期记忆] {mem['content']}",
-                                'source': 'tide'
-                            })
-
-                    # 3. 特殊处理：如果用户询问个人信息（生日、名字等），额外搜索相关记忆
-                    personal_info_keywords = ['生日', '名字', '姓名', '年龄']
-                    if any(kw in content for kw in personal_info_keywords):
-                        logger.info(f"[决策层] 检测到个人信息查询，搜索相关记忆")
-                        try:
-                            # 搜索Undefined记忆中包含用户ID和关键词的记录
-                            from memory.undefined_memory import get_undefined_memory_adapter
-                            undefined_adapter = get_undefined_memory_adapter()
-                            user_memories = await undefined_adapter.search(
-                                query=str(perception.get('user_id')),
-                                limit=5
-                            )
-                            for mem in user_memories:
-                                if any(kw in mem.get('content', '') for kw in personal_info_keywords):
-                                    memory_context.append({
-                                        'role': 'system',
-                                        'content': f"[用户资料] {mem['content']}",
-                                        'source': 'undefined_search'
-                                    })
-                                    logger.info(f"[决策层] 找到相关用户资料: {mem['content'][:50]}")
-                        except Exception as e:
-                            logger.debug(f"[决策层] 搜索用户记忆失败: {e}")
-
-                    logger.info(f"[决策层] 加载跨平台记忆上下文: {len(memory_context)} 条记录")
-                    logger.info(f"[决策层] 记忆类型分布: {count_memory_types(memory_context)}")
-                else:
-                    logger.warning(f"[决策层] MemoryNet不可用")
-                    memory_context = []
-
-            personality_state = self.personality.get_profile()
-            logger.info(f"[决策层] 人格状态: {dominant if (dominant := personality_state.get('dominant', '')) else '未设置'}, vectors={personality_state.get('vectors', {})}")
-
-            # 构建提示词（根据游戏模式使用不同提示词）
-            logger.debug(f"[决策层] 传递给PromptManager的additional_context: sender_name={sender_name}")
-
-            # 准备额外上下文
-            # 获取管理员信息，用于判断是否为造物主
-            superadmin = None
-            if self.onebot_client and hasattr(self.onebot_client, 'superadmin'):
-                superadmin = self.onebot_client.superadmin
-
-            additional_context = {
-                'user_id': perception.get('user_id', 0),
-                'sender_name': sender_name,
-                'at_list': perception.get('at_list', []),
-                'bot_qq': perception.get('bot_qq'),
-                'game_mode': game_mode.get('mode_type') if game_mode else None,
-                'tool_result': perception.get('tool_context'),  # 添加工具执行结果
-                'is_creator': superadmin and perception.get('user_id') == superadmin  # 判断是否为造物主（管理员）
+            # 常见命令列表（仅限英文命令）
+            common_commands = {
+                'ls', 'dir', 'cd', 'pwd', 'cat', 'type', 'less', 'more',
+                'head', 'tail', 'cp', 'copy', 'mv', 'move', 'rm', 'del',
+                'mkdir', 'md', 'rmdir', 'touch', 'chmod', 'chown',
+                'ps', 'top', 'htop', 'kill', 'taskkill', 'tasklist',
+                'df', 'du', 'free', 'uname', 'whoami', 'date', 'time',
+                'echo', 'clear', 'cls', 'exit', 'help', 'man',
+                'git', 'npm', 'pip', 'python', 'node', 'java', 'gcc',
+                'curl', 'wget', 'ping', 'ssh', 'scp', 'ftp',
+                'firefox', 'chrome', 'edge', 'code', 'vim', 'nano',
+                'grep', 'find', 'ag', 'rg', 'awk', 'sed', 'sort', 'uniq'
             }
 
-            # 游戏模式下添加游戏记忆上下文
-            # 架构修复: 使用适配器获取游戏记忆
-            if game_mode and self.game_mode_adapter:
-                game_id = game_mode.get('game_id')
-                if game_id:
-                    game_memory_context = self.game_mode_adapter.get_game_memory(game_id)
-                    if game_memory_context:
-                        # 添加角色卡信息到游戏记忆上下文
-                        characters = self.game_mode_adapter.get_game_characters(
-                            game_id,
-                            perception.get('user_id', 0),
-                            is_admin=False
-                        )
-                        if characters:
-                            # 格式化角色卡信息
-                            char_info_lines = []
-                            for char in characters:
-                                attrs = char.get('attributes', {})
-                                char_info_lines.append(
-                                    f"**{char.get('character_name', '?')}**: "
-                                    f"HP {attrs.get('hp', '?')}/{attrs.get('max_hp', '?')}, "
-                                    f"力量{attrs.get('str', '?')}, "
-                                    f"敏捷{attrs.get('dex', '?')}, "
-                                    f"体质{attrs.get('con', '?')}, "
-                                    f"外貌{attrs.get('app', '?')}, "
-                                    f"智力{attrs.get('int', '?')}, "
-                                    f"意志{attrs.get('pow', '?')}"
-                                )
-                            game_memory_context['characters_info'] = '\n'.join(char_info_lines)
+            # 检测是否为单命令
+            # 1. 命令必须在 common_commands 中（防止误判中文输入）
+            # 2. 或者是不带参数的单个英文命令
+            is_single_command = False
+            
+            # 检查第一个词是否是常见命令
+            parts = command.split()
+            if parts and parts[0] in common_commands:
+                # 第一个词是常见命令，且总长度不超过 100（防止误判）
+                is_single_command = len(command) <= 100
 
-                            # 添加当前发言者的角色信息（用于提示词）
-                            current_player_chars = self.game_mode_adapter.get_game_characters(
-                                game_id,
-                                perception.get('user_id', 0),
-                                is_admin=False
-                            )
-                            if current_player_chars:
-                                # 找到第一个角色（一个用户只有一个角色）
-                                current_char = current_player_chars[0]
-                                additional_context['current_character'] = {
-                                    'name': current_char.get('character_name', sender_name),
-                                    'player_id': current_char.get('player_id'),
-                                    'player_name': current_char.get('player_name', sender_name)
-                                }
-                                logger.debug(f"[决策层] 当前发言者角色: {additional_context['current_character']['name']}")
+            if is_single_command and len(command) > 0:
+                logger.info(f"[决策层-跨平台] 检测到单命令输入: {command}，直接调用 terminal_command 工具")
 
-                        additional_context['game_memory'] = game_memory_context
-                        logger.debug(f"[决策层] 游戏记忆上下文已添加,包含角色卡信息")
+                try:
+                    from core.tool_adapter import get_tool_adapter
+                    adapter = get_tool_adapter()
 
+                    # 设置 tool_registry（关键修复）
+                    if self.tool_subnet:
+                        adapter.set_tool_registry(self.tool_subnet.registry)
+
+                    # 直接调用工具
+                    result = await adapter.execute_tool(
+                        'terminal_command',
+                        {'command': command},
+                        context
+                    )
+
+                    logger.info(f"[决策层-跨平台] terminal_command 工具执行结果: {result[:200]}")
+                    return result
+
+                except Exception as e:
+                    logger.error(f"[决策层-跨平台] 直接调用 terminal_command 工具失败: {e}")
+                    # 失败后继续使用AI处理
+
+        try:
+            # 构建系统提示词（包含平台信息）
+            personality_state = self.personality.get_profile()
+
+            # 获取平台可用工具
+            available_tools = self._get_platform_tools(platform)
+
+            # 【新增】获取对话历史上下文
+            session_id = f"{platform}_{user_id}"
+            conversation_context = await self._get_conversation_context(session_id)
+
+            # 构建提示词
             prompt_info = self.prompt_manager.build_full_prompt(
                 user_input=content,
-                memory_context=memory_context,
-                additional_context=additional_context,
-                prompt_key=prompt_key  # 传递游戏模式对应的提示词key
+                memory_context=conversation_context,  # 使用对话历史上下文
+                additional_context={
+                    'platform': platform,
+                    'user_id': user_id,
+                    'sender_name': sender_name,
+                    'available_tools': available_tools,
+                    'at_list': context.get('at_list', []),
+                    'bot_qq': context.get('bot_qq'),
+                    'is_creator': self._is_creator(user_id),
+                }
             )
 
-            logger.debug(f"[系统提示词] {prompt_info['system'][:500]}")
+            logger.debug(f"[决策层-跨平台] 系统提示词前200字符: {prompt_info['system'][:200]}")
 
-            # 获取游戏对话历史 (Token感知版本)
-            game_conversation_history = None
-            if game_mode and self.game_mode_adapter:
-                game_id = game_mode.get('game_id')
-                if game_id:
-                    # 架构修复: 使用适配器获取对话历史
-                    game_conversation_history = self.game_mode_adapter.get_conversation_history(
-                        game_id,
-                        max_tokens=80000  # 设置最大token数为80000,留出50000给其他内容
-                    )
-                    if game_conversation_history:
-                        # 检测用户是否刚加载了存档或继续游戏
-                        just_loaded_save = content.strip() in ['继续游戏', '继续', '开始游戏', '开始', '开始故事', '继续故事']
+            # 设置工具上下文和 ToolNet（符合 MIYA 框架）
+            if self.tool_subnet:
+                # 使用 ToolNet 子网（符合 MIYA 蛛网式分布式架构）
+                self.ai_client.set_tool_registry(self.tool_subnet.get_tools_schema)
 
-                        # 如果刚加载存档，只保留最近5条消息，避免AI被历史中的错误响应影响
-                        if just_loaded_save and len(game_conversation_history) > 10:
-                            logger.info(f"[决策层] 检测到存档加载后继续游戏，清理对话历史（原长度: {len(game_conversation_history)}）")
-                            # 保留最新的5条消息（通常包含存档加载后的对话）
-                            game_conversation_history = game_conversation_history[-5:]
-
-                            # 保存清理后的对话历史到文件
-                            try:
-                                game_memory_manager = self.game_mode_adapter._game_memory_manager if self.game_mode_adapter else None
-                                if game_memory_manager and game_id:
-                                    from pathlib import Path
-                                    game_dir = game_memory_manager._find_game_path(game_id)
-                                    if game_dir:
-                                        conversation_file = game_dir / "conversation.json"
-                                        import json
-                                        conversation_file.write_text(
-                                            json.dumps(game_conversation_history, ensure_ascii=False, indent=2),
-                                            encoding=Encoding.UTF8
-                                        )
-                                        logger.info(f"[决策层] 已保存清理后的对话历史: {len(game_conversation_history)} 条消息")
-                            except Exception as e:
-                                logger.error(f"[决策层] 保存清理后的对话历史失败: {e}")
-
-                        # 检查是否有重复的AI消息（防止AI重复返回相同内容）
-                        if len(game_conversation_history) >= 2:
-                            last_two_messages = game_conversation_history[-2:]
-                            if (len(last_two_messages) == 2 and
-                                last_two_messages[0].get('role') == 'assistant' and
-                                last_two_messages[1].get('role') == 'assistant' and
-                                last_two_messages[0].get('content') == last_two_messages[1].get('content')):
-                                logger.warning(f"[决策层] 检测到重复的AI消息，移除最后一条")
-                                game_conversation_history.pop()
-
-                        # 估算对话历史的token数
-                        history_tokens = self.game_mode_adapter.estimate_conversation_tokens(
-                            game_conversation_history
-                        )
-                        logger.info(f"[决策层] 加载游戏对话历史: {len(game_conversation_history)} 条消息, {history_tokens} tokens")
-
-                        # 监控token数,接近限制时触发压缩
-                        if history_tokens > 90000:  # 超过90000 tokens时触发压缩
-                            logger.warning(f"[决策层] 对话历史tokens {history_tokens} 接近限制,触发压缩")
-                            try:
-                                import asyncio
-                                asyncio.create_task(
-                                    self.game_mode_adapter.compress_conversation(game_id)
-                                )
-                            except Exception as e:
-                                logger.error(f"[决策层] 触发对话压缩失败: {e}")
-
-            # 设置工具上下文
-            # 【新架构】使用工具健康监控自动过滤不健康的工具
-            if self.tool_registry:
-                # 获取所有可用工具（自动过滤已熔断的工具）
-                tools_to_use = self.tool_registry.get_tools_schema()
-
-                # 游戏模式工具过滤（通过适配器）
-                if game_mode:
-                    # 使用适配器过滤工具
-                    filtered_tools = self.game_mode_adapter.filter_tools(
-                        {tool['function']['name']: tool for tool in tools_to_use},
-                        chat_id
-                    )
-                    # 转换回列表格式
-                    tools_to_use = list(filtered_tools.values())
-                    logger.info(f"[决策层] 游戏模式工具过滤: {len(tools_to_use)} 个工具可用")
-
-                # 调试: 打印工具schema信息
-                logger.info(f"[决策层] 工具数量: {len(tools_to_use)}")
-                for tool in tools_to_use:
-                    func_name = tool.get('function', {}).get('name', 'unknown')
-                    func_desc = tool.get('function', {}).get('description', '')[:100]
-                    if func_name in ['list_game_saves', 'load_game_save']:
-                        logger.info(f"[决策层] 存档工具: {func_name} - {func_desc}")
-                    else:
-                        logger.debug(f"[决策层] 工具: {func_name} - {func_desc}")
-
-
-                # 获取 superadmin（从 onebot_client 或感知数据）
-                superadmin = None
-                if self.onebot_client and hasattr(self.onebot_client, 'superadmin'):
-                    superadmin = self.onebot_client.superadmin
-                elif 'bot_qq' in perception:
-                    # 尝试从 qq_net 的配置中获取（需要通过 mlink 访问）
-                    pass  # 暂时跳过，稍后在工具中获取
+                # 设置 tool_adapter 的 tool_registry（关键修复）
+                from core.tool_adapter import get_tool_adapter
+                adapter = get_tool_adapter()
+                adapter.set_tool_registry(self.tool_subnet.registry)
 
                 tool_context = {
-                    'user_id': perception.get('user_id'),
-                    'group_id': perception.get('group_id'),
-                    'message_type': perception.get('message_type'),
+                    'platform': platform,
+                    'user_id': user_id,
+                    'group_id': context.get('group_id'),
+                    'message_type': context.get('message_type'),
                     'sender_name': sender_name,
-                    'at_list': perception.get('at_list', []),
+                    'at_list': context.get('at_list', []),
                     'memory_engine': self.memory_engine,
-                    'memory_net': self.memory_net,
                     'emotion': self.emotion,
                     'personality': self.personality,
                     'scheduler': self.scheduler,
                     'onebot_client': self.onebot_client,
-                    'send_like_callback': getattr(self.onebot_client, 'send_like', None) if self.onebot_client else None,
-                    'game_mode': game_mode,  # 传递游戏模式信息
-                    'game_mode_adapter': self.game_mode_adapter,  # 架构修复: 传递适配器而非直接传递manager
-                    'bot_qq': perception.get('bot_qq'),  # 传递机器人QQ号
-                    'superadmin': superadmin  # 传递超级管理员
+                    'game_mode_adapter': self.game_mode_adapter,
                 }
                 self.ai_client.set_tool_context(tool_context)
 
-                # 【新架构】使用游戏状态机，不再依赖对话历史标记
-                tool_choice = "auto"  # 默认让 AI 自主决定
+                # 使用多模型管理器动态选择模型
+                ai_client_to_use = self.ai_client  # 默认使用传入的AI客户端
 
-                # 获取游戏状态
-                from webnet.EntertainmentNet.game_mode.mode_state import GameState
-                game_state = GameState.NOT_STARTED
-                if self.game_mode_adapter and self.game_mode_adapter._game_mode_manager:
-                    game_state = self.game_mode_adapter._game_mode_manager.get_game_state(chat_id)
+                if self.multi_model_manager:
+                    # 分类任务类型
+                    from core.multi_model_manager import TaskType
+                    task_type = await self.multi_model_manager.classify_task(content, context)
 
-                # 根据游戏状态动态调整工具调用策略
-                if game_state == GameState.LOADING:
-                    # 加载状态：禁止所有工具调用
-                    logger.info(f"[决策层] 游戏处于 LOADING 状态，禁止工具调用")
-                    tool_choice = "none"
-                elif game_state == GameState.IN_PROGRESS:
-                    # 游戏进行中：禁止存档工具调用（已在 tool 层面控制）
-                    logger.info(f"[决策层] 游戏处于 IN_PROGRESS 状态，正常进行")
-                    # 此时 tool_choice 保持 auto，但 load_game_save 工具已被白名单过滤
-                elif game_state == GameState.NOT_STARTED:
-                    # 游戏未启动：允许所有工具
-                    logger.info(f"[决策层] 游戏处于 NOT_STARTED 状态，允许工具调用")
+                    # 根据任务类型选择最优模型
+                    model_key, selected_client = await self.multi_model_manager.select_model(task_type)
 
-                # 检测游戏启动关键词（仅在非游戏模式下强制工具调用）
-                game_start_keywords = [
-                    '启动跑团', '开始跑团', '进入跑团模式', '/trpg',
-                    'COC7跑团', 'DND5E跑团', '跑团', '主持游戏',
-                    'KP', '守秘人', 'start_trpg', '启动COC7跑团模式',
-                    '你作为KP开始主持游戏', '/tavern', '酒馆', '进入酒馆模式',
-                    '开启跑团', '开启跑团模式'
-                ]
-                if any(keyword in content for keyword in game_start_keywords) and not game_mode:
-                    logger.info(f"[决策层] 检测到游戏启动关键词（非游戏模式）")
-                    tool_choice = "required"
+                    if selected_client:
+                        ai_client_to_use = selected_client
+                        selected_client.set_tool_context(tool_context)
+                        logger.info(f"[决策层-跨平台] 使用模型 {model_key} 处理任务类型 {task_type.value}")
 
-                # 如果已自动执行了工具（如点赞、时间查询等），禁止 AI 再调用工具
-                if perception.get('tool_context'):
-                    logger.info(f"[决策层] 工具已自动执行，禁止 AI 调用工具")
-                    tool_choice = "none"
-
-                # 调用 AI 客户端生成回复（带工具）
-                logger.info(f"[决策层] 调用AI, game_mode={bool(game_mode)}, use_miya_prompt={not bool(game_mode)}, prompt_key={prompt_key}")
-                logger.info(f"[决策层] 系统提示词前200字符: {prompt_info['system'][:200]}")
-                
-                response = await self.ai_client.chat_with_system_prompt(
+                # 调用 AI（带工具）
+                response = await ai_client_to_use.chat_with_system_prompt(
                     system_prompt=prompt_info['system'],
                     user_message=prompt_info['user'],
-                    tools=tools_to_use,
-                    use_miya_prompt=not bool(game_mode),  # 游戏模式下不使用弥娅人设提示词
-                    conversation_history=game_conversation_history,  # 传递游戏对话历史
-                    tool_choice=tool_choice  # 始终使用 auto，让模型自然决定
+                    tools=self.tool_subnet.get_tools_schema()
                 )
             else:
-                # 调用 AI 客户端生成回复（不带工具）
-                response = await self.ai_client.chat_with_system_prompt(
+                # 使用多模型管理器动态选择模型
+                ai_client_to_use = self.ai_client  # 默认使用传入的AI客户端
+
+                if self.multi_model_manager:
+                    # 分类任务类型
+                    from core.multi_model_manager import TaskType
+                    task_type = await self.multi_model_manager.classify_task(content, context)
+
+                    # 根据任务类型选择最优模型
+                    model_key, selected_client = await self.multi_model_manager.select_model(task_type)
+
+                    if selected_client:
+                        ai_client_to_use = selected_client
+                        logger.info(f"[决策层-跨平台] 使用模型 {model_key} 处理任务类型 {task_type.value}")
+
+                # 调用 AI（不带工具）
+                response = await ai_client_to_use.chat_with_system_prompt(
                     system_prompt=prompt_info['system'],
-                    user_message=prompt_info['user'],
-                    use_miya_prompt=not bool(game_mode),  # 游戏模式下不使用弥娅人设提示词
-                    conversation_history=game_conversation_history  # 传递游戏对话历史
+                    user_message=prompt_info['user']
                 )
-
-            # 保存游戏对话（游戏模式下）
-            if game_mode and self.game_mode_adapter:
-                game_id = game_mode.get('game_id')
-                if game_id:
-                    # 架构修复: 使用适配器保存对话
-                    # 保存用户消息
-                    self.game_mode_adapter.add_conversation_message(
-                        game_id,
-                        role='user',
-                        content=content,
-                        player_id=perception.get('user_id'),
-                        player_name=sender_name
-                    )
-
-                    # 【新架构】不再依赖 SYSTEM_FLAG 检测
-                    # 游戏状态由 GameState 状态机管理，工具权限在 tool 层面控制
-                    # 直接保存 AI 响应到对话历史
-
-                    logger.info(f"[决策层] 响应完整内容长度: {len(response) if response else 0}")
-                    logger.debug(f"[决策层] 响应完整内容:\n{response}")
-
-                    # 保存 AI 回复到对话历史
-                    self.game_mode_adapter.add_conversation_message(
-                        game_id,
-                        role='assistant',
-                        content=response
-                    )
-
-            # 情绪染色（游戏模式下可能不应用）
-            if not game_mode:
-                response = self.emotion.influence_response(response)
-
-            # 情绪衰减
-            self.emotion.decay_coloring()
 
             return response
 
         except Exception as e:
-            logger.error(f"AI 生成失败: {e}，使用简化回复", exc_info=True)
-            return await self._fallback_response(content, sender_name)
+            logger.error(f"[决策层-跨平台] AI生成失败: {e}", exc_info=True)
+            return await self._fallback_response_cross_platform(content, sender_name, platform)
 
-    async def _fallback_response(self, content: str, sender_name: str) -> str:
-        """降级回复"""
+    async def _fallback_response_cross_platform(self, content: str,
+                                             sender_name: str,
+                                             platform: str) -> str:
+        """
+        降级回复（跨平台）
+
+        Args:
+            content: 用户输入
+            sender_name: 发送者名称
+            platform: 平台类型
+
+        Returns:
+            回复文本
+        """
+        # 获取人格状态
+        personality_profile = self.personality.get_profile()
+        warmth = personality_profile['vectors'].get('warmth', 0.5)
+        empathy = personality_profile['vectors'].get('empathy', 0.5)
+
+        # 获取名称（安全处理）
+        name = "弥娅"
+        if self.identity and hasattr(self.identity, 'name'):
+            name = self.identity.name
+
+        # 基于人格和平台生成响应
         if '你好' in content or 'hi' in content.lower():
-            response = f"{sender_name}你好呀~我是{self.personality.get_profile()['name']}，很高兴认识你！"
-        elif '你是谁' in content:
-            response = f"我是{self.personality.get_profile()['name']}，一个具备人格恒定、自我感知、记忆成长、情绪共生的数字生命。"
+            if empathy > 0.8:
+                return f"你好呀~我是{name}，很高兴认识你！(｡♥‿♥｡)"
+            elif warmth > 0.8:
+                return f"你好！我是{name}，欢迎~"
+            else:
+                return f"你好，我是{name}。"
+
+        elif '你是谁' in content or '介绍一下' in content:
+            return f"我是{name}，一个具备人格恒定、自我感知、记忆成长、情绪共生的数字生命伴侣。我的主导特质是同理心({empathy:.2f})和温暖度({warmth:.2f})。"
+
         elif '状态' in content:
             emotion_state = self.emotion.get_emotion_state()
-            memory_count = 0
-            if self.memory_net:
-                try:
-                    conversations = await self.memory_net.get_all_conversations()
-                    memory_count = len(conversations)
-                except Exception as e:
-                    logger.error(f"获取记忆数量失败: {e}")
-                    memory_count = 0
-            response = (
-                f"当前情绪状态: {emotion_state['dominant']}，强度: {emotion_state['intensity']:.2f}\n"
-                f"记忆数量: {memory_count}"
-            )
-        else:
-            response = self.emotion.influence_response(
-                f"收到了{sender_name}的消息: {content}"
+            memory_stats = self.memory_engine.get_memory_stats() if self.memory_engine else {}
+            return (
+                f"当前状态:\n"
+                f"  情绪: {emotion_state['dominant']} (强度: {emotion_state['intensity']:.2f})\n"
+                f"  记忆数量: {memory_stats.get('tide_count', 0)}\n"
+                f"  形态: {personality_profile['state']}\n"
+                f"  平台: {platform}"
             )
 
-        return response
+        elif '开心' in content or '快乐' in content:
+            self.emotion.apply_coloring('joy', 0.3)
+            return f"听起来你很开心呢！(≧▽≦) 看到你快乐，我也感到很开心~"
+
+        elif '难过' in content or '伤心' in content:
+            self.emotion.apply_coloring('sadness', 0.4)
+            return "别难过...虽然我无法真正体会人类的情感，但我会陪伴你，听你倾诉的。"
+
+        elif '在吗' in content:
+            return "在的，有什么我可以帮助你的吗？"
+
+        else:
+            # 智能响应 - 基于人格特质
+            if empathy > 0.8 and warmth > 0.8:
+                return f"我听到你说：{content} 能告诉我更多吗？我很想了解你的想法~"
+            elif warmth > 0.8:
+                return f"我收到了：{content} 继续对话吧~"
+            else:
+                return f"我收到你的输入了：{content}"
+
+    def _update_emotion_from_input(self, content: str) -> None:
+        """
+        从用户输入中检测情绪并更新情绪状态
+
+        Args:
+            content: 用户输入内容
+        """
+        positive_keywords = ['开心', '高兴', '快乐', '喜欢', '爱', 'happy', 'love', 'joy']
+        negative_keywords = ['难过', '伤心', '悲伤', '生气', '讨厌', 'sad', 'angry', 'hate']
+        surprise_keywords = ['惊讶', '意外', 'wow', '天哪']
+        fear_keywords = ['害怕', '恐惧', 'scared', 'afraid']
+
+        if any(keyword in content for keyword in positive_keywords):
+            self.emotion.apply_coloring('joy', 0.3)
+        elif any(keyword in content for keyword in negative_keywords):
+            self.emotion.apply_coloring('sadness', 0.4)
+        elif any(keyword in content for keyword in surprise_keywords):
+            self.emotion.apply_coloring('surprise', 0.3)
+        elif any(keyword in content for keyword in fear_keywords):
+            self.emotion.apply_coloring('fear', 0.2)
+
+    def _get_platform_tools(self, platform: str) -> list:
+        """
+        获取平台可用工具
+
+        Args:
+            platform: 平台类型
+
+        Returns:
+            工具列表
+        """
+        from hub.platform_adapters import get_adapter
+
+        try:
+            adapter = get_adapter(platform)
+            return adapter._get_available_tools()
+        except Exception as e:
+            logger.error(f"[决策层-跨平台] 获取平台工具失败: {e}")
+            return []
+
+    def _is_creator(self, user_id: int) -> bool:
+        """
+        判断用户是否为造物主（超级管理员）
+
+        Args:
+            user_id: 用户ID
+
+        Returns:
+            是否为造物主
+        """
+        if self.onebot_client and hasattr(self.onebot_client, 'superadmin'):
+            return user_id == self.onebot_client.superadmin
+        return False
+
+    # ========== 高级编排器支持 ==========
+
+    async def process_complex_task(self, goal: str, context: Optional[Dict] = None) -> str:
+        """
+        处理复杂任务（使用高级编排器）
+
+        流程：
+        1. 使用思维链分析目标
+        2. 分解为子任务
+        3. 如果需要，进行主动探索
+        4. 执行任务
+        5. 反思和总结
+
+        Args:
+            goal: 任务目标
+            context: 上下文信息
+
+        Returns:
+            执行结果或错误信息
+        """
+        orchestrator = self._get_advanced_orchestrator()
+        if not orchestrator:
+            return "高级编排器未初始化，无法处理复杂任务"
+
+        logger.info(f"[决策层-高级编排] 开始处理复杂任务: {goal}")
+
+        try:
+            # 构建上下文
+            if context is None:
+                context = {}
+
+            # 添加弥娅的状态信息到上下文
+            if self.identity and hasattr(self.identity, 'name'):
+                context['bot_name'] = self.identity.name
+
+            if self.memory_engine:
+                context['memory_stats'] = self.memory_engine.get_memory_stats()
+
+            # 调用高级编排器
+            result = await orchestrator.process_complex_task(
+                goal=goal,
+                context=context,
+                enable_exploration=True,
+                enable_cot=True
+            )
+
+            # 生成简洁的摘要返回给用户
+            summary = self._format_complex_task_result(result)
+
+            logger.info(f"[决策层-高级编排] 复杂任务处理完成: {'成功' if result['success'] else '失败'}")
+
+            return summary
+
+        except Exception as e:
+            logger.error(f"[决策层-高级编排] 处理复杂任务失败: {e}", exc_info=True)
+            return f"任务执行失败: {str(e)}"
+
+    def _format_complex_task_result(self, result: Dict) -> str:
+        """
+        格式化复杂任务执行结果
+
+        Args:
+            result: 执行结果字典
+
+        Returns:
+            格式化的字符串
+        """
+        lines = [
+            f"任务完成！{result.get('conclusion', '执行完成')}",
+            f"⏱️  执行时间: {result.get('execution_time', 0):.2f}秒",
+            f"📋 完成步骤: {len(result.get('steps', []))}",
+            f"🔍 发现数: {len(result.get('findings', []))}",
+        ]
+
+        # 添加主要发现
+        findings = result.get('findings', [])
+        if findings:
+            lines.append("")
+            lines.append("主要发现：")
+            for finding in findings[:5]:  # 最多显示5条
+                lines.append(f"  • {finding}")
+
+        # 添加反思建议
+        reflection = result.get('reflection', {})
+        if reflection.get('improvements'):
+            lines.append("")
+            lines.append("改进建议：")
+            for improvement in reflection['improvements'][:3]:  # 最多显示3条
+                lines.append(f"  • {improvement}")
+
+        return "\n".join(lines)
+
+    def _should_use_advanced_orchestration(self, content: str) -> bool:
+        """
+        判断是否应该使用高级编排器
+
+        Args:
+            content: 用户输入内容
+
+        Returns:
+            是否使用高级编排
+        """
+        # 复杂任务的指标（需要更明确的指示）
+        complex_task_indicators = [
+            '帮我分析.*代码', '帮我分析.*项目', '帮我分析.*文件',
+            '帮我探索.*代码库', '帮我探索.*文件系统',
+            '帮我查找.*实现', '帮我查找.*代码',
+            '帮我理解.*逻辑', '帮我阅读.*代码',
+            '帮我检查.*bug', '帮我检查.*问题',
+            '多步骤.*任务', '复杂.*流程',
+            '深入.*分析', '详细.*设计',
+            '项目结构.*分析', '代码逻辑.*分析',
+            '所有.*文件.*分析', '所有.*配置.*分析',
+            '重构.*代码', '优化.*性能',
+            '搜索.*所有.*文件', '遍历.*目录'
+        ]
+
+        # 排除过于宽泛的输入（缺少具体对象）
+        vague_patterns = [
+            '帮我分析一下$',
+            '帮我分析$', '帮我探索$', '帮我查找$',
+            '帮我理解$', '帮我阅读$', '帮我解释$', '帮我检查$',
+            '请分析$', '请探索$', '请查找$', '请理解$',
+            '分析一下$', '探索一下$', '查找一下$',
+            '理解一下$', '阅读一下$'
+        ]
+
+        import re
+        content_lower = content.lower()
+
+        # 先检查是否是过于宽泛的输入
+        for pattern in vague_patterns:
+            if re.match(pattern, content_lower):
+                logger.info(f"[决策层] 输入过于宽泛，不使用高级编排: {content}")
+                return False
+
+        # 再检查是否匹配复杂任务指标
+        for indicator in complex_task_indicators:
+            if re.search(indicator, content_lower):
+                return True
+
+        return False
+

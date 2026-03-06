@@ -1,0 +1,49 @@
+{
+  "decisions": [
+    {
+      "id": "decision_20260306173731_config_19_1772789851.685815",
+      "problem_id": "config_19_1772789851.685815",
+      "decision_type": "auto_fix",
+      "risk_level": "SAFE",
+      "reasoning": "风险等级 SAFE 低于阈值，自动批准",
+      "action_taken": "auto_fix",
+      "result": "error: 'AutoFixer' object has no attribute 'execute_fix_plan'",
+      "timestamp": "2026-03-06T17:37:31.686838",
+      "approved": true,
+      "auto_approved": true
+    },
+    {
+      "id": "decision_20260306173731_security_100_1772789851.685815",
+      "problem_id": "security_100_1772789851.685815",
+      "decision_type": "auto_fix",
+      "risk_level": "LOW",
+      "reasoning": "风险等级 LOW 低于阈值，自动批准",
+      "action_taken": "auto_fix",
+      "result": "error: 'AutoFixer' object has no attribute 'execute_fix_plan'",
+      "timestamp": "2026-03-06T17:37:31.686838",
+      "approved": true,
+      "auto_approved": true
+    },
+    {
+      "id": "decision_20260306173731_security_101_1772789851.685815",
+      "problem_id": "security_101_1772789851.685815",
+      "decision_type": "auto_fix",
+      "risk_level": "LOW",
+      "reasoning": "风险等级 LOW 低于阈值，自动批准",
+      "action_taken": "auto_fix",
+      "result": "error: 'AutoFixer' object has no attribute 'execute_fix_plan'",
+      "timestamp": "2026-03-06T17:37:31.686838",
+      "approved": true,
+      "auto_approved": true
+    }
+  ],
+  "stats": {
+    "total_decisions": 3,
+    "auto_decisions": 3,
+    "manual_decisions": 0,
+    "successful_fixes": 0,
+    "failed_fixes": 3,
+    "improvements_made": 0
+  },
+  "last_improvement_time": null
+}

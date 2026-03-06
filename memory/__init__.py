@@ -28,10 +28,17 @@ from .cognitive_adapter import (
     create_cognitive_adapter,
 )
 
-# 向量缓存
-from .vector_cache import (
+# 真正的向量缓存系统
+from .real_vector_cache import (
+    RealVectorCache,
     VectorCacheManager,
     get_vector_cache_manager,
+)
+
+# 原有的向量缓存（保持兼容性，但实际功能有限）
+from .vector_cache import (
+    VectorCacheManager as OldVectorCacheManager,
+    get_vector_cache_manager as get_old_vector_cache_manager,
 )
 
 # 其他记忆模块

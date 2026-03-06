@@ -383,8 +383,8 @@ class OpenAIClient(BaseAIClient):
 
                 # 如果没有工具调用，返回结果
                 if not message.tool_calls:
-                    logger.warning(f"[AIClient] OpenAI返回纯文本（无工具调用），tool_choice={tool_choice}")
-                    logger.warning(f"[AIClient] 返回内容预览: {message.content[:200] if message.content else '(无内容)'}")
+                    logger.debug(f"[AIClient] OpenAI返回纯文本（无工具调用），tool_choice={tool_choice}")
+                    logger.debug(f"[AIClient] 返回内容预览: {message.content[:200] if message.content else '(无内容)'}")
                     if tool_choice == "required":
                         logger.error(f"[AIClient] tool_choice='required'但模型未调用工具，可能是工具描述或系统提示词问题")
                     return message.content
@@ -434,7 +434,8 @@ class OpenAIClient(BaseAIClient):
                         'create_pc', 'show_pc', 'update_pc', 'delete_pc',
                         'start_combat', 'add_initiative', 'next_turn', 'show_initiative', 'end_combat',
                         'rest', 'attack', 'combat_log',
-                        'kp_command'
+                        'kp_command',
+                        'terminal_command'  # 终端命令工具直接返回结果
                     ]
                     if tool_call.function.name in direct_return_tools:
                         logger.info(f"[AIClient] 检测到直接返回工具: {tool_call.function.name}，直接返回结果")
@@ -558,8 +559,8 @@ class DeepSeekClient(BaseAIClient):
 
                 # 如果没有工具调用，返回结果
                 if not message.tool_calls:
-                    logger.warning(f"[AIClient] DeepSeek返回纯文本（无工具调用），tool_choice={tool_choice}")
-                    logger.warning(f"[AIClient] 返回内容预览: {message.content[:200] if message.content else '(无内容)'}")
+                    logger.debug(f"[AIClient] DeepSeek返回纯文本（无工具调用），tool_choice={tool_choice}")
+                    logger.debug(f"[AIClient] 返回内容预览: {message.content[:200] if message.content else '(无内容)'}")
                     # 如果使用了required但没调用工具，记录详细错误
                     if tool_choice == "required":
                         logger.error(f"[AIClient] tool_choice='required'但模型未调用工具，可能是工具描述或系统提示词问题")
@@ -604,7 +605,7 @@ class DeepSeekClient(BaseAIClient):
 
                     # 检查是否是直接返回工具（如运势、抽签等）
                     # 这些工具返回的结果已经是格式化的，直接返回给用户
-                    direct_return_tools = ['horoscope', 'wenchang_dijun']
+                    direct_return_tools = ['horoscope', 'wenchang_dijun', 'terminal_command']
                     if tool_call.function.name in direct_return_tools:
                         logger.info(f"[AIClient] 检测到直接返回工具: {tool_call.function.name}，直接返回结果")
                         return result
