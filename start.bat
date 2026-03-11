@@ -108,6 +108,30 @@ echo.
 "%PYTHON_EXE%" run/health.py
 goto end
 
+:multi_term
+echo.
+echo [Starting] Multi-Terminal System...
+echo.
+"%PYTHON_EXE%" run/multi_terminal_main.py
+goto end
+
+:web_term
+echo.
+echo [Starting] Web Terminal Manager...
+echo.
+echo [Info] Installing web dependencies...
+"%PYTHON_EXE%" -m pip install fastapi uvicorn aiohttp -q
+if errorlevel 1 (
+    echo [Error] Failed to install web dependencies
+    pause
+    goto menu
+)
+echo.
+echo [Info] Starting web server on http://localhost:8080
+echo.
+"%PYTHON_EXE%" webnet/TerminalNet/server.py
+goto end
+
 :status
 echo.
 echo [Status] System Status Check...
