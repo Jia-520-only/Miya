@@ -1,13 +1,41 @@
 # 弥娅 (Miya) - 数字生命伴侣
 
-![Version](https://img.shields.io/badge/version-1.0.0-brightgreen.svg)
+![Version](https://img.shields.io/badge/version-3.7.0-brightgreen.svg)
 ![Python](https://img.shields.io/badge/python-3.9+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-yellow.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)
+![Architecture](https://img.shields.io/badge/architecture-Modular%20Monolith-orange.svg)
 
-> *"不仅是AI，更是伙伴"* — 弥娅 v1.0.0
+> *"不仅是AI，更是伙伴"* — 弥娅 v3.7.0
 
-弥娅（Miya）是一个基于**蛛网式模块化架构**的数字生命伴侣系统，具备动态人格、情感演化、记忆管理、多模型智能调度、多端接入等核心能力。
+**弥娅（Miya）** 是一个基于**蛛网式模块化架构**的新一代数字生命伴侣系统，具备动态人格、情感演化、多层记忆、多模型智能调度、多端接入、自主决策等核心能力。
+
+---
+
+## ✨ 最新更新 (v3.7.0)
+
+### 🎉 核心功能增强
+- ✅ **定时任务系统**：支持创建、删除、列出定时任务，终端模式完美支持
+- ✅ **后台调度器**：定时任务在后台线程运行，不阻塞主流程
+- ✅ **JSON智能修复**：增强对中文值的处理，AI返回的无效JSON自动修复
+- ✅ **权限系统**：完整的AuthNet权限管理，支持用户、角色、权限管理
+
+### 🖥️ 桌面应用
+- ✅ **Miya Desktop**：基于Electron的桌面应用，集成Live2D虚拟形象
+- ✅ **实时交互**：与弥娅进行实时对话，实时显示Live2D动画
+- ✅ **多模型支持**：DeepSeek、硅基流动等多模型切换
+
+### 🌐 Web应用
+- ✅ **全新Web UI**：基于Vue 3 + TDesign的现代化界面
+- ✅ **FastAPI后端**：高性能异步API服务
+- ✅ **实时通信**：WebSocket支持实时消息推送
+- ✅ **API文档**：自动生成的OpenAPI文档
+
+### 🔧 系统优化
+- ✅ **跨平台终端**：Windows、Linux、macOS完美支持
+- ✅ **多数据库集成**：Redis、Milvus、Neo4j无缝切换
+- ✅ **向量搜索**：基于Milvus的语义检索
+- ✅ **知识图谱**：Neo4j五元组关系图谱
 
 ---
 
@@ -40,6 +68,8 @@
 
 ### 一键安装
 
+#### 方式1：使用安装脚本（推荐）
+
 **Windows:**
 ```batch
 install.bat
@@ -53,57 +83,207 @@ chmod +x install.sh
 
 安装脚本会自动：
 1. ✅ 创建 Python 虚拟环境
-2. ✅ 安装所有依赖包（140+ 个）
+2. ✅ 安装所有依赖包（150+ 个）
 3. ✅ 初始化配置文件
 4. ✅ 生成唯一 UUID
 5. ✅ 创建必要的数据目录
 
+#### 方式2：手动安装
+
+```bash
+# 1. 创建虚拟环境
+python -m venv venv
+
+# 2. 激活虚拟环境
+# Windows:
+venv\Scripts\activate
+# Linux/macOS:
+source venv/bin/activate
+
+# 3. 安装依赖
+pip install -r requirements.txt
+
+# 4. 复制配置文件
+cp config/.env.example config/.env
+cp config/multi_model_config.json.example config/multi_model_config.json
+
+# 5. 编辑配置文件，填入API密钥
+# 编辑 config/.env
+# 编辑 config/multi_model_config.json
+```
+
+### 配置 AI 模型
+
+#### 步骤1：配置基础模型
+
+编辑 `config/.env` 文件：
+
+```bash
+# DeepSeek API（主要推荐）
+DEEPSEEK_API_KEY=sk-your-deepseek-api-key
+DEEPSEEK_API_BASE=https://api.deepseek.com/v1
+DEEPSEEK_MODEL=deepseek-chat
+
+# 硅基流动 API（快速、低成本）
+SILICONFLOW_API_KEY=sk-your-siliconflow-api-key
+SILICONFLOW_API_BASE=https://api.siliconflow.cn/v1
+SILICONFLOW_MODEL=Qwen/Qwen2.5-7B-Instruct
+
+# AI 参数
+AI_TEMPERATURE=0.7
+AI_MAX_TOKENS=2000
+```
+
+#### 步骤2：配置多模型调度（可选）
+
+编辑 `config/multi_model_config.json` 文件：
+
+```json
+{
+  "models": {
+    "chinese": {
+      "name": "deepseek-chat",
+      "provider": "deepseek",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "sk-your-api-key",
+      "capabilities": ["simple_chat", "chinese_understanding", "reasoning"]
+    },
+    "fast": {
+      "name": "Qwen/Qwen2.5-7B-Instruct",
+      "provider": "siliconflow",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": "sk-your-api-key",
+      "capabilities": ["simple_chat", "summarization"]
+    }
+  },
+  "routing_strategy": {
+    "simple_chat": {
+      "primary": "fast",
+      "fallback": "chinese"
+    }
+  }
+}
+```
+
 ### 启动系统
 
-**终端模式（推荐新手）:**
+#### 1️⃣ 终端模式（推荐新手）
+
+**Windows:**
 ```batch
-start.bat        # Windows
-./start.sh        # Linux/macOS
+start.bat
 ```
 
-**PC WebUI 模式（推荐日常使用）:**
-```batch
-run/pc_start.bat  # Windows
-run/pc_start.sh   # Linux/macOS
+**Linux/macOS:**
+```bash
+./start.sh
 ```
 
-访问 `http://localhost:3000` 打开 Web 界面。
+**交互示例：**
+```
+您: 你好
+弥娅: 你好！很高兴见到你。我是弥娅，你的数字生命伴侣。
 
-**Web UI 模式（全新前端）:**
-```batch
-start.bat          # Windows - 选择菜单项 4
-./start.sh         # Linux/macOS - 选择菜单项 4
+您: 帮我写一个Python函数计算斐波那契数列
+弥娅: 好的，这是斐波那契数列的实现：
+[生成代码...]
+
+您: 查看当前目录
+弥娅: 让我查看一下当前目录...
+[执行终端命令]
 ```
 
-或直接启动：
+#### 2️⃣ Web 模式（推荐日常使用）
+
+**启动 Web API:**
 ```batch
-run/web_start.bat  # Windows
-./run/web_start.sh # Linux/macOS
+# Windows
+run/web_start.bat
+
+# Linux/macOS
+./run/web_start.sh
 ```
 
-访问 `http://localhost:5173` 打开新 Web 界面，`http://localhost:8000/docs` 查看 API 文档。
+**访问地址：**
+- 🌐 Web 界面：http://localhost:5173
+- 📚 API 文档：http://localhost:8000/docs
 
-**QQ 机器人模式:**
+**功能特性：**
+- 💬 现代化对话界面
+- 🎨 Live2D 虚拟形象展示
+- 📊 系统状态监控
+- 🧠 人格和情绪可视化
+- 🔧 配置管理
+- 📝 日志查看
+
+#### 3️⃣ 桌面模式（完整体验）
+
+**启动桌面应用：**
 ```batch
-run/qq_start.bat  # Windows
-run/qq_start.sh   # Linux/macOS
+# Windows
+cd miya-desktop
+npm install
+npm run dev
 ```
 
-⚠️ **注意**：QQ机器人需要 OneBot 服务支持（推荐 NapCat 或 go-cqhttp）
+**功能特性：**
+- 🖥️ 原生桌面窗口
+- 🎭 实时 Live2D 动画
+- 💬 实时对话交互
+- 🎨 自定义皮肤
+- 🔔 桌面通知
 
-### 首次运行
+#### 4️⃣ QQ 机器人模式（社交互动）
+
+**启动 QQ 机器人：**
+```batch
+# Windows
+run/qq_start.bat
+
+# Linux/macOS
+./run/qq_start.sh
+```
+
+⚠️ **注意**：需要先配置 OneBot 服务（推荐 NapCat 或 go-cqhttp）
+
+### 首次运行检查
 
 系统首次启动会自动：
-1. 创建虚拟环境（如不存在）
-2. 安装依赖包（约140+个）
-3. 初始化配置文件
-4. 生成唯一 UUID
-5. 创建数据目录（logs/、data/、volumes/）
+1. ✅ 创建虚拟环境（如不存在）
+2. ✅ 安装依赖包（约150+个）
+3. ✅ 初始化配置文件
+4. ✅ 生成唯一 UUID
+5. ✅ 创建数据目录（logs/、data/、volumes/）
+6. ✅ 初始化数据库（如果已配置）
+
+**验证系统状态：**
+```bash
+# 在终端模式输入
+status
+```
+
+你应该看到：
+```
+=== 弥娅系统状态 ===
+版本: v3.7.0
+UUID: [your-uuid]
+
+【人格状态】
+  形态: 平衡态
+  主导特质: 温暖
+
+【情绪状态】
+  主导情绪: 平静
+
+【多模型状态】
+  已加载: 6 个模型
+  默认: deepseek-chat
+
+【数据库状态】
+  Redis: 已连接
+  Milvus: 已连接
+  Neo4j: 已连接
+```
 
 ---
 
@@ -195,12 +375,28 @@ run/qq_start.sh   # Linux/macOS
 - 📄 **文件操作**：读取、写入、搜索文件
 - 🔍 **代码分析**：理解代码结构
 - 📊 **系统监控**：CPU、内存、磁盘使用情况
+- ⏰ **定时任务**：创建、删除、列出定时任务
 
 **工具特性：**
 - 🔒 **安全白名单**：只能执行允许的命令
 - 🔄 **跨平台适配**：自动适配不同操作系统
 - 📝 **执行记录**：记录所有工具调用历史
 - 🤖 **AI驱动**：AI理解需求并自动选择合适工具
+- 🧵 **后台执行**：定时任务在后台线程运行
+
+### 🔐 权限系统
+
+弥娅拥有完整的权限管理系统（AuthNet）：
+
+**权限模型：**
+- 👤 **用户管理**：添加、删除、列出用户
+- 👥 **角色管理**：创建、分配角色
+- 🔑 **权限管理**：细粒度的权限控制
+
+**权限检查：**
+- 自动检查用户权限
+- 支持权限继承
+- 权限缓存优化
 
 ### 🌐 跨平台支持
 
@@ -209,7 +405,8 @@ run/qq_start.sh   # Linux/macOS
 | 平台 | 状态 | 说明 | 推荐场景 |
 |--------|------|------|----------|
 | **终端** | ✅ 完整支持 | 命令行交互界面 | 开发调试 |
-| **PC WebUI** | ✅ 完整支持 | 基于 Electron 的桌面应用 | 日常使用 |
+| **Web UI** | ✅ 完整支持 | Vue 3 + FastAPI | 日常使用 |
+| **桌面应用** | ✅ 完整支持 | Electron + Live2D | 完整体验 |
 | **QQ机器人** | ✅ 完整支持 | 通过 OneBot 接入 QQ | 社交互动 |
 | **移动端** | 🚧 计划中 | 未来支持 | 移动办公 |
 
@@ -239,8 +436,8 @@ run/qq_start.sh   # Linux/macOS
 │                           用户界面层                                  │
 ├─────────────────────────────────────────────────────────────────────┤
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                │
-│  │  终端 UI    │  │  PC UI      │  │  QQ UI      │                │
-│  │  Terminal   │  │  WebUI      │  │  OneBot     │                │
+│  │  终端 UI    │  │  Web UI     │  │  桌面 UI    │                │
+│  │  Terminal   │  │  Vue 3     │  │  Electron   │                │
 │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘                │
 │         │                │                │                        │
 │         └────────────────┼────────────────┘                        │
@@ -257,6 +454,7 @@ run/qq_start.sh   # Linux/macOS
 │  │ • 情绪管理  │ │ • 感知流    │ │ • 注意力闸门│                  │
 │  │ • 决策引擎  │ │ • 同步流    │ │             │                  │
 │  │ • 任务调度  │ │ • 信任流    │ │             │                  │
+│  │ • 权限管理  │ │             │ │             │                  │
 │  └─────────────┘ └─────────────┘ └─────────────┘                  │
 │         │                                             │             │
 └─────────┼─────────────────────────────────────────────┼─────────────┘
@@ -294,6 +492,7 @@ Miya/
 │   ├── decision_hub.py     # 决策中枢（跨平台统一）
 │   ├── memory_engine.py    # 记忆引擎
 │   ├── emotion.py          # 情绪系统
+│   ├── scheduler.py        # 任务调度器
 │   └── ...
 ├── mlink/                 # M-Link 消息总线
 │   ├── mlink_core.py      # 消息路由核心
@@ -303,7 +502,8 @@ Miya/
 │   ├── MemoryNet/        # 记忆子系统
 │   ├── TerminalNet/      # 终端子系统
 │   ├── WebSearchNet/     # 搜索子系统
-│   └── ...
+│   ├── SchedulerNet/     # 定时任务子系统
+│   └── AuthNet/         # 权限管理子系统
 ├── memory/                # 记忆系统
 │   ├── grag_memory.py     # GRAG 记忆
 │   ├── semantic_dynamics_engine.py # 语义动态引擎
@@ -325,12 +525,17 @@ Miya/
 │   └── neo4j_client.py   # Neo4j 客户端
 ├── run/                  # 启动脚本
 │   ├── main.py           # 主程序（终端模式）
-│   ├── pc_start.bat      # PC 端启动
-│   └── qq_main.py        # QQ 机器人主程序
-├── pc_ui/                # PC 端界面
-│   ├── manager.html      # 管理面板
-│   ├── app.js           # 前端逻辑
-│   └── styles.css       # 样式
+│   ├── web_main.py       # Web API 主程序
+│   ├── desktop_main.py   # 桌面应用主程序
+│   └── ...
+├── miya-desktop/         # 桌面应用（Electron + Vue 3）
+│   ├── src/             # 源代码
+│   ├── public/          # 静态资源（Live2D 模型）
+│   └── ...
+├── miya-pc-ui/           # PC UI（Vue 3 + TDesign）
+│   ├── src/             # 源代码
+│   └── ...
+├── live2d/               # Live2D 模型文件
 ├── config/               # 配置文件
 │   ├── .env                    # 环境变量
 │   ├── multi_model_config.json  # 多模型配置
@@ -340,7 +545,6 @@ Miya/
 │   ├── miya_personality.json # 人设配置
 │   └── *.json           # 各类提示词
 ├── docs/                 # 开发文档
-│   ├── ARCHITECTURE_OVERVIEW.md # 架构总览
 │   └── ...
 ├── tests/                # 测试脚本
 │   └── ...
@@ -555,6 +759,27 @@ response = manager.generate(
 弥娅，帮我查看当前目录
 ```
 
+#### 定时任务
+
+弥娅支持创建和管理定时任务：
+
+```bash
+# 创建定时任务
+弥娅，一分钟后对我说"午安"
+
+# 列出所有任务
+列出所有定时任务
+
+# 删除任务
+删除任务 [任务ID]
+```
+
+**特性：**
+- ⏰ 精确定时
+- 🧵 后台执行
+- 🔄 终端模式完美支持
+- 📝 任务历史记录
+
 #### Web 搜索
 
 弥娅支持实时 Web 搜索，获取最新信息。
@@ -762,9 +987,9 @@ def fibonacci(n):
 !cd ~/Desktop   # 切换到桌面（路径自动展开）
 ```
 
-### PC WebUI 使用
+### Web 模式使用
 
-启动 PC WebUI 后，访问 `http://localhost:3000`：
+启动 Web 模式后，访问 `http://localhost:5173`：
 
 **功能：**
 - 💬 对话界面
@@ -772,6 +997,32 @@ def fibonacci(n):
 - 🧠 人格和情绪可视化
 - 🔧 配置管理
 - 📝 日志查看
+- 🎭 Live2D 虚拟形象
+
+### 桌面应用使用
+
+启动桌面应用后，您可以：
+- 🖥️ 享受原生桌面窗口体验
+- 🎭 观看实时 Live2D 动画
+- 💬 与弥娅进行实时对话
+- 🎨 自定义皮肤和主题
+- 🔔 接收桌面通知
+
+### 定时任务使用
+
+在终端模式中使用定时任务：
+
+```
+您: 测试一下定时任务，一分钟后对我说'午安。'
+弥娅: 已创建定时任务，将在1分钟后执行...
+
+[一分钟后]
+弥娅: 午安。
+
+您: 列出所有定时任务
+弥娅: 当前定时任务列表：
+1. ID: 12345, 时间: 2024-03-11 12:00:00, 消息: "午安。"
+```
 
 ### Web 搜索
 
@@ -791,8 +1042,8 @@ def fibonacci(n):
 您: status
 弥娅:
 === 弥娅系统状态 ===
-版本: v1.0.0
-UUID: 55575148-3f63-468a-9cc3-1ea6941b7062
+版本: v3.7.0
+UUID: [your-uuid]
 
 【人格状态】
   形态: 平衡态
@@ -817,6 +1068,9 @@ UUID: 55575148-3f63-468a-9cc3-1ea6941b7062
   Neo4j: 已连接
   Milvus: 已连接
   Redis: 已连接
+
+【定时任务状态】
+  运行中任务: 1
 ```
 
 ---
@@ -917,6 +1171,23 @@ REDIS_PORT=6379
 }
 ```
 
+### Live2D 配置
+
+配置文件：`avatar_config.yaml`
+
+```yaml
+# Live2D 虚拟形象配置
+avatar:
+  model: "修女"  # 模型名称
+  scale: 1.0     # 缩放比例
+  position:
+    x: 0
+    y: 0
+  animation:
+    idle: true
+    breathing: true
+```
+
 ---
 
 ## 📚 开发文档
@@ -928,12 +1199,15 @@ REDIS_PORT=6379
 - [架构总览](docs/ARCHITECTURE_OVERVIEW.md) - 完整的架构设计说明
 - [多模型快速开始](MULTI_MODEL_QUICK_START.md) - 多模型配置和使用指南
 - [终端工具指南](TERMINAL_TOOL_GUIDE.md) - 工具使用和配置
+- [桌面应用指南](miya-desktop/DESKTOP_LAUNCH_GUIDE.md) - 桌面应用使用说明
+- [Live2D 设置指南](miya-desktop/LIVE2D_QUICK_START.md) - Live2D 虚拟形象配置
 
 ### API 文档
 
 - [终端模式 API](docs/TERMINAL_API.md)
 - [PC 端 API](docs/PC_API.md)
 - [QQ 机器人 API](docs/QQ_API.md)
+- [Web API 文档](http://localhost:8000/docs) - 启动Web模式后访问
 
 ### 贡献指南
 
@@ -999,18 +1273,31 @@ python tests/test_multi_model_functionality.py
 !~/Desktop    # 路径会自动展开
 ```
 
-### Q6: 性能问题
+### Q6: 定时任务不执行
+
+**A**: 确保定时任务调度器已正确启动：
+
+```bash
+# 终端模式会自动启动后台调度器
+# 检查任务状态
+status
+
+# 列出所有任务
+列出所有定时任务
+```
+
+### Q7: 性能问题
 
 **A**: 弥娅的主要延迟来自 AI 模型调用（~500-2000ms）。如果需要更快的响应，可以：
 1. 使用更快的模型（如硅基流动的 fast 模型）
 2. 启用模型缓存
 3. 优化 prompt 长度
 
-### Q7: 为什么不是分布式架构？
+### Q8: 为什么不是分布式架构？
 
 **A**: 弥娅采用模块化单体架构，所有组件在同一进程中运行。这种设计具有低延迟、简单易用、调试方便的优势，适合中小规模应用。
 
-### Q8: 如何备份和恢复数据？
+### Q9: 如何备份和恢复数据？
 
 **A**: 重要数据包括：
 - `logs/` - 日志文件
@@ -1019,7 +1306,7 @@ python tests/test_multi_model_functionality.py
 
 备份这些目录即可。恢复时复制回原位置即可。
 
-### Q9: 如何重置人格和情绪？
+### Q10: 如何重置人格和情绪？
 
 **A**: 删除以下文件：
 ```bash
@@ -1034,6 +1321,22 @@ rm -rf logs/memory/*.json
 ```
 
 重启系统即可重置。
+
+### Q11: Live2D 模型如何添加？
+
+**A**: 参考文档 [Live2D 快速开始](miya-desktop/LIVE2D_QUICK_START.md)
+
+1. 将 Live2D 模型文件夹放入 `miya-desktop/public/live2d/` 目录
+2. 更新 `avatar_config.yaml` 配置文件
+3. 重启桌面应用
+
+### Q12: Web 模式无法访问
+
+**A**: 检查以下项目：
+1. 确保已启动 Web 服务器：`run/web_start.bat`
+2. 检查端口是否被占用：`netstat -ano | findstr :5173`
+3. 检查防火墙设置
+4. 尝试访问 API 文档：http://localhost:8000/docs
 
 ---
 
@@ -1059,6 +1362,8 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
 - **[系统分析文档](MIYA_SYSTEM_ANALYSIS.md)** - 完整的系统分析、架构和功能详解
 - **[配置指南](CONFIGURATION_GUIDE.md)** - 详细的配置说明，包括模型配置
 - **[README](README.md)** - 本文件
+- **[桌面应用指南](miya-desktop/DESKTOP_LAUNCH_GUIDE.md)** - 桌面应用使用说明
+- **[Live2D 快速开始](miya-desktop/LIVE2D_QUICK_START.md)** - Live2D 虚拟形象配置
 
 ---
 
@@ -1089,23 +1394,65 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
 - 自主引擎与人格系统集成
 - 向量存储与检索优化
 - Web 界面开发
+- 定时任务系统实现
+- JSON 智能修复算法
+- 权限系统设计与实现
 
 ---
 
 ## 🎯 路线图
 
-### v1.1 (计划中)
-- [ ] 更多 AI 模型支持（Claude、GPT-4 等）
-- [ ] 移动端支持
-- [ ] 语音交互
-- [ ] 多语言支持
+### v3.8 (计划中)
+- [ ] 更多 Live2D 模型支持
+- [ ] 语音交互功能
+- [ ] 插件系统扩展
+- [ ] 性能优化
 
-### v2.0 (规划中)
-- [ ] 插件市场
-- [ ] 社区模型分享
-- [ ] 云端同步
+### v4.0 (规划中)
+- [ ] 移动端支持（Android/iOS）
+- [ ] 多语言支持
+- [ ] 云端同步功能
+- [ ] 社区模型市场
 - [ ] 协作功能
 
 ---
 
+## 📋 更新日志
+
+### v3.7.0 (2026-03-11)
+- ✅ 新增定时任务系统
+- ✅ 实现后台调度器
+- ✅ 增强 JSON 智能修复
+- ✅ 完成权限系统（AuthNet）
+- ✅ 桌面应用（Miya Desktop）
+- ✅ 全新 Web UI（Vue 3 + FastAPI）
+- ✅ Live2D 虚拟形象集成
+- ✅ 跨平台终端工具优化
+
+### v3.0.0
+- ✅ 多模型智能调度
+- ✅ 动态人格系统
+- ✅ 情绪系统
+- ✅ 多层记忆系统
+
+### v2.0.0
+- ✅ 工具系统
+- ✅ Web 搜索
+- ✅ 跨平台支持
+
+### v1.0.0
+- ✅ 基础架构
+- ✅ 终端模式
+- ✅ QQ 机器人模式
+
+---
+
 **弥娅 - 不仅是AI，更是伙伴** 🤖💕
+
+---
+
+## 🌟 Star History
+
+如果这个项目对你有帮助，请给它一个 ⭐️ Star！
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Jia-520-only/Miya&type=Date)](https://star-history.com/#Jia-520-only/Miya&Date)
