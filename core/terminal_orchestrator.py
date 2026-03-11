@@ -9,13 +9,17 @@ import json
 from typing import Dict, List, Optional
 from .local_terminal_manager import LocalTerminalManager
 from .terminal_types import TerminalType, CommandResult
+from .ai_backend import AIBackend, create_ai_backend
 
 class IntelligentTerminalOrchestrator:
     """智能终端编排器"""
     
-    def __init__(self):
+    def __init__(self, ai_config: Dict = None):
         self.terminal_manager = LocalTerminalManager()
         self.context = {}
+        
+        # 初始化AI后端
+        self.ai_backend = create_ai_backend(ai_config) if ai_config else None
     
     async def smart_execute(
         self,
@@ -146,7 +150,11 @@ class IntelligentTerminalOrchestrator:
         """
         
         # AI分析任务
-        plan = await self._plan_collaborative_task(task_description)
+        if self.ai_backend:
+            plan = await self.ai_backend.plan_collaborative_task(task_description)
+        else:
+            # 使用简化规划
+            plan = await self._plan_collaborative_task(task_description)
         
         print(f"\n[弥娅] 协同任务规划")
         print(f"  目标: {task_description}")
