@@ -1,0 +1,27 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "礼服御姐.moc3",
+		"Textures": [
+			"礼服御姐.4096/texture_00.png",
+			"礼服御姐.4096/texture_01.png",
+			"礼服御姐.4096/texture_02.png",
+			"礼服御姐.4096/texture_03.png",
+			"礼服御姐.4096/texture_04.png"
+		],
+		"Physics": "礼服御姐.physics3.json",
+		"DisplayInfo": "礼服御姐.cdi3.json"
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		},
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": []
+		}
+	]
+}

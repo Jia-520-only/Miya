@@ -10,7 +10,7 @@ from webnet.tools.base import BaseTool, ToolContext
 logger = logging.getLogger(__name__)
 
 
-class SendMessage(BaseTool):
+class SendMessageTool(BaseTool):
     """发送消息工具"""
 
     @property

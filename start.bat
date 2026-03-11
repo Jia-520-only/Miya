@@ -33,21 +33,23 @@ echo ========================================
 echo.
 echo 1. Start Main Program (Full Mode)
 echo 2. Start QQ Bot
-echo 3. Start PC UI
-echo 4. Start Runtime API Server
-echo 5. Start Health Check
-echo 6. Check System Status
-echo 7. Exit
+echo 3. Start Web UI (Frontend + Backend)
+echo 4. Start Desktop UI (Electron)
+echo 5. Start Runtime API Server
+echo 6. Start Health Check
+echo 7. Check System Status
+echo 8. Exit
 echo.
-set /p choice=Select mode (1-7):
+set /p choice=Select mode (1-8):
 
 if "%choice%"=="1" goto main
 if "%choice%"=="2" goto qq
-if "%choice%"=="3" goto pc
-if "%choice%"=="4" goto api
-if "%choice%"=="5" goto health
-if "%choice%"=="6" goto status
-if "%choice%"=="7" goto end
+if "%choice%"=="3" goto web
+if "%choice%"=="4" goto desktop
+if "%choice%"=="5" goto api
+if "%choice%"=="6" goto health
+if "%choice%"=="7" goto status
+if "%choice%"=="8" goto end
 
 echo [ERROR] Invalid choice
 pause
@@ -76,18 +78,27 @@ echo.
 "%PYTHON_EXE%" run/qq_main.py
 goto end
 
-:pc
+:web
 echo.
-echo [Starting] PC UI...
+echo [Starting] Web UI (Frontend + Backend)...
 echo.
-"%PYTHON_EXE%" pc_ui/main.py
+"%PYTHON_EXE%" run/web_main.py
+goto end
+
+:desktop
+echo.
+echo [Starting] Desktop UI (Electron)...
+echo.
+echo [Info] Starting Miya Desktop...
+echo.
+"%PYTHON_EXE%" run/desktop_main.py
 goto end
 
 :api
 echo.
 echo [Starting] Runtime API Server...
 echo.
-"%PYTHON_EXE%" -c "from core.runtime_api_server import RuntimeAPIServer; import asyncio; server = RuntimeAPIServer(); asyncio.run(server.start())"
+"%PYTHON_EXE%" run/runtime_api_start.py
 goto end
 
 :health

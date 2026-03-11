@@ -116,6 +116,10 @@ class Miya:
 
         # 【框架一致性】终端工具由 DecisionHub 管理,不在这里初始化
 
+        # 【WebNet】初始化 Web 子网
+        self.web_net = None
+        self._init_web_net()
+
         # 初始化 AI 客户端
         self.ai_client = self._init_ai_client()
 
@@ -137,7 +141,8 @@ class Miya:
             onebot_client=None,
             game_mode_adapter=None,
             identity=self.identity,
-            multi_model_manager=getattr(self, 'multi_model_manager', None)  # 传递多模型管理器
+            multi_model_manager=getattr(self, 'multi_model_manager', None),  # 传递多模型管理器
+            miya_instance=self  # 传递miya实例，用于获取系统状态
         )
 
         # 初始化平台适配器
@@ -152,6 +157,10 @@ class Miya:
         )
         self.autonomy_with_personality.initialize()
         self.logger.info("✅ 自主能力已初始化（含人设集成）")
+
+        # 【WebNet】初始化 Web API 路由器
+        self.web_api = None
+        self._init_web_api()
 
         self.logger.info("弥娅系统初始化完成（含跨平台支持）")
         self.identity.awake()
@@ -251,6 +260,20 @@ class Miya:
         except Exception as e:
             self.logger.warning(f"ToolNet 子网初始化失败: {e}", exc_info=True)
             self.tool_subnet = None
+
+    def _init_web_net(self):
+        """初始化 WebNet 子网"""
+        try:
+            from webnet.webnet import WebNet
+
+            self.web_net = WebNet(
+                memory_engine=self.memory_engine,
+                emotion_manager=self.emotion
+            )
+            self.logger.info("WebNet 子网初始化成功")
+        except Exception as e:
+            self.logger.warning(f"WebNet 初始化失败（可选模块）: {e}")
+            self.web_net = None
 
     def _init_memory_system(self):
         """初始化全局记忆系统 (M-Link + MemoryNet)"""
@@ -430,6 +453,24 @@ class Miya:
             self.embedding_client = None
             self.vector_cache = None
             self.semantic_engine = None
+
+    def _init_web_api(self):
+        """初始化 Web API 路由器"""
+        try:
+            from core.web_api import create_web_api
+
+            self.web_api = create_web_api(
+                web_net=self.web_net,
+                decision_hub=self.decision_hub
+            )
+            
+            if self.web_api:
+                self.logger.info("Web API 路由器初始化成功")
+            else:
+                self.logger.warning("FastAPI 不可用，Web API 功能将被禁用")
+        except Exception as e:
+            self.logger.warning(f"Web API 初始化失败（可选模块）: {e}")
+            self.web_api = None
 
     def _init_neo4j_system(self):
         """初始化Neo4j知识图谱系统"""
@@ -615,6 +656,21 @@ def main():
         print("输入 'exit' 或 '退出' 退出程序")
         print()
 
+        # 启动定时任务调度器
+        if miya.scheduler:
+            try:
+                # 设置终端回调，用于在终端模式下输出提醒
+                async def terminal_callback(message: str):
+                    print(f"\n【定时提醒】 {message}\n佳: ")
+
+                miya.scheduler.terminal_callback = terminal_callback
+
+                # 在后台线程中启动调度器
+                miya.scheduler.start_background()
+                print("[系统] 定时任务调度器已启动（后台运行）")
+            except Exception as e:
+                print(f"[警告] 定时任务调度器启动失败: {e}")
+
         # 交互循环
         while True:
             try:
@@ -747,20 +803,82 @@ def main():
                 # 处理输入
                 import sys
                 import time
+                import re
                 
                 print(f"{miya.identity.name}: ", end="", flush=True)
                 
                 # 获取响应（假设返回是完整文本）
                 response = miya.process_input(user_input)
                 
-                # 流式输出效果：按字符逐个打印
-                for char in response:
-                    sys.stdout.write(char)
-                    sys.stdout.flush()
-                    # 控制输出速度
-                    time.sleep(0.01)
+                # 智能输出函数：根据内容长度和类型自动选择输出方式
+                def smart_print_response(content: str):
+                    """
+                    智能输出响应内容
+                    
+                    判断逻辑：
+                    1. 内容长度 < 200字符：直接打印
+                    2. 内容长度 >= 200字符：流式输出
+                    3. 检测到列表/表格：直接打印
+                    4. 检测到状态信息（多行简短内容）：直接打印
+                    
+                    Args:
+                        content: 响应内容
+                    """
+                    if not content:
+                        return
+                    
+                    # 判断条件1：内容长度
+                    content_length = len(content)
+                    
+                    # 判断条件2：是否为列表（检查是否以 - 或 * 或数字. 开头）
+                    is_list = bool(re.search(r'^(\s*[-*•]|\s*\d+\.)', content, re.MULTILINE))
+                    
+                    # 判断条件3：是否为表格（检查是否包含 | 或 + 或 - 的重复模式）
+                    is_table = bool(re.search(r'\|.+\|', content)) or bool(re.search(r'^[+-]{3,}', content, re.MULTILINE))
+                    
+                    # 判断条件4：是否为状态信息（多行，每行较短，包含 : ）
+                    lines = content.split('\n')
+                    is_status = (
+                        len(lines) > 3 and  # 多于3行
+                        all(len(line.strip()) < 100 for line in lines[:5]) and  # 前几行较短
+                        any(':' in line for line in lines[:5])  # 包含冒号
+                    )
+                    
+                    # 判断条件5：是否为代码块（包含 ``` ）
+                    is_code_block = '```' in content
+                    
+                    # 判断条件6：是否包含换行（多行内容）
+                    has_multiple_lines = '\n' in content
+                    
+                    # 决策：是否应该直接打印
+                    # 阈值设置：
+                    # - < 150字符：直接打印（非常短）
+                    # - 150-300字符：如果是列表/表格/状态/代码块则直接打印，否则流式
+                    # - > 300字符：流式输出（很长）
+                    if content_length < 150:
+                        # 非常短的内容：直接打印
+                        should_print_directly = True
+                    elif content_length > 300:
+                        # 很长的内容：流式输出（除非是指令性内容）
+                        should_print_directly = (is_list or is_table or is_status or is_code_block)
+                    else:
+                        # 中等长度：根据内容类型决定
+                        should_print_directly = (is_list or is_table or is_status or is_code_block)
+                    
+                    if should_print_directly:
+                        # 直接打印（适合短内容、列表、表格、状态信息）
+                        print(content)
+                    else:
+                        # 流式输出（适合长文本、故事、解释）
+                        for char in content:
+                            sys.stdout.write(char)
+                            sys.stdout.flush()
+                            # 控制输出速度
+                            time.sleep(0.01)
                 
-                print()  # 换行
+                # 使用智能输出
+                smart_print_response(response)
+                
                 print()  # 空行
 
             except KeyboardInterrupt:

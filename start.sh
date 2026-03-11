@@ -31,17 +31,18 @@ while true; do
     echo "  MIYA - Launch Menu"
     echo "========================================"
     echo ""
-    echo "1. Start Main Program (Full Mode)"
-    echo "2. Start QQ Bot"
-    echo "3. Start PC UI"
-    echo "4. Start Runtime API Server"
-    echo "5. Start Health Check"
-    echo "6. Check System Status"
-    echo "7. Exit"
-    echo ""
-    read -p "Select mode (1-7): " choice
+echo "1. Start Main Program (Full Mode)"
+echo "2. Start QQ Bot"
+echo "3. Start PC UI"
+echo "4. Start Desktop UI (Electron)"
+echo "5. Start Runtime API Server"
+echo "6. Start Health Check"
+echo "7. Check System Status"
+echo "8. Exit"
+echo ""
+read -p "Select mode (1-8): " choice
 
-    case $choice in
+case $choice in
         1)
             echo ""
             echo "[Starting] Main Program (Full Mode)..."
@@ -67,26 +68,33 @@ while true; do
             ;;
         3)
             echo ""
-            echo "[Starting] PC UI..."
+            echo "[Starting] Web UI (Frontend + Backend)..."
             echo ""
-            python pc_ui/main.py
+            python run/web_main.py
             break
             ;;
         4)
             echo ""
-            echo "[Starting] Runtime API Server..."
+            echo "[Starting] Desktop UI (Electron)..."
             echo ""
-            python -c "from core.runtime_api_server import RuntimeAPIServer; import asyncio; server = RuntimeAPIServer(); asyncio.run(server.start())"
+            python run/desktop_main.py
             break
             ;;
         5)
+            echo ""
+            echo "[Starting] Runtime API Server..."
+            echo ""
+            python run/runtime_api_start.py
+            break
+            ;;
+        6)
             echo ""
             echo "[Starting] Health Check..."
             echo ""
             python run/health.py
             break
             ;;
-        6)
+        7)
             echo ""
             echo "[Status] System Status Check..."
             echo ""
@@ -94,7 +102,7 @@ while true; do
             echo ""
             read -p "Press Enter to continue..."
             ;;
-        7)
+        8)
             echo ""
             echo "[Done] Exiting..."
             exit 0

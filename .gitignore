@@ -78,3 +78,42 @@ temp/
 # OS
 Thumbs.db
 .DS_Store
+
+# User Data
+userData/
+
+# Cache
+Cache/
+
+# Live2D cached files
+*.cache
+*.cdi3.json
+*.physics3.json
+*.vtube.json
+*.exp3.json
+
+# Desktop build
+miya-desktop/dist/
+miya-desktop/node_modules/
+miya-desktop/.vite/
+
+# PC UI build
+miya-pc-ui/node_modules/
+miya-pc-ui/dist/
+miya-pc-ui/.vite/
+
+# npm
+package-lock.json
+
+# Temporary files
+$null
+0.25.0
+0.27.0
+2.0.0
+2.8.0
+3.0.0
+3.1.0
+3.1.5
+3.7.0
+4.0.0
+41.0.0

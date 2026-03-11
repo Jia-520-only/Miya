@@ -9,7 +9,7 @@ from webnet.tools.base import BaseTool, ToolContext
 logger = logging.getLogger(__name__)
 
 
-class GetRecentMessages(BaseTool):
+class GetRecentMessagesTool(BaseTool):
     """获取历史消息工具"""
 
     @property

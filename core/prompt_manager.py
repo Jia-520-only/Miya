@@ -26,6 +26,7 @@ class PromptManager:
         self.user_prompt_template = "用户输入：{user_input}"
         self.memory_context_enabled = False
         self.memory_context_max_count = 5
+        self._custom_system_prompt = None  # 自定义系统提示词
 
         # 加载配置
         self._load_from_config()
@@ -35,6 +36,9 @@ class PromptManager:
 
     def _load_from_config(self):
         """从配置文件加载提示词设置"""
+        import logging
+        logger = logging.getLogger(__name__)
+
         try:
             if self.config_path.exists():
                 import os
@@ -46,8 +50,19 @@ class PromptManager:
                 self.memory_context_enabled = os.getenv('ENABLE_MEMORY_CONTEXT', 'false').lower() == 'true'
                 self.memory_context_max_count = int(os.getenv('MEMORY_CONTEXT_MAX_COUNT', '5'))
 
+                # 加载自定义系统提示词
+                custom_prompt = os.getenv('SYSTEM_PROMPT', '').strip()
+                if custom_prompt:
+                    # 处理 \n 转义符和真正的换行符
+                    self._custom_system_prompt = custom_prompt.replace('\\n', '\n')
+                    logger.info(f"[PromptManager] 已加载自定义系统提示词，长度: {len(self._custom_system_prompt)}")
+                else:
+                    # 如果 .env 中没有自定义提示词，尝试从 prompts/default.txt 加载
+                    logger.info(f"[PromptManager] .env 中未找到自定义系统提示词，将尝试从 prompts 目录加载")
+                    pass
+
         except Exception as e:
-            print(f"警告：加载提示词配置失败，使用默认值。错误：{e}")
+            logger.warning(f"警告：加载提示词配置失败，使用默认值。错误：{e}")
 
     def _load_mode_prompt(self, prompt_key: str) -> Optional[str]:
         """
@@ -144,7 +159,16 @@ class PromptManager:
         Returns:
             系统提示词（基础提示词 + 动态人格描述）
         """
-        base_prompt = self._get_default_system_prompt()
+        # 优先使用自定义系统提示词
+        if self._custom_system_prompt:
+            base_prompt = self._custom_system_prompt
+        else:
+            # 尝试从 prompts/default.txt 加载
+            default_prompt = self._load_mode_prompt('default')
+            if default_prompt:
+                base_prompt = default_prompt
+            else:
+                base_prompt = self._get_default_system_prompt()
 
         # 如果有人格实例，添加动态人格描述
         if self.personality:
@@ -296,43 +320,30 @@ class PromptManager:
         self,
         user_input: str,
         memory_context: Optional[List[Dict]] = None,
-        additional_context: Optional[Dict] = None,
-        prompt_key: str = "default"
+        additional_context: Optional[Dict] = None
     ) -> Dict[str, str]:
         """
         构建完整的提示词（系统提示词 + 用户提示词 + 上下文）
         人格信息直接从绑定的人格实例获取，确保动态同步
-        支持游戏模式提示词切换
+        统一使用默认提示词，通过上下文传递平台信息
 
         Args:
             user_input: 用户输入
             memory_context: 记忆上下文（可选）
-            additional_context: 额外上下文（可选）
-            prompt_key: 提示词key（用于游戏模式，如 'trpg_kp', 'tavern_miya'）
+            additional_context: 额外上下文（可选，包含 platform, user_id, sender_name 等）
 
         Returns:
             包含系统提示词和用户提示词的字典
         """
-        # 尝试加载特定模式的提示词
         import logging
         logger = logging.getLogger(__name__)
-        
-        mode_prompt = self._load_mode_prompt(prompt_key)
 
-        if mode_prompt:
-            # 使用游戏模式的提示词
-            system_prompt = mode_prompt
-            logger.info(f"[PromptManager] 使用游戏模式提示词: {prompt_key}")
-        else:
-            # 使用默认系统提示词（自动包含动态人格）
-            system_prompt = self.get_system_prompt()
-            logger.info(f"[PromptManager] 使用默认提示词 (prompt_key={prompt_key} 无效)")
+        # 统一使用默认系统提示词（自动包含动态人格）
+        system_prompt = self.get_system_prompt()
+        logger.info(f"[PromptManager] 使用默认提示词，平台: {additional_context.get('platform', 'unknown') if additional_context else 'unknown'}")
 
         # 替换系统提示词中的占位符（支持Jinja2模板）
         if additional_context:
-            import logging
-            logger = logging.getLogger(__name__)
-
             # 检查是否包含Jinja2语法
             if '{%' in system_prompt or '{{' in system_prompt:
                 # 使用Jinja2模板渲染

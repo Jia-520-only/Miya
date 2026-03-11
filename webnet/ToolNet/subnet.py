@@ -125,7 +125,7 @@ class ToolSubnet:
         # 创建执行上下文
         context = ToolContext(
             memory_engine=self.config.memory_engine,
-            cognitive_memory=self.config.cognitive_memory,
+            unified_memory=self.config.memory_engine,  # 使用 memory_engine 作为 unified_memory
             onebot_client=self.config.onebot_client,
             scheduler=self.config.scheduler,
             lifenet=lifenet,

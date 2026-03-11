@@ -11,7 +11,7 @@ from webnet.tools.base import BaseTool, ToolContext
 logger = logging.getLogger(__name__)
 
 
-class SendTextFile(BaseTool):
+class SendTextFileTool(BaseTool):
     """发送文本文件工具"""
 
     @property

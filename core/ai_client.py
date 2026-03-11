@@ -594,7 +594,61 @@ class DeepSeekClient(BaseAIClient):
 
                     # 解析工具参数（使用 JSON 而不是 eval）
                     arguments_str = tool_call.function.arguments
-                    tool_args = json.loads(arguments_str)
+
+                    # 尝试解析 JSON，如果失败则尝试修复
+                    try:
+                        tool_args = json.loads(arguments_str)
+                    except json.JSONDecodeError as e:
+                        logger.error(f"[AIClient] JSON解析失败: {arguments_str}")
+                        logger.error(f"[AIClient] 错误详情: {e}")
+
+                        fixed_str = arguments_str
+
+                        # 修复常见的 JSON 格式问题
+                        try:
+                            # 1. 移除末尾多余的逗号
+                            fixed_str = fixed_str.rstrip(', ')
+                        except Exception:
+                            pass
+
+                        try:
+                            tool_args = json.loads(fixed_str)
+                            logger.info(f"[AIClient] JSON修复成功（移除逗号）")
+                        except Exception as e2:
+                            # 2. 尝试修复中文值没有引号的问题（如 "target_id": 用户 -> "target_id": "用户"）
+                            import re
+                            try:
+                                # 匹配 "key": 值（值是中文或英文但没有引号）
+                                def add_quotes(match):
+                                    key_part = match.group(1)
+                                    value_part = match.group(2)
+                                    # 如果值不包含引号，则添加引号
+                                    if '"' not in value_part:
+                                        value_part = '"' + value_part + '"'
+                                    return key_part + value_part
+
+                                fixed_str2 = re.sub(
+                                    r'("[\w\u4e00-\u9fa5]+":\s*)([\w\u4e00-\u9fa5]+)',
+                                    add_quotes,
+                                    fixed_str
+                                )
+                                tool_args = json.loads(fixed_str2)
+                                logger.info(f"[AIClient] JSON修复成功（修复中文值）: {fixed_str2}")
+                            except Exception as e3:
+                                logger.error(f"[AIClient] JSON修复也失败: {e2}, {e3}")
+                                # 即使JSON解析失败，也要添加工具响应消息，避免API报错
+                                error_result = json.dumps({
+                                    "success": False,
+                                    "error": f"JSON解析失败: {e}",
+                                    "raw_arguments": arguments_str
+                                }, ensure_ascii=False)
+                                current_messages.append(AIMessage(
+                                    role="tool",
+                                    content=error_result,
+                                    tool_call_id=tool_call.id
+                                ))
+                                continue
+
                     logger.info(f"[AIClient] 工具调用: {tool_call.function.name}, 参数: {tool_args}")
 
                     result = await adapter.execute_tool(

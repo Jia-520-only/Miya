@@ -110,10 +110,16 @@ class ToolRegistry:
         args: Dict[str, Any],
         context: ToolContext
     ) -> str:
-        """执行工具"""
+        """执行工具（含权限检查）"""
         tool = self.get_tool(name)
         if not tool:
             return f"❌ 工具不存在: {name}"
+
+        # 【新增】权限检查
+        permission_check = await self._check_tool_permission(name, context)
+        if not permission_check['allowed']:
+            self.logger.warning(f"[权限拒绝] 用户 {context.user_id} 尝试执行工具 {name}，缺少权限")
+            return f"❌ 权限不足：执行工具 '{name}' 需要权限 '{permission_check['required_permission']}'"
 
         try:
             # 验证参数
@@ -127,6 +133,77 @@ class ToolRegistry:
         except Exception as e:
             self.logger.error(f"执行工具失败 {name}: {e}", exc_info=True)
             return f"❌ 工具执行失败: {str(e)}"
+
+    async def _check_tool_permission(
+        self,
+        tool_name: str,
+        context: ToolContext
+    ) -> Dict[str, Any]:
+        """
+        检查用户是否有执行工具的权限
+
+        Args:
+            tool_name: 工具名称
+            context: 工具执行上下文
+
+        Returns:
+            包含 allowed 和 required_permission 的字典
+        """
+        try:
+            # 从 AuthNet 获取权限核心
+            from webnet.AuthNet.permission_core import PermissionCore
+            from webnet.AuthNet.user_mapper import UserMapper
+
+            # 确定用户ID和平台
+            user_id = getattr(context, 'user_id', None) or getattr(context, 'superadmin', None)
+            platform = getattr(context, 'platform', 'terminal')
+
+            if user_id is None:
+                # 没有用户ID，允许执行（可能是系统调用）
+                return {'allowed': True, 'required_permission': None}
+
+            # 生成统一用户ID
+            user_mapper = UserMapper()
+            platform = self._detect_platform_from_context(context)
+            unified_user_id = user_mapper.generate_user_id(platform, str(user_id))
+
+            # 构建权限节点
+            required_permission = f"tool.{tool_name}"
+
+            # 检查权限
+            perm_core = PermissionCore()
+            has_permission = perm_core.check_permission(unified_user_id, required_permission)
+
+            # 如果没有直接权限，检查是否是超级管理员
+            if not has_permission:
+                # 尝试系统管理员
+                has_permission = perm_core.check_permission('system_admin', required_permission)
+
+            return {
+                'allowed': has_permission,
+                'required_permission': required_permission,
+                'user_id': unified_user_id
+            }
+
+        except Exception as e:
+            # 权限检查失败时，允许执行（降级处理）
+            self.logger.warning(f"[权限检查异常] {e}，允许执行")
+            return {'allowed': True, 'required_permission': None, 'error': str(e)}
+
+    def _detect_platform_from_context(self, context: ToolContext) -> str:
+        """从上下文检测平台类型"""
+        # 尝试从多个属性检测平台
+        if hasattr(context, 'platform'):
+            return context.platform
+
+        # 根据消息类型或其他属性推断
+        if hasattr(context, 'message_type'):
+            if context.message_type == 'private':
+                return 'qq'  # 默认为QQ
+            elif context.message_type == 'group':
+                return 'qq'
+
+        return 'terminal'  # 默认平台
 
     def clear(self):
         """清空注册表"""
@@ -149,6 +226,7 @@ class ToolRegistry:
         self._load_game_mode_tools()
         self._load_lifenet_tools()
         self._load_web_search_tools()  # 新增：加载 Web 搜索工具
+        self._load_visualization_tools()  # 新增：加载可视化工具
         # 注意：查询工具已在 _load_entertainment_tools() 中加载
 
     def _load_basic_tools(self):
@@ -169,15 +247,15 @@ class ToolRegistry:
 
     def _load_message_tools(self):
         """加载消息工具"""
-        from webnet.MessageNet.tools.send_message import SendMessage
-        from webnet.MessageNet.tools.get_recent_messages import GetRecentMessages
-        from webnet.MessageNet.tools.send_text_file import SendTextFile
-        from webnet.MessageNet.tools.send_url_file import SendUrlFile
+        from webnet.MessageNet.tools.send_message import SendMessageTool
+        from webnet.MessageNet.tools.get_recent_messages import GetRecentMessagesTool
+        from webnet.MessageNet.tools.send_text_file import SendTextFileTool
+        from webnet.MessageNet.tools.send_url_file import SendUrlFileTool
 
-        self.register(SendMessage())
-        self.register(GetRecentMessages())
-        self.register(SendTextFile())
-        self.register(SendUrlFile())
+        self.register(SendMessageTool())
+        self.register(GetRecentMessagesTool())
+        self.register(SendTextFileTool())
+        self.register(SendUrlFileTool())
 
     def _load_group_tools(self):
         """加载群工具"""
@@ -236,13 +314,13 @@ class ToolRegistry:
 
     def _load_scheduler_tools(self):
         """加载定时任务工具"""
-        from webnet.SchedulerNet.tools.create_schedule_task import CreateScheduleTask
-        from webnet.SchedulerNet.tools.list_schedule_tasks import ListScheduleTasks
-        from webnet.SchedulerNet.tools.delete_schedule_task import DeleteScheduleTask
+        from webnet.SchedulerNet.tools.create_schedule_task import CreateScheduleTaskTool
+        from webnet.SchedulerNet.tools.list_schedule_tasks import ListScheduleTasksTool
+        from webnet.SchedulerNet.tools.delete_schedule_task import DeleteScheduleTaskTool
 
-        self.register(CreateScheduleTask())
-        self.register(ListScheduleTasks())
-        self.register(DeleteScheduleTask())
+        self.register(CreateScheduleTaskTool())
+        self.register(ListScheduleTasksTool())
+        self.register(DeleteScheduleTaskTool())
 
     def _load_tavern_tools(self):
         """加载酒馆工具"""
@@ -392,6 +470,19 @@ class ToolRegistry:
             self.logger.info("已加载 Web 搜索工具")
         except Exception as e:
             self.logger.warning(f"加载 Web 搜索工具失败: {e}")
+
+    def _load_visualization_tools(self):
+        """加载可视化工具（数据分析、图表生成）"""
+        try:
+            from tools.visualization.data_analyzer import DataAnalyzer
+            from tools.visualization.chart_generator import ChartGenerator
+
+            self.register(DataAnalyzer())
+            self.register(ChartGenerator())
+
+            self.logger.info("已加载可视化工具")
+        except Exception as e:
+            self.logger.warning(f"加载可视化工具失败: {e}")
 
     def _load_lifenet_tools(self):
         """加载 LifeNet 记忆管理工具"""

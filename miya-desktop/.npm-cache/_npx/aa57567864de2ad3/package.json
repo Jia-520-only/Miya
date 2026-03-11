@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "electron-vite": "^5.0.0"
+  },
+  "_npx": {
+    "packages": [
+      "electron-vite"
+    ]
+  }
+}

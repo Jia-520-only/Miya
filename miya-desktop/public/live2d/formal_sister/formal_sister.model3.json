@@ -1,0 +1,27 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "formal_sister.moc3",
+		"Textures": [
+			"formal_sister.4096/texture_00.png",
+			"formal_sister.4096/texture_01.png",
+			"formal_sister.4096/texture_02.png",
+			"formal_sister.4096/texture_03.png",
+			"formal_sister.4096/texture_04.png"
+		],
+		"Physics": "formal_sister.physics3.json",
+		"DisplayInfo": "formal_sister.cdi3.json"
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		},
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": []
+		}
+	]
+}

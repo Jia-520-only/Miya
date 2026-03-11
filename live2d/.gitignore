@@ -1,0 +1,45 @@
+# Live2D模型库 - Git忽略配置
+
+# 临时文件
+*.tmp
+*.temp
+*.log
+*.cache
+
+# 编辑器文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 测试文件
+test_*
+*_test.*
+*.test.*
+
+# 备份文件
+*.bak
+*.backup
+*.old
+
+# 压缩文件（如果是生成的）
+*.zip
+*.rar
+*.7z
+
+# 注意：不要忽略Live2D模型文件！
+# 以下文件会被Git跟踪：
+# - *.model3.json
+# - *.moc3
+# - *.physics3.json
+# - *.cdi3.json
+# - *.exp3.json
+# - *.png
+# - *.jpg
+# - *.jpeg

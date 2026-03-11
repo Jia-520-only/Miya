@@ -1,0 +1,59 @@
+{
+  "name": "miya-pc-ui",
+  "version": "1.0.0",
+  "description": "弥娅 PC UI 端",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "vite",
+    "dev:renderer": "vite",
+    "dev:main": "tsc -p tsconfig.main.json && electron dist/main/index.js",
+    "dev:web": "vite",
+    "build": "npm run build:renderer && npm run build:main",
+    "build:renderer": "vite build",
+    "build:main": "tsc -p tsconfig.main.json",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.20.0",
+    "zustand": "^4.4.7",
+    "axios": "^1.6.2",
+    "recharts": "^2.10.3",
+    "chart.js": "^4.4.0",
+    "react-chartjs-2": "^5.2.0",
+    "clsx": "^2.0.0",
+    "tailwind-merge": "^2.0.0",
+    "react-markdown": "^9.0.1",
+    "pixi-live2d-display": "^0.4.0",
+    "pixi.js": "^7.3.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.43",
+    "@types/react-dom": "^18.2.17",
+    "@types/node": "^20.10.5",
+    "@vitejs/plugin-react": "^4.2.1",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.8",
+    "vite-plugin-electron": "^0.28.0",
+    "vite-plugin-electron-renderer": "^0.14.5",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "concurrently": "^8.2.2",
+    "monaco-editor": "^0.45.0",
+    "@monaco-editor/react": "^4.6.0",
+    "tailwindcss": "^3.4.0",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.32"
+  },
+  "build": {
+    "appId": "com.miya.pc",
+    "productName": "弥娅",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*"
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "snow_lady.moc3",
+		"Textures": [
+			"snow_lady.4096/texture_00.png",
+			"snow_lady.4096/texture_01.png",
+			"snow_lady.4096/texture_02.png",
+			"snow_lady.4096/texture_03.png",
+			"snow_lady.4096/texture_04.png"
+		],
+		"Physics": "snow_lady.physics3.json",
+		"DisplayInfo": "snow_lady.cdi3.json"
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": [
+				"ParamEyeROpen",
+				"ParamEyeLOpen"
+			]
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		}
+	]
+}

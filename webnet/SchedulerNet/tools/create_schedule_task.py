@@ -12,8 +12,8 @@ from webnet.tools.base import BaseTool, ToolContext
 logger = logging.getLogger(__name__)
 
 
-class CreateScheduleTask(BaseTool):
-    """CreateScheduleTask"""
+class CreateScheduleTaskTool(BaseTool):
+    """CreateScheduleTaskTool"""
 
     @property
     def config(self) -> Dict[str, Any]:
@@ -80,7 +80,7 @@ class CreateScheduleTask(BaseTool):
         """执行工具"""
         task_type = args.get("task_type")
         target_type = args.get("target_type", "group")
-        target_id = args.get("target_id")
+        target_id = args.get("target_id", context.user_id)  # 默认使用当前用户ID
         message = args.get("message", "")
         schedule_time = args.get("schedule_time", "")
         repeat = args.get("repeat", "once")
@@ -91,8 +91,9 @@ class CreateScheduleTask(BaseTool):
         if not task_type:
             return "❌ 任务类型不能为空"
 
-        if not target_id:
-            return "❌ 目标ID不能为空"
+        # 终端模式下，如果 target_id 为 None、无效值或中文，使用默认值
+        if not target_id or not isinstance(target_id, (int, str)) or str(target_id) in ["用户", "user", "None", "null", ""]:
+            target_id = 0  # 默认ID
 
         if task_type == "message" and not message:
             return "❌ 消息任务需要提供消息内容"

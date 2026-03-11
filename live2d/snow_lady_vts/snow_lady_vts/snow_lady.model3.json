@@ -1,0 +1,30 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "白发雪女.moc3",
+		"Textures": [
+			"白发雪女.4096/texture_00.png",
+			"白发雪女.4096/texture_01.png",
+			"白发雪女.4096/texture_02.png",
+			"白发雪女.4096/texture_03.png",
+			"白发雪女.4096/texture_04.png"
+		],
+		"Physics": "白发雪女.physics3.json",
+		"DisplayInfo": "白发雪女.cdi3.json"
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": [
+				"ParamEyeROpen",
+				"ParamEyeLOpen"
+			]
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		}
+	]
+}

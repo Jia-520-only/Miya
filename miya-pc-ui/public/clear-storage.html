@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>清除存储并跳转登录</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            text-align: center;
+            max-width: 500px;
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        .status {
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 8px;
+            background: #f0f0f0;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        button:hover {
+            transform: scale(1.05);
+        }
+        .info {
+            color: #666;
+            margin-top: 20px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔄 清除存储并跳转登录</h1>
+        <div id="status" class="status">正在处理...</div>
+        <button onclick="clearAndRedirect()">清除并跳转</button>
+        <div class="info">
+            <p>如果自动跳转失败，请手动访问：</p>
+            <a href="http://localhost:3000/login">http://localhost:3000/login</a>
+        </div>
+    </div>
+
+    <script>
+        function clearAndRedirect() {
+            const statusEl = document.getElementById('status');
+
+            try {
+                // 清除所有 localStorage
+                const keys = Object.keys(localStorage);
+                keys.forEach(key => {
+                    localStorage.removeItem(key);
+                });
+
+                // 清除所有 sessionStorage
+                sessionStorage.clear();
+
+                statusEl.className = 'status success';
+                statusEl.textContent = `✅ 已清除 ${keys.length} 项本地存储`;
+
+                // 延迟跳转
+                setTimeout(() => {
+                    window.location.href = '/login';
+                }, 1500);
+
+            } catch (error) {
+                statusEl.className = 'status error';
+                statusEl.textContent = `❌ 错误: ${error.message}`;
+            }
+        }
+
+        // 自动执行
+        setTimeout(clearAndRedirect, 500);
+    </script>
+</body>
+</html>

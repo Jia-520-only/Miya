@@ -1,0 +1,29 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "魅魔子.moc3",
+		"Textures": [
+			"魅魔子.8192/texture_00.png",
+			"魅魔子.8192/texture_01.png",
+			"魅魔子.8192/texture_02.png",
+			"魅魔子.8192/texture_03.png"
+		],
+		"Physics": "魅魔子.physics3.json",
+		"DisplayInfo": "魅魔子.cdi3.json"
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": [
+				"ParamEyeLOpen",
+				"ParamEyeROpen"
+			]
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		}
+	]
+}

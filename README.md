@@ -74,6 +74,20 @@ run/pc_start.sh   # Linux/macOS
 
 访问 `http://localhost:3000` 打开 Web 界面。
 
+**Web UI 模式（全新前端）:**
+```batch
+start.bat          # Windows - 选择菜单项 4
+./start.sh         # Linux/macOS - 选择菜单项 4
+```
+
+或直接启动：
+```batch
+run/web_start.bat  # Windows
+./run/web_start.sh # Linux/macOS
+```
+
+访问 `http://localhost:5173` 打开新 Web 界面，`http://localhost:8000/docs` 查看 API 文档。
+
 **QQ 机器人模式:**
 ```batch
 run/qq_start.bat  # Windows
@@ -589,18 +603,62 @@ pip3 install -r requirements.txt
 
 ### 配置 AI 模型
 
-编辑 `config/.env` 文件，配置 AI 模型 API：
+**重要**：模型配置分为两个部分！
+
+#### 方式1：基础配置（.env）
+
+编辑 `config/.env` 文件，配置基础 AI 模型 API：
 
 ```bash
-# DeepSeek API
-AI_API_KEY=sk-your-deepseek-api-key
-AI_API_BASE_URL=https://api.deepseek.com/v1
-AI_MODEL=deepseek-chat
+# DeepSeek API（主要推荐）
+DEEPSEEK_API_KEY=sk-your-deepseek-api-key
+DEEPSEEK_API_BASE=https://api.deepseek.com/v1
+DEEPSEEK_MODEL=deepseek-chat
+
+# 硅基流动 API（快速、低成本）
+SILICONFLOW_API_KEY=sk-your-siliconflow-api-key
+SILICONFLOW_API_BASE=https://api.siliconflow.cn/v1
+SILICONFLOW_MODEL=Qwen/Qwen2.5-7B-Instruct
 
 # AI 参数
 AI_TEMPERATURE=0.7
 AI_MAX_TOKENS=2000
 ```
+
+#### 方式2：多模型配置（multi_model_config.json）
+
+**重要**：这是多模型智能调度的核心配置文件！
+
+编辑 `config/multi_model_config.json`，配置多个模型和路由策略：
+
+```json
+{
+  "models": {
+    "chinese": {
+      "name": "deepseek-chat",
+      "provider": "deepseek",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "sk-your-api-key",
+      "capabilities": ["simple_chat", "chinese_understanding"]
+    },
+    "fast": {
+      "name": "Qwen/Qwen2.5-7B-Instruct",
+      "provider": "siliconflow",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": "sk-your-api-key",
+      "capabilities": ["simple_chat", "summarization"]
+    }
+  },
+  "routing_strategy": {
+    "simple_chat": {
+      "primary": "fast",
+      "fallback": "chinese"
+    }
+  }
+}
+```
+
+**详细配置说明**：请参考 [配置指南](CONFIGURATION_GUIDE.md)
 
 ### 可选服务配置
 
@@ -794,7 +852,9 @@ REDIS_PORT=6379
 
 ### 多模型配置
 
-配置文件：`config/multi_model_config.json`
+**重要**：多模型配置文件是 `config/multi_model_config.json`，这是多模型智能调度的核心配置！
+
+配置文件示例：
 
 ```json
 {
@@ -839,6 +899,8 @@ REDIS_PORT=6379
 }
 ```
 
+**详细配置说明**：请参考 [配置指南](CONFIGURATION_GUIDE.md)
+
 ### 终端工具配置
 
 配置文件：`config/terminal_config.json`
@@ -861,6 +923,8 @@ REDIS_PORT=6379
 
 ### 核心文档
 
+- [系统分析文档](MIYA_SYSTEM_ANALYSIS.md) - 完整的系统分析、架构和功能详解
+- [配置指南](CONFIGURATION_GUIDE.md) - 详细的配置说明，包括模型配置
 - [架构总览](docs/ARCHITECTURE_OVERVIEW.md) - 完整的架构设计说明
 - [多模型快速开始](MULTI_MODEL_QUICK_START.md) - 多模型配置和使用指南
 - [终端工具指南](TERMINAL_TOOL_GUIDE.md) - 工具使用和配置
@@ -913,11 +977,17 @@ redis-cli ping
 
 ### Q4: 多模型不工作？
 
-**A**: 检查 `config/multi_model_config.json` 配置是否正确，并运行测试：
+**A**: 检查 `config/multi_model_config.json` 配置是否正确：
 
 ```bash
+# 验证配置文件
+cat config/multi_model_config.json
+
+# 运行测试
 python tests/test_multi_model_functionality.py
 ```
+
+**重要**：确保 `multi_model_config.json` 中的 `api_key` 正确配置。
 
 ### Q5: 终端命令执行失败（Windows）
 
@@ -981,6 +1051,14 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
 - **DeepSeek** 提供强大的 AI 模型
 - **硅基流动** 提供低成本 AI 服务
 - **开源社区** 的支持和反馈
+
+---
+
+## 📚 完整文档
+
+- **[系统分析文档](MIYA_SYSTEM_ANALYSIS.md)** - 完整的系统分析、架构和功能详解
+- **[配置指南](CONFIGURATION_GUIDE.md)** - 详细的配置说明，包括模型配置
+- **[README](README.md)** - 本文件
 
 ---
 

@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>弥娅 - 启动错误</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      color: white;
+      padding: 20px;
+    }
+
+    .container {
+      text-align: center;
+      max-width: 500px;
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      border-radius: 20px;
+      padding: 40px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+
+    .icon {
+      font-size: 80px;
+      margin-bottom: 20px;
+      display: block;
+    }
+
+    h1 {
+      font-size: 28px;
+      margin-bottom: 16px;
+      font-weight: 600;
+    }
+
+    .message {
+      font-size: 16px;
+      line-height: 1.6;
+      margin-bottom: 24px;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .steps {
+      text-align: left;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+
+    .steps h3 {
+      font-size: 14px;
+      margin-bottom: 12px;
+      color: rgba(255, 255, 255, 0.7);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .step {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+      font-size: 14px;
+    }
+
+    .step:last-child {
+      margin-bottom: 0;
+    }
+
+    .step-number {
+      width: 24px;
+      height: 24px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+
+    .restart-btn {
+      background: white;
+      color: #667eea;
+      border: none;
+      padding: 14px 32px;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+
+    .restart-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+    }
+
+    .restart-btn:active {
+      transform: translateY(0);
+    }
+
+    .footer {
+      margin-top: 24px;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.6);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <span class="icon">😔</span>
+    <h1>无法加载应用</h1>
+    <div class="message">
+      弥娅桌面端启动时遇到了问题。<br>
+      开发服务器可能未运行或已断开连接。
+    </div>
+
+    <div class="steps">
+      <h3>解决步骤</h3>
+      <div class="step">
+        <span class="step-number">1</span>
+        <span>检查后端 API 是否运行在端口 8000</span>
+      </div>
+      <div class="step">
+        <span class="step-number">2</span>
+        <span>检查 Vite 前端是否运行在端口 5173</span>
+      </div>
+      <div class="step">
+        <span class="step-number">3</span>
+        <span>运行 <code>check_ports.bat</code> 诊断问题</span>
+      </div>
+      <div class="step">
+        <span class="step-number">4</span>
+        <span>使用 <code>start_dev.bat</code> 重新启动</span>
+      </div>
+    </div>
+
+    <button class="restart-btn" onclick="window.location.reload()">
+      🔄 重试加载
+    </button>
+
+    <div class="footer">
+      弥娅 - 您的 AI 助手
+    </div>
+  </div>
+
+  <script>
+    // 自动重试机制
+    let retryCount = 0;
+    const maxRetries = 5;
+    const retryInterval = 3000;
+
+    function checkServers() {
+      Promise.all([
+        fetch('http://localhost:5173', { mode: 'no-cors' }).catch(() => false),
+        fetch('http://localhost:8000/docs', { mode: 'no-cors' }).catch(() => false)
+      ]).then(([frontend, backend]) => {
+        if (frontend) {
+          console.log('Frontend server is available');
+          window.location.href = 'http://localhost:5173';
+        } else if (retryCount < maxRetries) {
+          retryCount++;
+          console.log(`Retry ${retryCount}/${maxRetries} in ${retryInterval}ms...`);
+          setTimeout(checkServers, retryInterval);
+        } else {
+          console.log('Max retries reached');
+        }
+      });
+    }
+
+    // 开始检查
+    setTimeout(checkServers, 2000);
+  </script>
+</body>
+</html>

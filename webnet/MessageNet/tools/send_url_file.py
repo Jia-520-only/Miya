@@ -13,7 +13,7 @@ from webnet.tools.base import BaseTool, ToolContext
 logger = logging.getLogger(__name__)
 
 
-class SendUrlFile(BaseTool):
+class SendUrlFileTool(BaseTool):
     """发送URL文件工具"""
 
     @property

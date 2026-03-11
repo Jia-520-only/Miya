@@ -1,0 +1,27 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "魅蝙蝠.moc3",
+		"Textures": [
+			"魅蝙蝠.8192/texture_00.png",
+			"魅蝙蝠.8192/texture_01.png"
+		],
+		"Physics": "魅蝙蝠.physics3.json",
+		"DisplayInfo": "魅蝙蝠.cdi3.json"
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": [
+				"ParamEyeLOpen",
+				"ParamEyeROpen"
+			]
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		}
+	]
+}

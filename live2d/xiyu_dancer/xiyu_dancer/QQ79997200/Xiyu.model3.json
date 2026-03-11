@@ -1,0 +1,40 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "Xiyu.moc3",
+		"Textures": [
+			"Xiyu.4096/texture_00.png",
+			"Xiyu.4096/texture_01.png",
+			"Xiyu.4096/texture_02.png",
+			"Xiyu.4096/texture_03.png",
+			"Xiyu.4096/texture_04.png",
+			"Xiyu.4096/texture_05.png",
+			"Xiyu.4096/texture_06.png",
+			"Xiyu.4096/texture_07.png",
+			"Xiyu.4096/texture_08.png",
+			"Xiyu.4096/texture_09.png",
+			"Xiyu.4096/texture_10.png",
+			"Xiyu.4096/texture_11.png",
+			"Xiyu.4096/texture_12.png",
+			"Xiyu.4096/texture_13.png",
+			"Xiyu.4096/texture_14.png",
+			"Xiyu.4096/texture_15.png",
+			"Xiyu.4096/texture_16.png",
+			"Xiyu.4096/texture_17.png"
+		],
+		"Physics": "Xiyu.physics3.json",
+		"DisplayInfo": "Xiyu.cdi3.json"
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": []
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		}
+	]
+}

@@ -107,32 +107,33 @@ class DuckDuckGoSearchEngine(WebSearchEngine):
     ) -> List[SearchResult]:
         """使用 DuckDuckGo 搜索"""
         try:
-            # 使用 duckduckgo-search 库
+            # 使用 duckduckgo-search 库（新版本）
             from duckduckgo_search import DDGS
 
             results = []
-            async with DDGS() as ddgs:
-                # 执行搜索
-                search_results = ddgs.text(
-                    query,
-                    max_results=max_results
+            # 新版本不需要 async with，直接使用
+            ddgs = DDGS()
+            # 执行搜索
+            search_results = ddgs.text(
+                query,
+                max_results=max_results
+            )
+
+            if not search_results:
+                logger.warning(f"DuckDuckGo 未找到结果: {query}")
+                return []
+
+            # 转换为 SearchResult 对象
+            for result in search_results:
+                search_result = SearchResult(
+                    title=result.get('title', ''),
+                    url=result.get('href', ''),
+                    snippet=result.get('body', ''),
+                    source='DuckDuckGo',
+                    timestamp=datetime.now(),
+                    relevance=0.85  # DuckDuckGo 默认相关度
                 )
-
-                if not search_results:
-                    logger.warning(f"DuckDuckGo 未找到结果: {query}")
-                    return []
-
-                # 转换为 SearchResult 对象
-                for result in search_results:
-                    search_result = SearchResult(
-                        title=result.get('title', ''),
-                        url=result.get('href', ''),
-                        snippet=result.get('body', ''),
-                        source='DuckDuckGo',
-                        timestamp=datetime.now(),
-                        relevance=0.85  # DuckDuckGo 默认相关度
-                    )
-                    results.append(search_result)
+                results.append(search_result)
 
             logger.info(f"DuckDuckGo 搜索完成: {query}, 找到 {len(results)} 条结果")
             return results

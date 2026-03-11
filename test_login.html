@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>登录测试</title>
+</head>
+<body>
+    <h1>登录测试</h1>
+    <button onclick="testLogin()">测试登录</button>
+    <pre id="result"></pre>
+
+    <script>
+        async function testLogin() {
+            const result = document.getElementById('result');
+            result.textContent = '正在测试...\n';
+
+            try {
+                const response = await fetch('http://localhost:8000/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: 'admin',
+                        password: 'admin123'
+                    })
+                });
+
+                result.textContent += '状态码: ' + response.status + '\n';
+
+                const data = await response.json();
+                result.textContent += '响应数据:\n' + JSON.stringify(data, null, 2);
+            } catch (error) {
+                result.textContent += '错误:\n' + error.message;
+            }
+        }
+    </script>
+</body>
+</html>

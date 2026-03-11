@@ -1,0 +1,27 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "粉狐.moc3",
+		"Textures": [
+			"粉狐.8192/texture_00.png",
+			"粉狐.8192/texture_01.png"
+		],
+		"Physics": "粉狐.physics3.json",
+		"DisplayInfo": "粉狐.cdi3.json"
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": [
+				"ParamEyeLOpen",
+				"ParamEyeROpen"
+			]
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		}
+	]
+}

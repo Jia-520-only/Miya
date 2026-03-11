@@ -388,6 +388,27 @@ class TerminalTool:
 
         return raw_output
 
+    def get_command_history(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        获取命令执行历史
+
+        Args:
+            limit: 返回数量限制
+
+        Returns:
+            List[Dict[str, Any]]: 命令历史列表
+        """
+        return self.history.get_recent(limit)
+
+    def get_command_statistics(self) -> Dict[str, Any]:
+        """
+        获取命令执行统计信息
+
+        Returns:
+            Dict[str, Any]: 统计数据
+        """
+        return self.history.get_statistics()
+
     # ========== 命令链相关方法 ==========
 
     def get_available_templates(self) -> List[Dict[str, Any]]:

@@ -2,7 +2,8 @@
 任务调度
 管理和调度系统任务
 """
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Callable, Any
+import threading
 import heapq
 import asyncio
 import logging
@@ -46,8 +47,10 @@ class Scheduler:
         self.task_history = []
         self._running = False
         self._task: Optional[asyncio.Task] = None
+        self._thread: Optional[threading.Thread] = None
         self.tool_registry = tool_registry
         self.onebot_client = onebot_client
+        self.terminal_callback: Optional[Callable[[str], Any]] = None  # 终端模式回调
 
     async def start(self):
         """启动调度器"""
@@ -58,6 +61,27 @@ class Scheduler:
         self._running = True
         self._task = asyncio.create_task(self._run_loop())
         logger.info("任务调度器已启动")
+
+    def start_background(self):
+        """在后台线程中启动调度器"""
+        if self._running:
+            logger.warning("调度器已经在运行")
+            return
+
+        def run_in_thread():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(self.start())
+                loop.run_forever()
+            except Exception as e:
+                logger.error(f"调度器线程错误: {e}")
+            finally:
+                loop.close()
+
+        self._thread = threading.Thread(target=run_in_thread, daemon=True)
+        self._thread.start()
+        logger.info("任务调度器已在后台线程中启动")
 
     async def stop(self):
         """停止调度器"""
@@ -118,8 +142,17 @@ class Scheduler:
 
                 logger.info(f"执行提醒任务: 目标={target_type}_{target_id}, 消息={message}")
 
-                # 直接使用 onebot_client 发送消息（避免 tool_context 的 qq_net 依赖）
-                if self.onebot_client:
+                # 终端模式或没有 onebot_client 时，记录日志提醒
+                if not self.onebot_client:
+                    logger.info(f"【定时提醒】{message}")
+                    # 可以通过回调通知终端
+                    if hasattr(self, 'terminal_callback') and self.terminal_callback:
+                        try:
+                            await self.terminal_callback(message)
+                        except Exception as e:
+                            logger.error(f"终端回调失败: {e}")
+                else:
+                    # 使用 onebot_client 发送消息
                     try:
                         if target_type == 'group':
                             await self.onebot_client.send_group_message(target_id, message)

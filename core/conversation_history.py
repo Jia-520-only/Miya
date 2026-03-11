@@ -115,16 +115,39 @@ class ConversationHistoryManager:
                             pass
 
                 data = [asdict(m) for m in messages]
-                async with aiofiles.open(file_path, 'w', encoding=Encoding.UTF8) as f:
-                    await f.write(json.dumps(data, ensure_ascii=False, indent=2))
+
+                # 尝试使用 aiofiles 保存，失败则回退到同步保存
+                try:
+                    async with aiofiles.open(file_path, 'w', encoding=Encoding.UTF8) as f:
+                        await f.write(json.dumps(data, ensure_ascii=False, indent=2))
+                except RuntimeError:
+                    # 如果事件循环已关闭，使用同步保存
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
 
                 self._session_counts[session_id] = len(messages)
                 logger.debug(f"保存会话历史 {session_id}: {len(messages)} 条消息")
 
             except asyncio.CancelledError:
                 logger.debug(f"保存任务被取消: {session_id}")
+                # 尝试同步保存
+                try:
+                    data = [asdict(m) for m in messages]
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+                    logger.info(f"同步保存会话历史 {session_id}: {len(messages)} 条消息")
+                except:
+                    logger.error(f"同步保存失败: {session_id}")
             except Exception as e:
                 logger.error(f"保存会话历史失败 {session_id}: {e}", exc_info=True)
+                # 尝试同步保存作为最后手段
+                try:
+                    data = [asdict(m) for m in messages]
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+                    logger.info(f"同步保存会话历史 {session_id}: {len(messages)} 条消息")
+                except:
+                    pass
 
     async def add_message(
         self,
@@ -170,11 +193,22 @@ class ConversationHistoryManager:
         async def _save_with_cleanup():
             try:
                 await self._save_session_to_disk(session_id, self._memory_cache[session_id])
+            except Exception as e:
+                logger.error(f"保存会话历史失败: {e}", exc_info=True)
             finally:
                 # 清理任务引用
                 self._save_tasks.pop(session_id, None)
 
-        task = asyncio.create_task(_save_with_cleanup())
+        task = asyncio.create_task(_save_with_cleanup(), name=f"save_session_{session_id}")
+
+        # 添加完成回调，确保任务完成时清理引用
+        def _task_done(t: asyncio.Task):
+            if t.exception():
+                logger.error(f"会话保存任务异常: {t.exception()}", exc_info=t.exception())
+            self._save_tasks.pop(session_id, None)
+
+        task.add_done_callback(_task_done)
+
         self._save_tasks[session_id] = task
 
         logger.debug(f"添加消息到会话 {session_id}: {role} - {content[:50]}...")

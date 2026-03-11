@@ -1,0 +1,27 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "品酒.moc3",
+		"Textures": [
+			"品酒.8192/texture_00.png",
+			"品酒.8192/texture_01.png"
+		],
+		"Physics": "品酒.physics3.json",
+		"DisplayInfo": "品酒.cdi3.json"
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": [
+				"ParamEyeLOpen",
+				"ParamEyeROpen"
+			]
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		}
+	]
+}

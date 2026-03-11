@@ -1,0 +1,62 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "cheng_huan_2024_411.moc3",
+		"Textures": [
+			"cheng_huan_2024_411.4096/texture_00.png",
+			"cheng_huan_2024_411.4096/texture_01.png"
+		],
+		"Physics": "cheng_huan_2024_411.physics3.json",
+		"DisplayInfo": "cheng_huan_2024_411.cdi3.json",
+		"Expressions": [
+			{
+				"Name": "expression1",
+				"File": "expression1.exp3.json"
+			},
+			{
+				"Name": "expression2",
+				"File": "expression2.exp3.json"
+			},
+			{
+				"Name": "expression3",
+				"File": "expression3.exp3.json"
+			},
+			{
+				"Name": "expression4",
+				"File": "expression4.exp3.json"
+			},
+			{
+				"Name": "expression5",
+				"File": "expression5.exp3.json"
+			},
+			{
+				"Name": "expression6",
+				"File": "expression6.exp3.json"
+			},
+			{
+				"Name": "expression7",
+				"File": "expression7.exp3.json"
+			},
+			{
+				"Name": "expression8",
+				"File": "expression8.exp3.json"
+			}
+		]
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		},
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": [
+				"ParamEyeLOpen",
+				"ParamEyeROpen"
+			]
+		}
+	],
+	"HitAreas": []
+}

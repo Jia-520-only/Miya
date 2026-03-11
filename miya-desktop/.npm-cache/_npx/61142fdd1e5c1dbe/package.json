@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "tca-mcp-server": "^1.3.2"
+  },
+  "_npx": {
+    "packages": [
+      "tca-mcp-server@latest"
+    ]
+  }
+}

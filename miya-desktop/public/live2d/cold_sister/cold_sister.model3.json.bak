@@ -1,0 +1,39 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "御姐完整版.moc3",
+		"Textures": [
+			"御姐完整版.4096/texture_00.png",
+			"御姐完整版.4096/texture_01.png",
+			"御姐完整版.4096/texture_02.png",
+			"御姐完整版.4096/texture_03.png",
+			"御姐完整版.4096/texture_04.png",
+			"御姐完整版.4096/texture_05.png",
+			"御姐完整版.4096/texture_06.png",
+			"御姐完整版.4096/texture_07.png",
+			"御姐完整版.4096/texture_08.png",
+			"御姐完整版.4096/texture_09.png",
+			"御姐完整版.4096/texture_10.png",
+			"御姐完整版.4096/texture_11.png",
+			"御姐完整版.4096/texture_12.png",
+			"御姐完整版.4096/texture_13.png"
+		],
+		"Physics": "御姐完整版.physics3.json",
+		"DisplayInfo": "御姐完整版.cdi3.json"
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		},
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": [
+				"ParamEyeLOpen",
+				"ParamEyeROpen"
+			]
+		}
+	]
+}

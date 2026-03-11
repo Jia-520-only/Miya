@@ -1,0 +1,28 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "AoiYume.moc3",
+		"Textures": [
+			"AoiYume.8192/texture_00.png",
+			"AoiYume.8192/texture_01.png",
+			"AoiYume.8192/texture_02.png"
+		],
+		"Physics": "AoiYume.physics3.json",
+		"DisplayInfo": "AoiYume.cdi3.json"
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": [
+				"ParamEyeLOpen",
+				"ParamEyeROpen"
+			]
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		}
+	]
+}

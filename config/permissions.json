@@ -1,0 +1,164 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2026-03-11",
+  "description": "弥娅系统统一权限配置文件",
+
+  "permission_groups": {
+    "Default": {
+      "name": "默认权限组",
+      "description": "所有用户默认拥有的基本权限",
+      "permissions": [
+        "tool.get_current_time",
+        "memory.read",
+        "knowledge.search",
+        "agent.chat"
+      ]
+    },
+    "Admin": {
+      "name": "管理员",
+      "description": "拥有系统的所有权限",
+      "permissions": [
+        "*.*"
+      ]
+    },
+    "Terminal": {
+      "name": "终端用户",
+      "description": "终端平台用户的基础权限",
+      "permissions": [
+        "tool.terminal.execute",
+        "tool.web_search",
+        "tool.get_current_time",
+        "memory.read",
+        "memory.write",
+        "knowledge.search",
+        "agent.chat"
+      ]
+    },
+    "Web": {
+      "name": "Web用户",
+      "description": "Web平台用户的基础权限",
+      "permissions": [
+        "tool.web_search",
+        "tool.get_current_time",
+        "memory.read",
+        "memory.write",
+        "knowledge.search",
+        "agent.chat"
+      ]
+    },
+    "Desktop": {
+      "name": "Desktop用户",
+      "description": "Desktop平台用户的基础权限",
+      "permissions": [
+        "tool.web_search",
+        "tool.get_current_time",
+        "memory.read",
+        "memory.write",
+        "knowledge.search",
+        "agent.chat",
+        "system.config.read"
+      ]
+    },
+    "QQ": {
+      "name": "QQ用户",
+      "description": "QQ平台用户的基础权限",
+      "permissions": [
+        "tool.web_search",
+        "tool.get_current_time",
+        "memory.read",
+        "knowledge.search",
+        "agent.chat"
+      ]
+    },
+    "Developer": {
+      "name": "开发者",
+      "description": "开发者权限，可访问调试和系统信息",
+      "permissions": [
+        "tool.*",
+        "memory.*",
+        "knowledge.*",
+        "agent.*",
+        "system.*",
+        "config.*"
+      ]
+    }
+  },
+
+  "platform_defaults": {
+    "terminal": ["Terminal"],
+    "web": ["Web"],
+    "desktop": ["Desktop"],
+    "qq": ["QQ"],
+    "discord": ["Default"],
+    "telegram": ["Default"]
+  },
+
+  "users": [
+    {
+      "user_id": "terminal_default",
+      "username": "默认终端用户",
+      "platform": "terminal",
+      "permission_groups": ["Admin"],
+      "description": "终端平台的默认管理员用户",
+      "created_at": "2026-03-11T00:00:00"
+    },
+    {
+      "user_id": "web_default",
+      "username": "默认Web用户",
+      "platform": "web",
+      "permission_groups": ["Web"],
+      "description": "Web平台的默认用户",
+      "created_at": "2026-03-11T00:00:00"
+    },
+    {
+      "user_id": "desktop_default",
+      "username": "默认Desktop用户",
+      "platform": "desktop",
+      "permission_groups": ["Desktop"],
+      "description": "Desktop平台的默认用户",
+      "created_at": "2026-03-11T00:00:00"
+    }
+  ],
+
+  "special_rules": {
+    "admin_whitelist": [
+      "terminal_default"
+    ],
+    "super_admin_whitelist": [
+      "terminal_default"
+    ]
+  },
+
+  "disabled_permissions": [],
+
+  "platform_restrictions": {
+    "terminal": {
+      "allowed_groups": [],
+      "forbidden_groups": []
+    },
+    "web": {
+      "allowed_groups": [],
+      "forbidden_groups": ["Terminal"]
+    },
+    "desktop": {
+      "allowed_groups": [],
+      "forbidden_groups": []
+    },
+    "qq": {
+      "allowed_groups": ["Default", "QQ", "Web", "Admin"],
+      "forbidden_groups": ["Terminal", "Developer"]
+    }
+  },
+
+  "security": {
+    "enable_audit": true,
+    "enable_cache": true,
+    "cache_ttl": 300,
+    "log_denied": true,
+    "log_allowed": false,
+    "whitelist_mode": false,
+    "user_whitelist": [
+      "terminal_default"
+    ]
+  }
+}

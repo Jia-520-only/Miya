@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <link rel="icon" href="/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>弥娅 - 数字生命伴侣</title>
+
+    <!-- PIXI.js (本地文件) -->
+    <script src="./libraries/pixi.min.js"></script>
+
+    <!-- Live2D Cubism 2 Mock (用于绕过检查) -->
+    <script src="./libraries/live2d.min.js"></script>
+
+    <!-- Live2D Cubism 4 Core -->
+    <script src="./libraries/live2dcubismcore.min.js"></script>
+
+    <!-- pixi-live2d-display -->
+    <script src="./libraries/pixi-live2d-display-cubism4.min.js"></script>
+
+    <!-- 注册 Cubism 4 运行时 -->
+    <script>
+      if (typeof PIXI?.live2d?.cubism4Ready === 'function') {
+        PIXI.live2d.cubism4Ready()
+        console.log('[Live2D] Cubism 4 runtime registered')
+      }
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

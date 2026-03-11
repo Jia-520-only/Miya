@@ -1,0 +1,174 @@
+{
+  "ConfigLists": [
+    {
+      "ID": "post_processing",
+      "Configs": {
+        "post_processing-strength": "1"
+      }
+    },
+    {
+      "ID": "color_grading",
+      "Configs": {
+        "color_grading-strength": "0.4395971",
+        "color_grading-hue_shift": "-7.605629",
+        "color_grading-saturation": "29.6585",
+        "color_grading-brightness": "4.296958",
+        "color_grading-contrast": "-7.976061",
+        "color_grading-color_filter": "FFFFFFFF",
+        "color_grading-whitebalance_temperature": "-2.650827",
+        "color_grading-whitebalance_tint": "5.86344",
+        "color_grading-invert": "0"
+      }
+    },
+    {
+      "ID": "bloom",
+      "Configs": {
+        "bloom-strength": "0.4956912",
+        "bloom-model_color_darken": "0",
+        "bloom-background_color_darken": "0",
+        "bloom-main_threshold": "0.8429388",
+        "bloom-main_intensity": "0.08263748",
+        "bloom-main_color_tint": "FFAAAAFF",
+        "bloom-streak_threshold": "1",
+        "bloom-streak_intensity": "0.3901258",
+        "bloom-streak_color_tint": "870B8FFF",
+        "bloom-streak_vertical": "True",
+        "bloom-mic_increases_bloom": "0.05036421",
+        "bloom-quality": "10"
+      }
+    },
+    {
+      "ID": "backlight",
+      "Configs": {
+        "backlight-strength": "0.7740202",
+        "backlight-bg_blur_over_model": "0",
+        "backlight-bg_blur_over_bg": "0",
+        "backlight-darken_model": "0",
+        "backlight-darken_bg": "0",
+        "backlight-strength_normal": "0.6368473",
+        "backlight-strength_directional": "0.2944353",
+        "backlight-brightness_limit": "0.9",
+        "backlight-backlight_direction": "293.1101",
+        "backlight-backlight_both_directions": "0.5",
+        "backlight-backlight_softness": "1",
+        "backlight-backlight_color_tint": "EA8D8DFF",
+        "backlight-backlight_color_from_bg": "0.178794",
+        "backlight-outline_size": "0.05831696",
+        "backlight-outline_color_main": "FFFFFFFF",
+        "backlight-outline_color_stripes": "FFFFFFFF",
+        "backlight-outline_stripe_count": "0.5",
+        "backlight-outline_stripe_speed": "0.2",
+        "backlight-outline_stripe_curve": "0",
+        "backlight-shadow_main_color": "08090CAA",
+        "backlight-shadow_offset_x": "0",
+        "backlight-shadow_offset_y": "0"
+      }
+    },
+    {
+      "ID": "custom_particles",
+      "Configs": {
+        "custom_particles-strength": "0.1192841",
+        "custom_particles-base_move_with_head": "-0.4",
+        "custom_particles-sparkle_strength": "0.4380406",
+        "custom_particles-sparkle_size": "0.4",
+        "custom_particles-sparkle_color_a": "FFD2D2C8",
+        "custom_particles-sparkle_color_b": "FF94A978",
+        "custom_particles-floaty_strength": "0.346985",
+        "custom_particles-floaty_size": "0.0621611",
+        "custom_particles-floaty_color_a": "E0D6FF5A",
+        "custom_particles-floaty_color_b": "FFE7EC6E",
+        "custom_particles-cloud_strength": "0.3399628",
+        "custom_particles-cloud_size": "0.2084178",
+        "custom_particles-cloud_color_a": "83252564",
+        "custom_particles-cloud_color_b": "C83ACE64",
+        "custom_particles-sphere_strength": "0",
+        "custom_particles-sphere_size": "0",
+        "custom_particles-sphere_color_a": "3037E964",
+        "custom_particles-sphere_color_b": "E810AC5A",
+        "custom_particles-hearts_strength": "0",
+        "custom_particles-hearts_size": "0",
+        "custom_particles-hearts_color_a": "FF126232",
+        "custom_particles-hearts_color_b": "FF00313C",
+        "custom_particles-custom_1_texture_file": "",
+        "custom_particles-custom_1_color_a": "FFFFFFFF",
+        "custom_particles-custom_1_color_b": "FFFFFFFF",
+        "custom_particles-custom_1_material_type_id": "False",
+        "custom_particles-custom_1_in_back": "False",
+        "custom_particles-custom_1_move_with_head": "-0.5",
+        "custom_particles-custom_1_size": "0.1925131",
+        "custom_particles-custom_1_amount": "0.266734",
+        "custom_particles-custom_1_fill_to_center": "0.1277009",
+        "custom_particles-custom_1_base_rotation": "60.80494",
+        "custom_particles-custom_1_rotation_speed": "0",
+        "custom_particles-custom_1_move_faster_mic_vol": "0.3",
+        "custom_particles-custom_2_texture_file": "",
+        "custom_particles-custom_2_color_a": "FFFFFFFF",
+        "custom_particles-custom_2_color_b": "FFFFFFFF",
+        "custom_particles-custom_2_material_type_id": "False",
+        "custom_particles-custom_2_in_back": "False",
+        "custom_particles-custom_2_move_with_head": "-0.5",
+        "custom_particles-custom_2_size": "0.5",
+        "custom_particles-custom_2_amount": "0.5",
+        "custom_particles-custom_2_fill_to_center": "0.3",
+        "custom_particles-custom_2_base_rotation": "15",
+        "custom_particles-custom_2_rotation_speed": "0",
+        "custom_particles-custom_2_move_faster_mic_vol": "0.3"
+      }
+    },
+    {
+      "ID": "vignette",
+      "Configs": {
+        "vignette-strength": "0.1139828",
+        "vignette-smoothness": "0.9",
+        "vignette-color": "FFE5EDFF",
+        "vignette-center_x": "0",
+        "vignette-center_y": "0",
+        "vignette-roundness": "1",
+        "vignette-circular": "False"
+      }
+    },
+    {
+      "ID": "chromatic_aberration",
+      "Configs": {
+        "chromatic_aberration-strength": "0.1484419",
+        "chromatic_aberration-blur_edges": "True"
+      }
+    },
+    {
+      "ID": "foggy_window",
+      "Configs": {
+        "foggy_window-strength": "0.577705",
+        "foggy_window-fog_strength": "0.1986681",
+        "foggy_window-fog_tint": "FFFFFF32",
+        "foggy_window-fog_boost": "0.5973494",
+        "foggy_window-raindrop_visibility": "0",
+        "foggy_window-raindrop_speed": "0.2",
+        "foggy_window-raindrop_size": "0.8",
+        "foggy_window-fog_wipe_size": "0.8645448",
+        "foggy_window-fog_wipe_lifetime_seconds": "6.410208",
+        "foggy_window-fog_lifetime_infinite": "True"
+      }
+    },
+    {
+      "ID": "blur_effects",
+      "Configs": {
+        "blur_effects-strength": "0.1644962",
+        "blur_effects-basic_blur_visibility": "0.3067129",
+        "blur_effects-basic_blur_strength": "0.3389988",
+        "blur_effects-pixelation_blur": "0",
+        "blur_effects-motion_blur": "0"
+      }
+    },
+    {
+      "ID": "outline",
+      "Configs": {
+        "outline-strength": "1",
+        "outline-sharpen": "0",
+        "outline-visibility": "0.04241154",
+        "outline-color": "FFFFFFFF",
+        "outline-threshold": "0.9",
+        "outline-contrast": "0.2"
+      }
+    }
+  ]
+}

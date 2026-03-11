@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PIXI.js 测试</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    .test-item {
+      margin: 10px 0;
+      padding: 10px;
+      background: #2a2a2a;
+      border-radius: 4px;
+    }
+    .pass { border-left: 4px solid #4ade80; }
+    .fail { border-left: 4px solid #f87171; }
+    canvas {
+      border: 2px solid #4ade80;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>PIXI.js 加载测试</h1>
+
+  <div id="results"></div>
+  <canvas id="test-canvas" width="400" height="300"></canvas>
+
+  <script src="./libraries/pixi.min.js"></script>
+
+  <script>
+    const results = document.getElementById('results')
+
+    function addTest(name, passed, message) {
+      const div = document.createElement('div')
+      div.className = `test-item ${passed ? 'pass' : 'fail'}`
+      div.innerHTML = `<strong>${name}:</strong> ${message}`
+      results.appendChild(div)
+    }
+
+    // 测试 1: PIXI 是否存在
+    addTest(
+      'PIXI 全局对象',
+      typeof PIXI !== 'undefined',
+      typeof PIXI !== 'undefined' ? 'PIXI 已加载' : 'PIXI 未加载'
+    )
+
+    // 测试 2: PIXI.Application 是否存在
+    addTest(
+      'PIXI.Application',
+      typeof PIXI?.Application === 'function',
+      typeof PIXI?.Application === 'function' ? 'Application 是函数' : `Application 类型: ${typeof PIXI?.Application}`
+    )
+
+    // 测试 3: 尝试创建 Application
+    try {
+      const app = new PIXI.Application({
+        view: document.getElementById('test-canvas'),
+        width: 400,
+        height: 300,
+        backgroundAlpha: 0
+      })
+      addTest('创建 PIXI 应用', true, 'Application 创建成功')
+
+      // 测试 4: 检查 PIXI 对象属性
+      const keys = Object.keys(PIXI)
+      addTest('PIXI 对象属性', keys.length > 0, `找到 ${keys.length} 个属性: ${keys.slice(0, 10).join(', ')}...`)
+
+    } catch (error) {
+      addTest('创建 PIXI 应用', false, `错误: ${error.message}`)
+    }
+  </script>
+</body>
+</html>

@@ -10,8 +10,8 @@ from webnet.tools.base import BaseTool, ToolContext
 logger = logging.getLogger(__name__)
 
 
-class ListScheduleTasks(BaseTool):
-    """ListScheduleTasks"""
+class ListScheduleTasksTool(BaseTool):
+    """ListScheduleTasksTool"""
 
     @property
     def config(self) -> Dict[str, Any]:

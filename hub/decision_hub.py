@@ -32,7 +32,7 @@ class DecisionHub:
     5. 【新增】支持跨平台统一交互（Terminal、PC UI、QQ）
     """
 
-    def __init__(self, mlink, ai_client, emotion, personality, prompt_manager, memory_net, decision_engine, tool_subnet=None, memory_engine=None, scheduler=None, onebot_client=None, game_mode_adapter=None, identity=None, multi_model_manager=None):
+    def __init__(self, mlink, ai_client, emotion, personality, prompt_manager, memory_net, decision_engine, tool_subnet=None, memory_engine=None, scheduler=None, onebot_client=None, game_mode_adapter=None, identity=None, multi_model_manager=None, miya_instance=None):
         """
         初始化决策层
 
@@ -51,6 +51,7 @@ class DecisionHub:
             game_mode_adapter: 游戏模式适配器（架构修复:封装WebNet层访问）
             identity: 身份系统
             multi_model_manager: 多模型管理器（用于动态选择模型）
+            miya_instance: Miya 实例（用于获取系统状态）
         """
         self.mlink = mlink
         self.ai_client = ai_client
@@ -66,6 +67,7 @@ class DecisionHub:
         self.onebot_client = onebot_client
         self.identity = identity
         self.multi_model_manager = multi_model_manager  # 新增：多模型管理器
+        self.miya_instance = miya_instance  # 新增：Miya 实例
 
         # 【新增】对话历史上下文配置
         self.enable_conversation_context = os.getenv('ENABLE_CONVERSATION_CONTEXT', 'false').lower() == 'true'
@@ -84,10 +86,14 @@ class DecisionHub:
         self._advanced_orchestrator: Optional[Any] = None
         self._advanced_orchestrator_initialized = False
 
+        # 【新增】鉴权子网（AuthNet）
+        self.auth_subnet = None
+        self._init_auth_subnet()
+
         # 响应回调（用于发送回 QQNet）
         self.response_callback: Optional[callable] = None
 
-        logger.info("决策层 Hub 初始化成功（含跨平台、终端工具和高级编排器支持）")
+        logger.info("决策层 Hub 初始化成功（含跨平台、终端工具、高级编排器和鉴权支持）")
 
     def set_response_callback(self, callback: callable) -> None:
         """
@@ -123,6 +129,27 @@ class DecisionHub:
         except Exception as e:
             logger.warning(f"[决策层] 终端工具初始化失败: {e}")
             self.terminal_tool = None
+
+    def _init_auth_subnet(self) -> None:
+        """
+        初始化鉴权子网（AuthNet）
+        
+        AuthNet职责：
+        - 统一用户身份管理（跨平台）
+        - 权限检查与验证
+        - 会话管理
+        - API访问控制
+        """
+        try:
+            from webnet.AuthNet import AuthSubnet
+            
+            self.auth_subnet = AuthSubnet()
+            logger.info("[决策层] 鉴权子网初始化成功（支持跨平台权限管理）")
+            logger.info("[决策层] 权限检查将在消息处理前自动执行")
+            
+        except Exception as e:
+            logger.warning(f"[决策层] 鉴权子网初始化失败: {e}")
+            self.auth_subnet = None
 
     def _get_advanced_orchestrator(self) -> Optional[Any]:
         """
@@ -457,7 +484,7 @@ class DecisionHub:
             except Exception as e:
                 logger.error(f"[决策层] 直接调用工具失败: {e}")
                 return None
-        
+
         return None
 
     def _get_chat_id(self, perception: Dict) -> str:
@@ -519,6 +546,29 @@ class DecisionHub:
         content = perception.get('content', '') or perception.get('input', '')
         user_id = perception.get('user_id', 'unknown')
         sender_name = perception.get('sender_name', '用户')
+
+        # 【新增】权限检查（如果AuthNet可用）
+        if self.auth_subnet:
+            try:
+                # 检查用户是否有基础访问权限
+                from webnet.AuthNet.permission_core import PermissionCore
+                perm_core = PermissionCore()
+                
+                # 生成统一的用户ID格式
+                unified_user_id = f"{platform}_{user_id}"
+                
+                # 检查基础权限
+                has_permission = perm_core.check_permission(unified_user_id, 'api.access')
+                
+                if not has_permission:
+                    logger.warning(f"[决策层-跨平台] 用户 {unified_user_id} 无权限访问")
+                    return "抱歉，您没有权限使用此功能。"
+                
+                logger.debug(f"[决策层-跨平台] 用户 {unified_user_id} 权限检查通过")
+                
+            except Exception as e:
+                logger.error(f"[决策层-跨平台] 权限检查失败: {e}")
+                # 权限检查失败时，允许继续（降级处理）
 
         logger.info(f"[决策层-跨平台] {sender_name} - {content[:50]}")
 
@@ -854,7 +904,7 @@ class DecisionHub:
             session_id = f"{platform}_{user_id}"
             conversation_context = await self._get_conversation_context(session_id)
 
-            # 构建提示词
+            # 构建提示词（统一使用默认提示词，通过上下文传递平台信息）
             prompt_info = self.prompt_manager.build_full_prompt(
                 user_input=content,
                 memory_context=conversation_context,  # 使用对话历史上下文
@@ -1008,11 +1058,11 @@ class DecisionHub:
         else:
             # 智能响应 - 基于人格特质
             if empathy > 0.8 and warmth > 0.8:
-                return f"我听到你说：{content} 能告诉我更多吗？我很想了解你的想法~"
+                return f"嗯...能告诉我更多吗？我很想了解你的想法~"
             elif warmth > 0.8:
-                return f"我收到了：{content} 继续对话吧~"
+                return f"好的，继续对话吧~"
             else:
-                return f"我收到你的输入了：{content}"
+                return f"嗯，我收到了。"
 
     def _update_emotion_from_input(self, content: str) -> None:
         """

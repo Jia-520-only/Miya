@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "electron": "^40.8.0"
+  },
+  "_npx": {
+    "packages": [
+      "electron"
+    ]
+  }
+}

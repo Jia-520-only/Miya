@@ -9,8 +9,8 @@ from webnet.tools.base import BaseTool, ToolContext
 logger = logging.getLogger(__name__)
 
 
-class DeleteScheduleTask(BaseTool):
-    """DeleteScheduleTask"""
+class DeleteScheduleTaskTool(BaseTool):
+    """DeleteScheduleTaskTool"""
 
     @property
     def config(self) -> Dict[str, Any]:
