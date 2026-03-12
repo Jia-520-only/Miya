@@ -636,10 +636,11 @@ class LocalTerminalManager:
                 # 打开 WSL 窗口并启动终端代理
                 # 使用 start wsl 命令打开可见的WSL窗口
                 # Windows路径需要转换为WSL路径格式 (/mnt/c/...)
-                wsl_work_dir = work_dir.replace("\\", "/").replace(":", "")
-                if wsl_work_dir[1:3].lower() in ["c", "d", "e"]:
-                    # 转换为 /mnt/c/, /mnt/d/, /mnt/e/ 格式
-                    wsl_work_dir = f"/mnt/{wsl_work_dir[0].lower()}{wsl_work_dir[2:]}"
+                wsl_work_dir = work_dir.replace("\\", "/")
+                if len(wsl_work_dir) >= 2 and wsl_work_dir[1] == ":":
+                    # 转换 D:/path 或 d:/path 为 /mnt/d/path 格式
+                    drive_letter = wsl_work_dir[0].lower()
+                    wsl_work_dir = f"/mnt/{drive_letter}{wsl_work_dir[2:]}"
                 
                 # 方案1: 使用 Windows Terminal 的 wt.exe 打开新的WSL标签页
                 try:
