@@ -39,8 +39,8 @@ class MiyaTerminalAgent:
             try:
                 import aiohttp
                 async with aiohttp.ClientSession() as session:
-                    # 尝试连接状态 API
-                    url = f"http://{self.host}:{port}/api/status"
+                    # Web API的状态端点是 /status（不是 /api/status）
+                    url = f"http://{self.host}:{port}/status"
                     print(f"  - 尝试连接 {url}")
                     async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as resp:
                         if resp.status == 200:
