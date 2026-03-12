@@ -30,8 +30,8 @@ class MiyaTerminalAgent:
         
     async def connect_to_miya(self) -> bool:
         """连接到弥娅主系统"""
-        # 尝试多个端口
-        ports_to_try = [8080, 8000, 8001, 8888]
+        # 尝试多个端口，优先尝试8000（Web API）
+        ports_to_try = [8000, 8080, 8001, 8888]
 
         print(f"正在尝试连接到弥娅主系统...")
 
@@ -62,8 +62,8 @@ class MiyaTerminalAgent:
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
-                # 使用 terminal/chat 端点
-                url = f"http://{self.host}:{self.port}/api/terminal/chat"
+                # 使用 terminal/chat 端点（Web API）
+                url = f"http://{self.host}:{self.port}/terminal/chat"
                 payload = {
                     "message": message,
                     "session_id": self.session_id,
