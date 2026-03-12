@@ -10,5 +10,7 @@ TerminalNet - 终端命令子网
 from .terminal_command import TerminalCommandTool
 from .multi_terminal import MultiTerminalTool
 from .wsl_manager import WSLManagerTool
+from .environment_detector import EnvironmentDetectorTool
+from .system_info import SystemInfoTool
 
-__all__ = ['TerminalCommandTool', 'MultiTerminalTool', 'WSLManagerTool']
+__all__ = ['TerminalCommandTool', 'MultiTerminalTool', 'WSLManagerTool', 'EnvironmentDetectorTool', 'SystemInfoTool']
