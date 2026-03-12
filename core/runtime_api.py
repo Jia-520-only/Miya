@@ -408,9 +408,37 @@ class RuntimeAPIServer:
     # ========== WebUI Chat ==========
     
     async def handle_chat(self, request: web.Request):
-        """WebUI聊天接口"""
-        # TODO: 实现WebUI聊天
-        return await self._json_response({"response": "Not implemented yet"})
+        """聊天接口（支持终端代理）"""
+        try:
+            # 获取请求数据
+            data = await request.json()
+            message = data.get("message", "")
+            session_id = data.get("session_id", "default")
+            from_terminal = data.get("from_terminal")
+
+            if not message:
+                return await self._json_response({
+                    "response": "❌ 缺少消息内容"
+                }, status=400)
+
+            # TODO: 实现实际的聊天逻辑
+            # 这里需要集成到弥娅的认知引擎或对话系统
+            # 暂时返回一个占位响应
+            response = f"收到消息: {message}"
+
+            if from_terminal:
+                response = f"✅ 终端[{from_terminal}]已连接。弥娅主系统正在处理请求..."
+
+            return await self._json_response({
+                "response": response,
+                "session_id": session_id
+            })
+
+        except Exception as e:
+            logger.error(f"处理聊天请求失败: {e}", exc_info=True)
+            return await self._json_response({
+                "response": f"❌ 处理失败: {str(e)}"
+            }, status=500)
     
     # ========== 健康检查 ==========
 

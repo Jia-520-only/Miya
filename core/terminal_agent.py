@@ -31,23 +31,29 @@ class MiyaTerminalAgent:
     async def connect_to_miya(self) -> bool:
         """连接到弥娅主系统"""
         # 尝试多个端口
-        ports_to_try = [8000, 8001, 8080]
-        
+        ports_to_try = [8080, 8000, 8001, 8888]
+
+        print(f"正在尝试连接到弥娅主系统...")
+
         for port in ports_to_try:
             try:
                 import aiohttp
                 async with aiohttp.ClientSession() as session:
                     # 尝试连接状态 API
                     url = f"http://{self.host}:{port}/api/status"
+                    print(f"  - 尝试连接 {url}")
                     async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as resp:
                         if resp.status == 200:
                             self.port = port
                             print(f"✅ 已连接到弥娅主系统 (端口: {port})")
                             return True
-            except:
+            except Exception as e:
+                print(f"  - 端口 {port} 连接失败")
                 continue
-        
+
         print(f"⚠️ 无法连接到弥娅主系统")
+        print(f"   尝试的端口: {', '.join(map(str, ports_to_try))}")
+        print(f"   请确保弥娅主程序正在运行")
         print("   请确保弥娅主程序正在运行")
         return False
     
