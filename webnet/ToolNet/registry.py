@@ -244,9 +244,11 @@ class ToolRegistry:
         """加载终端命令工具"""
         from webnet.TerminalNet.tools.terminal_command import TerminalCommandTool
         from webnet.TerminalNet.tools.multi_terminal import MultiTerminalTool
+        from webnet.TerminalNet.tools.wsl_manager import WSLManagerTool
 
         self.register(TerminalCommandTool())
         self.register(MultiTerminalTool())
+        self.register(WSLManagerTool())
 
     def _load_model_management_tools(self):
         """加载模型管理工具"""

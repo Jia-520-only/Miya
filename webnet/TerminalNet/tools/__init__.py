@@ -9,5 +9,6 @@ TerminalNet - 终端命令子网
 """
 from .terminal_command import TerminalCommandTool
 from .multi_terminal import MultiTerminalTool
+from .wsl_manager import WSLManagerTool
 
-__all__ = ['TerminalCommandTool', 'MultiTerminalTool']
+__all__ = ['TerminalCommandTool', 'MultiTerminalTool', 'WSLManagerTool']
