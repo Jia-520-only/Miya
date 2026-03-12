@@ -633,19 +633,30 @@ class LocalTerminalManager:
                 logger.info(f"已打开 PowerShell 窗口并启动弥娅代理: {session_id}")
                 
             elif terminal_type == TerminalType.WSL:
-                # 打开 WSL 窗口
+                # 打开 WSL 窗口并启动终端代理
+                # Windows路径需要转换为WSL路径格式 (/mnt/c/...)
+                wsl_work_dir = work_dir.replace("\\", "/").replace(":", "")
+                if wsl_work_dir[1:3].lower() in ["c", "d", "e"]:
+                    # 转换为 /mnt/c/, /mnt/d/, /mnt/e/ 格式
+                    wsl_work_dir = f"/mnt/{wsl_work_dir[0].lower()}{wsl_work_dir[2:]}"
+                
+                # 使用 wsl bash 命令直接打开WSL窗口
+                # 先cd到工作目录，然后运行python3启动终端代理
+                # 使用 nohup 在后台运行，并打开新窗口
+                wsl_cmd = f'wsl bash -c "cd {wsl_work_dir} && echo 正在启动弥娅终端代理... && python3 {agent_script} --session-id {session_id}"'
+                
                 subprocess.Popen(
-                    f'start wsl',
+                    wsl_cmd,
                     shell=True,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
                 )
-                logger.info(f"已打开 WSL 窗口")
+                logger.info(f"已打开 WSL 窗口并启动弥娅代理: {session_id}")
                 
             elif terminal_type == TerminalType.BASH:
                 # 打开 Git Bash 窗口并运行终端代理
                 git_bash_path = r"C:\Program Files\Git\git-bash.exe"
-                cmd = f'cd "{work_dir}" && "{venv_python}" "{agent_script}" --session-id {session_id}'
+                cmd = f'cd "{work_dir}" && {venv_python} {agent_script} --session-id {session_id}'
                 subprocess.Popen(
                     f'start "" "{git_bash_path}" -c "{cmd}"',
                     shell=True,
