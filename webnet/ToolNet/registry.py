@@ -227,6 +227,7 @@ class ToolRegistry:
         self._load_lifenet_tools()
         self._load_web_search_tools()  # 新增：加载 Web 搜索工具
         self._load_visualization_tools()  # 新增：加载可视化工具
+        self._load_model_management_tools()  # 新增：加载模型管理工具
         # 注意：查询工具已在 _load_entertainment_tools() 中加载
 
     def _load_basic_tools(self):
@@ -242,8 +243,19 @@ class ToolRegistry:
     def _load_terminal_tools(self):
         """加载终端命令工具"""
         from webnet.TerminalNet.tools.terminal_command import TerminalCommandTool
+        from webnet.TerminalNet.tools.multi_terminal import MultiTerminalTool
 
         self.register(TerminalCommandTool())
+        self.register(MultiTerminalTool())
+
+    def _load_model_management_tools(self):
+        """加载模型管理工具"""
+        try:
+            from webnet.ToolNet.tools.model_management import ModelManagementTool
+            self.register(ModelManagementTool())
+            self.logger.info("模型管理工具已注册")
+        except Exception as e:
+            self.logger.warning(f"加载模型管理工具失败: {e}")
 
     def _load_message_tools(self):
         """加载消息工具"""

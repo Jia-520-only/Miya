@@ -1,15 +1,16 @@
 {
   "models": {
-    "chinese": {
+    "deepseek_v3_official": {
       "name": "deepseek-chat",
-      "provider": "deepseek",
+      "provider": "openai",
       "base_url": "https://api.deepseek.com/v1",
-      "api_key": "your-deepseek-api-key-here",
+      "api_key": "sk-your-deepseek-api-key",
+      "description": "DeepSeek V3 官方 - 快速响应的通用模型",
       "capabilities": [
         "simple_chat",
         "chinese_understanding",
-        "task_planning",
-        "tool_calling"
+        "tool_calling",
+        "multimodal"
       ],
       "cost_per_1k_tokens": {
         "input": 0.00014,
@@ -18,31 +19,34 @@
       "latency": "fast",
       "quality": "excellent"
     },
-    "siliconflow": {
+    "deepseek_r1_official": {
+      "name": "deepseek-reasoner",
+      "provider": "openai",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "sk-your-deepseek-api-key",
+      "description": "DeepSeek R1 官方 - 深度推理模型",
+      "capabilities": [
+        "complex_reasoning",
+        "code_analysis",
+        "creative_writing",
+        "task_planning"
+      ],
+      "cost_per_1k_tokens": {
+        "input": 0.00028,
+        "output": 0.00056
+      },
+      "latency": "medium",
+      "quality": "excellent"
+    },
+    "qwen_7b": {
       "name": "Qwen/Qwen2.5-7B-Instruct",
       "provider": "openai",
       "base_url": "https://api.siliconflow.cn/v1",
-      "api_key": "your-siliconflow-api-key-here",
+      "api_key": "sk-your-siliconflow-api-key",
+      "description": "Qwen 2.5 7B - 快速通用模型（硅基流动）",
       "capabilities": [
         "simple_chat",
         "chinese_understanding",
-        "task_planning",
-        "tool_calling"
-      ],
-      "cost_per_1k_tokens": {
-        "input": 0.0001,
-        "output": 0.0002
-      },
-      "latency": "fast",
-      "quality": "excellent"
-    },
-    "fast": {
-      "name": "Qwen/Qwen2.5-7B-Instruct",
-      "provider": "openai",
-      "base_url": "https://api.siliconflow.cn/v1",
-      "api_key": "your-siliconflow-api-key-here",
-      "capabilities": [
-        "simple_chat",
         "summarization",
         "task_classification"
       ],
@@ -51,54 +55,114 @@
         "output": 0.0002
       },
       "latency": "fast",
-      "quality": "excellent"
+      "quality": "good"
     },
-    "chat": {
-      "name": "deepseek-chat",
-      "provider": "deepseek",
-      "base_url": "https://api.deepseek.com/v1",
-      "api_key": "your-deepseek-api-key-here",
+    "qwen_72b": {
+      "name": "Qwen/Qwen2.5-72B-Instruct",
+      "provider": "openai",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": "sk-your-siliconflow-api-key",
+      "description": "Qwen 2.5 72B - 高性能通用模型（硅基流动）",
       "capabilities": [
-        "tool_calling",
-        "multimodal",
-        "code_analysis"
+        "complex_reasoning",
+        "chinese_understanding",
+        "creative_writing",
+        "tool_calling"
       ],
       "cost_per_1k_tokens": {
-        "input": 0.00014,
-        "output": 0.00028
+        "input": 0.0015,
+        "output": 0.0020
+      },
+      "latency": "medium",
+      "quality": "excellent"
+    },
+    "glm_4_9b": {
+      "name": "THUDM/glm-4-9b-chat",
+      "provider": "openai",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": "sk-your-siliconflow-api-key",
+      "description": "GLM-4 9B - 清华智谱（代码能力强，硅基流动）",
+      "capabilities": [
+        "code_generation",
+        "code_analysis",
+        "chinese_understanding",
+        "simple_chat"
+      ],
+      "cost_per_1k_tokens": {
+        "input": 0.00015,
+        "output": 0.00030
       },
       "latency": "fast",
       "quality": "excellent"
     },
-    "reasoning": {
-      "name": "deepseek-chat",
-      "provider": "deepseek",
-      "base_url": "https://api.deepseek.com/v1",
-      "api_key": "your-deepseek-api-key-here",
+    "internlm_7b": {
+      "name": "internlm/internlm2_5-7b-chat",
+      "provider": "openai",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": "sk-your-siliconflow-api-key",
+      "description": "InternLM 2.5 7B - 书生浦语（硅基流动）",
+      "capabilities": [
+        "simple_chat",
+        "chinese_understanding",
+        "summarization"
+      ],
+      "cost_per_1k_tokens": {
+        "input": 0.0001,
+        "output": 0.0002
+      },
+      "latency": "fast",
+      "quality": "good"
+    },
+    "deepseek_r1_distill_7b": {
+      "name": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+      "provider": "openai",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": "sk-your-siliconflow-api-key",
+      "description": "DeepSeek R1 Distill 7B - 轻量级推理（硅基流动）",
       "capabilities": [
         "complex_reasoning",
+        "code_analysis",
+        "chinese_understanding"
+      ],
+      "cost_per_1k_tokens": {
+        "input": 0.00012,
+        "output": 0.00024
+      },
+      "latency": "fast",
+      "quality": "excellent"
+    },
+    "llama_3_1_8b": {
+      "name": "meta-llama/Llama-3.1-8B-Instruct",
+      "provider": "openai",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": "sk-your-siliconflow-api-key",
+      "description": "Llama 3.1 8B - Meta开源（硅基流动）",
+      "capabilities": [
+        "simple_chat",
+        "summarization",
+        "task_classification"
+      ],
+      "cost_per_1k_tokens": {
+        "input": 0.00008,
+        "output": 0.00016
+      },
+      "latency": "fast",
+      "quality": "good"
+    },
+    "gemma_2_9b": {
+      "name": "google/gemma-2-9b-it",
+      "provider": "openai",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": "sk-your-siliconflow-api-key",
+      "description": "Gemma 2 9B - Google开源（硅基流动）",
+      "capabilities": [
+        "simple_chat",
         "code_analysis",
         "creative_writing"
       ],
       "cost_per_1k_tokens": {
-        "input": 0.00014,
-        "output": 0.00028
-      },
-      "latency": "fast",
-      "quality": "excellent"
-    },
-    "code": {
-      "name": "deepseek-chat",
-      "provider": "deepseek",
-      "base_url": "https://api.deepseek.com/v1",
-      "api_key": "your-deepseek-api-key-here",
-      "capabilities": [
-        "code_generation",
-        "code_analysis"
-      ],
-      "cost_per_1k_tokens": {
-        "input": 0.00014,
-        "output": 0.00028
+        "input": 0.00010,
+        "output": 0.00020
       },
       "latency": "fast",
       "quality": "excellent"
@@ -106,71 +170,81 @@
   },
   "routing_strategy": {
     "simple_chat": {
-      "primary": "fast",
-      "fallback": "chinese",
+      "primary": "qwen_7b",
+      "secondary": "llama_3_1_8b",
+      "fallback": "deepseek_v3_official",
       "cost_priority": 1.0,
       "speed_priority": 0.9,
       "quality_priority": 0.7
     },
     "complex_reasoning": {
-      "primary": "reasoning_pro",
-      "fallback": "reasoning",
+      "primary": "deepseek_r1_official",
+      "secondary": "deepseek_r1_distill_7b",
+      "fallback": "qwen_72b",
       "cost_priority": 0.5,
       "speed_priority": 0.4,
       "quality_priority": 1.0
     },
     "code_analysis": {
-      "primary": "reasoning",
-      "secondary": "code",
+      "primary": "glm_4_9b",
+      "secondary": "deepseek_v3_official",
+      "fallback": "deepseek_r1_distill_7b",
       "cost_priority": 0.6,
       "speed_priority": 0.7,
       "quality_priority": 0.9
     },
     "code_generation": {
-      "primary": "code",
-      "fallback": "reasoning",
+      "primary": "glm_4_9b",
+      "secondary": "deepseek_v3_official",
+      "fallback": "gemma_2_9b",
       "cost_priority": 0.2,
       "speed_priority": 0.8,
       "quality_priority": 0.85
     },
     "tool_calling": {
-      "primary": "chat",
-      "fallback": "reasoning",
-      "cost_priority": 0.8,
+      "primary": "qwen_72b",
+      "secondary": "deepseek_v3_official",
+      "fallback": "qwen_7b",
+      "cost_priority": 0.7,
       "speed_priority": 0.6,
       "quality_priority": 0.95
     },
     "creative_writing": {
-      "primary": "reasoning_pro",
-      "secondary": "reasoning",
+      "primary": "deepseek_r1_official",
+      "secondary": "qwen_72b",
+      "fallback": "deepseek_v3_official",
       "cost_priority": 0.5,
       "speed_priority": 0.4,
       "quality_priority": 1.0
     },
     "chinese_understanding": {
-      "primary": "chinese",
-      "fallback": "fast",
+      "primary": "qwen_7b",
+      "secondary": "internlm_7b",
+      "fallback": "deepseek_v3_official",
       "cost_priority": 0.1,
       "speed_priority": 0.9,
       "quality_priority": 0.85
     },
     "summarization": {
-      "primary": "fast",
-      "fallback": "chat",
+      "primary": "llama_3_1_8b",
+      "secondary": "qwen_7b",
+      "fallback": "deepseek_v3_official",
       "cost_priority": 0.2,
       "speed_priority": 0.8,
       "quality_priority": 0.9
     },
     "multimodal": {
-      "primary": "chat",
-      "fallback": "reasoning_pro",
+      "primary": "deepseek_v3_official",
+      "secondary": "qwen_72b",
+      "fallback": "qwen_7b",
       "cost_priority": 1.0,
       "speed_priority": 0.5,
       "quality_priority": 1.0
     },
     "task_planning": {
-      "primary": "chinese",
-      "secondary": "chat",
+      "primary": "qwen_72b",
+      "secondary": "deepseek_v3_official",
+      "fallback": "deepseek_r1_official",
       "cost_priority": 0.3,
       "speed_priority": 0.7,
       "quality_priority": 0.9

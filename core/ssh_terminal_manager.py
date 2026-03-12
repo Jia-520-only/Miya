@@ -5,14 +5,23 @@ SSH远程终端管理 - 弥娅V4.0
 """
 
 import asyncio
-import paramiko
 from typing import Dict, Optional, List
 from .terminal_types import TerminalType, TerminalStatus, CommandResult, TerminalSession
 
+try:
+    import paramiko
+    PARAMIKO_AVAILABLE = True
+except ImportError:
+    PARAMIKO_AVAILABLE = False
+    paramiko = None
+
 class SSHConnection:
     """SSH连接配置"""
-    
+
     def __init__(self, host: str, port: int = 22, username: str = None, password: str = None, key_path: str = None):
+        if not PARAMIKO_AVAILABLE:
+            raise ImportError("paramiko 模块未安装。SSH 功能需要安装 paramiko: pip install paramiko")
+
         self.host = host
         self.port = port
         self.username = username
@@ -47,8 +56,11 @@ class SSHConnection:
 
 class SSHTerminalManager:
     """SSH远程终端管理器"""
-    
+
     def __init__(self):
+        if not PARAMIKO_AVAILABLE:
+            print("[警告] paramiko 未安装，SSH 功能将不可用。运行: pip install paramiko")
+
         self.ssh_connections: Dict[str, SSHConnection] = {}
         self.ssh_sessions: Dict[str, TerminalSession] = {}
         self.active_ssh_id: Optional[str] = None

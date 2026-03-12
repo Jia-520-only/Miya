@@ -84,6 +84,13 @@ class ChatRequest(BaseModel):
     platform: Optional[str] = None  # 平台类型：desktop, web, mobile 等
 
 
+class TerminalChatRequest(BaseModel):
+    """终端聊天请求"""
+    message: str
+    session_id: str = "terminal"
+    from_terminal: Optional[str] = None  # 来自终端的标识
+
+
 class SecurityScanRequest(BaseModel):
     """安全扫描请求"""
     path: str
@@ -478,6 +485,50 @@ class WebAPI:
                 }
             except Exception as e:
                 logger.error(f"[WebAPI] 聊天处理失败: {e}", exc_info=True)
+                raise HTTPException(status_code=500, detail=str(e))
+
+        # ========== 终端代理聊天 API ==========
+
+        @self.router.post("/terminal/chat")
+        async def terminal_chat(request: TerminalChatRequest):
+            """终端代理聊天接口 - 供子终端窗口使用"""
+            try:
+                from mlink.message import Message
+
+                # 确定来源标识
+                terminal_id = request.from_terminal or request.session_id
+                
+                # 使用 "desktop" 平台来绕过权限检查（因为 desktop 平台已授权）
+                # 同时保留 terminal 信息用于标识来源
+                perception = {
+                    'platform': 'desktop',  # 使用已授权的平台
+                    'content': request.message,
+                    'user_id': request.session_id,
+                    'sender_name': f'终端-{terminal_id[:8]}',
+                    'from_terminal': terminal_id,
+                    'is_terminal_agent': True  # 标记为终端代理
+                }
+
+                message = Message(
+                    msg_type='data',
+                    content=perception,
+                    source='terminal_agent',
+                    destination='decision_hub'
+                )
+
+                # 调用 DecisionHub 处理消息
+                response = await self.decision_hub.process_perception_cross_platform(message)
+
+                if not response:
+                    response = "抱歉，我无法处理您的请求。"
+
+                return {
+                    "response": response,
+                    "session_id": request.session_id,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            except Exception as e:
+                logger.error(f"[WebAPI] 终端聊天处理失败: {e}", exc_info=True)
                 raise HTTPException(status_code=500, detail=str(e))
 
         @self.router.get("/terminal/history")

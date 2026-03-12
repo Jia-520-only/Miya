@@ -8,6 +8,7 @@
 import asyncio
 import logging
 import os
+import sys
 from typing import Dict, Optional, Any, List
 from datetime import datetime
 from pathlib import Path
@@ -548,7 +549,10 @@ class DecisionHub:
         sender_name = perception.get('sender_name', '用户')
 
         # 【新增】权限检查（如果AuthNet可用）
-        if self.auth_subnet:
+        # 跳过终端代理的权限检查（terminal_agent 来自独立终端窗口）
+        is_terminal_agent = perception.get('is_terminal_agent', False)
+        
+        if self.auth_subnet and not is_terminal_agent:
             try:
                 # 检查用户是否有基础访问权限
                 from webnet.AuthNet.permission_core import PermissionCore
@@ -653,7 +657,8 @@ class DecisionHub:
         message.content['response'] = response
         message.content['platform'] = platform
 
-        logger.info(f"[决策层-跨平台] 生成响应: {response[:50]}")
+        logger.info(f"[决策层-跨平台] 生成响应: {response[:50] if response else '(空)'}")
+        print(f"[调试] 决策层返回响应: {response[:100] if response else '(空)'}", file=sys.stderr)
         return response
 
     async def _store_unified_memory(self, perception: Dict, role: str = 'user') -> None:
@@ -836,62 +841,12 @@ class DecisionHub:
         if not self.ai_client:
             return await self._fallback_response_cross_platform(content, sender_name, platform)
 
-        # 【新增】终端模式：检测单命令输入，直接调用工具
-        if platform == 'terminal' and self.tool_subnet:
-            from webnet.TerminalNet.tools.terminal_command import TerminalCommandTool
-
-            # 简单检测：如果输入不包含空格或只有很短，可能是单个命令
-            command = content.strip()
-
-            # 常见命令列表（仅限英文命令）
-            common_commands = {
-                'ls', 'dir', 'cd', 'pwd', 'cat', 'type', 'less', 'more',
-                'head', 'tail', 'cp', 'copy', 'mv', 'move', 'rm', 'del',
-                'mkdir', 'md', 'rmdir', 'touch', 'chmod', 'chown',
-                'ps', 'top', 'htop', 'kill', 'taskkill', 'tasklist',
-                'df', 'du', 'free', 'uname', 'whoami', 'date', 'time',
-                'echo', 'clear', 'cls', 'exit', 'help', 'man',
-                'git', 'npm', 'pip', 'python', 'node', 'java', 'gcc',
-                'curl', 'wget', 'ping', 'ssh', 'scp', 'ftp',
-                'firefox', 'chrome', 'edge', 'code', 'vim', 'nano',
-                'grep', 'find', 'ag', 'rg', 'awk', 'sed', 'sort', 'uniq'
-            }
-
-            # 检测是否为单命令
-            # 1. 命令必须在 common_commands 中（防止误判中文输入）
-            # 2. 或者是不带参数的单个英文命令
-            is_single_command = False
-            
-            # 检查第一个词是否是常见命令
-            parts = command.split()
-            if parts and parts[0] in common_commands:
-                # 第一个词是常见命令，且总长度不超过 100（防止误判）
-                is_single_command = len(command) <= 100
-
-            if is_single_command and len(command) > 0:
-                logger.info(f"[决策层-跨平台] 检测到单命令输入: {command}，直接调用 terminal_command 工具")
-
-                try:
-                    from core.tool_adapter import get_tool_adapter
-                    adapter = get_tool_adapter()
-
-                    # 设置 tool_registry（关键修复）
-                    if self.tool_subnet:
-                        adapter.set_tool_registry(self.tool_subnet.registry)
-
-                    # 直接调用工具
-                    result = await adapter.execute_tool(
-                        'terminal_command',
-                        {'command': command},
-                        context
-                    )
-
-                    logger.info(f"[决策层-跨平台] terminal_command 工具执行结果: {result[:200]}")
-                    return result
-
-                except Exception as e:
-                    logger.error(f"[决策层-跨平台] 直接调用 terminal_command 工具失败: {e}")
-                    # 失败后继续使用AI处理
+        # 【修改】终端模式：禁用单命令快速检测,让AI处理所有自然语言
+        # 原因: 单命令检测会绕过AI理解,导致"打开一个终端"等自然语言请求被错误处理
+        # 现在所有终端输入都通过AI分析,让AI决定调用哪个工具(multi_terminal或terminal_command)
+        # if platform == 'terminal' and self.tool_subnet:
+        #     from webnet.TerminalNet.tools.terminal_command import TerminalCommandTool
+        #     ... (已禁用单命令检测逻辑)
 
         try:
             # 构建系统提示词（包含平台信息）
@@ -964,11 +919,13 @@ class DecisionHub:
                         logger.info(f"[决策层-跨平台] 使用模型 {model_key} 处理任务类型 {task_type.value}")
 
                 # 调用 AI（带工具）
+                print(f"[调试] 开始调用AI（带工具），提示词长度: {len(prompt_info['system'])}", file=sys.stderr)
                 response = await ai_client_to_use.chat_with_system_prompt(
                     system_prompt=prompt_info['system'],
                     user_message=prompt_info['user'],
                     tools=self.tool_subnet.get_tools_schema()
                 )
+                print(f"[调试] AI调用完成（带工具），返回: {response[:100] if response else '(空)'}", file=sys.stderr)
             else:
                 # 使用多模型管理器动态选择模型
                 ai_client_to_use = self.ai_client  # 默认使用传入的AI客户端
@@ -986,10 +943,12 @@ class DecisionHub:
                         logger.info(f"[决策层-跨平台] 使用模型 {model_key} 处理任务类型 {task_type.value}")
 
                 # 调用 AI（不带工具）
+                print(f"[调试] 开始调用AI（不带工具），提示词长度: {len(prompt_info['system'])}", file=sys.stderr)
                 response = await ai_client_to_use.chat_with_system_prompt(
                     system_prompt=prompt_info['system'],
                     user_message=prompt_info['user']
                 )
+                print(f"[调试] AI调用完成（不带工具），返回: {response[:100] if response else '(空)'}", file=sys.stderr)
 
             return response
 

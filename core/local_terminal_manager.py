@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class LocalTerminalManager:
     """单机多终端管理器"""
     
-    def __init__(self):
+    def __init__(self, use_conpty: bool = True):
         self.sessions: Dict[str, TerminalSession] = {}
         self.active_session_id: Optional[str] = None
         
@@ -34,6 +34,32 @@ class LocalTerminalManager:
         
         # 全局命令历史
         self.global_history: List[Dict] = []
+        
+        # PTY 管理器（用于完整的终端控制）
+        self._pty_manager = None
+        self._use_pty = False
+        
+        # 根据平台选择合适的 PTY 管理器
+        if platform.system() == "Windows":
+            # Windows: 使用 ConPTY
+            if use_conpty:
+                try:
+                    from .conpty_terminal_manager import get_conpty_manager
+                    self._pty_manager = get_conpty_manager()
+                    self._use_pty = True
+                    logger.info("Windows ConPTY 终端控制已启用")
+                except Exception as e:
+                    logger.warning(f"ConPTY 初始化失败，使用兼容模式: {e}")
+        else:
+            # Linux/macOS: 使用 PTY
+            if use_conpty:
+                try:
+                    from .linux_pty_terminal_manager import get_pty_manager
+                    self._pty_manager = get_pty_manager()
+                    self._use_pty = True
+                    logger.info("Linux PTY 终端控制已启用")
+                except Exception as e:
+                    logger.warning(f"PTY 初始化失败，使用兼容模式: {e}")
     
     async def create_terminal(
         self,
@@ -57,8 +83,34 @@ class LocalTerminalManager:
         # 确定初始目录
         work_dir = initial_dir or os.getcwd()
         
-        # 创建进程
-        process = self._create_process(terminal_type, work_dir)
+        # 确定终端类型字符串
+        terminal_type_str = terminal_type.value if hasattr(terminal_type, 'value') else str(terminal_type)
+        
+        # ===== 关键修改：必须打开可见的终端窗口 =====
+        # 使用 start 命令打开真正的可见窗口，同时启动终端代理
+        try:
+            self._open_visible_window(terminal_type, work_dir, session_id)
+        except Exception as e:
+            logger.error(f"打开可见窗口失败: {e}", exc_info=True)
+        
+        # 同时也可以使用 PTY 来控制（可选，用于读取输出）
+        pty_session_id = None
+        process = None
+        
+        if self._use_pty and self._pty_manager:
+            try:
+                pty_session_id = self._pty_manager.create_terminal(
+                    name=name,
+                    terminal_type=terminal_type_str,
+                    initial_dir=work_dir
+                )
+                logger.info(f"使用 PTY 创建终端: {pty_session_id}")
+            except Exception as e:
+                logger.warning(f"PTY 创建失败，回退到普通方式: {e}")
+        
+        # 如果 PTY 失败，使用普通方式
+        if not pty_session_id:
+            process = self._create_process(terminal_type, work_dir)
         
         # 创建会话
         session = TerminalSession(
@@ -68,6 +120,10 @@ class LocalTerminalManager:
             process=process,
             current_dir=work_dir
         )
+        
+        # 保存 PTY 会话 ID
+        if pty_session_id:
+            session.pty_session_id = pty_session_id
         
         self.sessions[session_id] = session
         
@@ -119,10 +175,27 @@ class LocalTerminalManager:
         start_time = time.time()
         
         try:
-            # 发送命令
-            if session.process and session.process.stdin:
+            output = ""
+            
+            # 如果有 PTY 会话 ID，优先使用 PTY
+            pty_id = getattr(session, 'pty_session_id', None)
+            if pty_id and self._pty_manager:
+                # 使用 PTY 发送命令
+                self._pty_manager.send_command(pty_id, command)
+                
+                # 等待输出
+                if wait_for_completion:
+                    time.sleep(0.5)  # 等待命令执行
+                    output = self._pty_manager.read_output(pty_id, timeout=timeout)
+            elif session.process and session.process.stdin:
+                # 使用普通管道发送命令
                 session.process.stdin.write(command + "\n")
                 session.process.stdin.flush()
+                
+                if wait_for_completion:
+                    # 简单等待
+                    await asyncio.sleep(0.5)
+                    output = f"[执行命令] {command}"
             
             if wait_for_completion:
                 # 简单等待
@@ -386,53 +459,86 @@ class LocalTerminalManager:
         """
         
         try:
+            import platform
+            if platform.system() != "Windows":
+                # 非Windows系统使用普通方式
+                if terminal_type == TerminalType.CMD:
+                    return subprocess.Popen(
+                        ["bash"],
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        cwd=work_dir,
+                        text=True,
+                        bufsize=1
+                    )
+            
+            # Windows: 使用 start 命令打开新窗口
             if terminal_type == TerminalType.CMD:
-                # Windows CMD
-                return subprocess.Popen(
-                    ["cmd"],
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    cwd=work_dir,
-                    text=True,
-                    bufsize=1
+                # Windows CMD - 使用 start cmd 打开新窗口
+                # /k 表示执行命令后保持窗口打开
+                subprocess.Popen(
+                    f'start cmd /k "cd /d {work_dir}"',
+                    shell=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
                 )
+                # 返回一个虚拟的进程对象
+                return None
             
             elif terminal_type == TerminalType.POWERSHELL:
-                # PowerShell
-                return subprocess.Popen(
-                    ["powershell", "-NoExit"],
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    cwd=work_dir,
-                    text=True,
-                    bufsize=1
+                # PowerShell - 使用 start powershell 打开新窗口
+                subprocess.Popen(
+                    f'start powershell -NoExit -Command "cd \'{work_dir}\'"',
+                    shell=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
                 )
+                return None
             
             elif terminal_type == TerminalType.WSL:
-                # WSL Bash
-                return subprocess.Popen(
-                    ["wsl", "bash"],
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    cwd=work_dir,
-                    text=True,
-                    bufsize=1
-                )
+                # WSL - 使用 wt.exe 打开 Windows Terminal 或直接用 wsl
+                try:
+                    subprocess.Popen(
+                        f'start wsl -d Ubuntu',
+                        shell=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                except:
+                    # 回退到普通方式
+                    return subprocess.Popen(
+                        ["wsl", "bash"],
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        cwd=work_dir,
+                        text=True,
+                        bufsize=1
+                    )
+                return None
             
             elif terminal_type == TerminalType.BASH:
-                # Linux/Mac Bash
-                return subprocess.Popen(
-                    ["bash"],
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    cwd=work_dir,
-                    text=True,
-                    bufsize=1
-                )
+                # Linux/Mac Bash - 在 Windows 上使用 Git Bash
+                try:
+                    subprocess.Popen(
+                        f'start "C:\\Program Files\\Git\\git-bash.exe" --cd="{work_dir}"',
+                        shell=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                    return None
+                except:
+                    # 回退到普通方式
+                    return subprocess.Popen(
+                        ["bash"],
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        cwd=work_dir,
+                        text=True,
+                        bufsize=1
+                    )
             
             elif terminal_type == TerminalType.ZSH:
                 # Zsh
@@ -453,6 +559,114 @@ class LocalTerminalManager:
         except Exception as e:
             logger.error(f"创建进程失败: {e}")
             return None
+    
+    def _open_visible_window(self, terminal_type: TerminalType, work_dir: str, session_id: str = None):
+        """打开可见的终端窗口（独立新窗口）
+        
+        这是让用户真正看到新终端窗口的关键方法！
+        使用 Windows start 命令打开独立窗口。
+        同时在新窗口中启动弥娅终端代理，实现与弥娅的交互。
+        
+        Args:
+            terminal_type: 终端类型
+            work_dir: 工作目录
+            session_id: 会话ID（用于终端代理）
+        """
+        import platform
+        import sys
+        from pathlib import Path
+        
+        # 获取项目根目录
+        project_root = Path(__file__).parent.parent
+        agent_script = str(project_root / "core" / "terminal_agent.py")
+        venv_python = str(project_root / "venv" / "Scripts" / "python.exe")
+        
+        # 检查 venv Python 是否存在
+        if not Path(venv_python).exists():
+            venv_python = sys.executable  # 回退到系统 Python
+        
+        # 如果没有 session_id，生成一个
+        if not session_id:
+            session_id = self._generate_session_id()
+        
+        if platform.system() != "Windows":
+            # Linux/macOS: 使用 xdg-open 或 open
+            if platform.system() == "Linux":
+                # 使用 Python 脚本启动终端代理
+                subprocess.Popen(
+                    ["x-terminal-emulator", "-e", f"cd {work_dir} && {venv_python} {agent_script} --session-id {session_id}"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            elif platform.system() == "Darwin":
+                subprocess.Popen(
+                    ["open", "-a", "Terminal", "-n", "--args", f"-c 'cd {work_dir} && {venv_python} {agent_script} --session-id {session_id}'"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            logger.info(f"已打开终端窗口并启动弥娅代理: {session_id}")
+            return
+        
+        # Windows: 使用 start 命令打开真正可见的独立窗口
+        # 同时启动 terminal_agent.py 连接回弥娅主系统
+        try:
+            if terminal_type == TerminalType.CMD:
+                # 打开 CMD 窗口并运行终端代理
+                cmd = f'cd /d "{work_dir}" && "{venv_python}" "{agent_script}" --session-id {session_id}'
+                subprocess.Popen(
+                    f'start cmd /k "{cmd}"',
+                    shell=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                logger.info(f"已打开 CMD 窗口并启动弥娅代理: {session_id}")
+                
+            elif terminal_type == TerminalType.POWERSHELL:
+                # 打开 PowerShell 窗口并运行终端代理
+                cmd = f'cd "{work_dir}"; "{venv_python}" "{agent_script}" --session-id {session_id}'
+                subprocess.Popen(
+                    f'start powershell -NoExit -Command "{cmd}"',
+                    shell=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                logger.info(f"已打开 PowerShell 窗口并启动弥娅代理: {session_id}")
+                
+            elif terminal_type == TerminalType.WSL:
+                # 打开 WSL 窗口
+                subprocess.Popen(
+                    f'start wsl',
+                    shell=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                logger.info(f"已打开 WSL 窗口")
+                
+            elif terminal_type == TerminalType.BASH:
+                # 打开 Git Bash 窗口并运行终端代理
+                git_bash_path = r"C:\Program Files\Git\git-bash.exe"
+                cmd = f'cd "{work_dir}" && "{venv_python}" "{agent_script}" --session-id {session_id}'
+                subprocess.Popen(
+                    f'start "" "{git_bash_path}" -c "{cmd}"',
+                    shell=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                logger.info(f"已打开 Git Bash 窗口并启动弥娅代理: {session_id}")
+                
+            else:
+                # 默认打开 PowerShell
+                cmd = f'cd "{work_dir}"; "{venv_python}" "{agent_script}" --session-id {session_id}'
+                subprocess.Popen(
+                    f'start powershell -NoExit -Command "{cmd}"',
+                    shell=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                logger.info(f"已打开终端窗口并启动弥娅代理: {session_id}")
+                
+        except Exception as e:
+            logger.error(f"打开可见窗口失败: {e}")
     
     def _generate_session_id(self) -> str:
         """生成会话ID

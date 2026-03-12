@@ -657,9 +657,11 @@ class DeepSeekClient(BaseAIClient):
                         self.tool_context or {}
                     )
 
+                    logger.info(f"[AIClient] 工具执行结果: {result[:200] if result else '(无结果)'}")
+
                     # 检查是否是直接返回工具（如运势、抽签等）
                     # 这些工具返回的结果已经是格式化的，直接返回给用户
-                    direct_return_tools = ['horoscope', 'wenchang_dijun', 'terminal_command']
+                    direct_return_tools = ['horoscope', 'wenchang_dijun', 'terminal_command', 'multi_terminal']
                     if tool_call.function.name in direct_return_tools:
                         logger.info(f"[AIClient] 检测到直接返回工具: {tool_call.function.name}，直接返回结果")
                         return result

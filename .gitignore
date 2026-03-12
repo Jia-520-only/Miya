@@ -46,6 +46,8 @@ volumes/
 *.sqlite
 
 # Config
+.env
+config/.env
 .env.local
 .env.*.local
 config/.env.local

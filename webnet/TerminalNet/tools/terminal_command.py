@@ -79,36 +79,11 @@ class TerminalCommandTool(BaseTool):
 
         return {
             "name": "terminal_command",
-            "description": f"""【重要】执行终端命令以完成用户的电脑操作请求。弥娅拥有完全的命令行控制权，通过此工具操作电脑。
+            "description": f"""执行单个系统命令。仅当用户要求执行明确的系统命令（如ls、cd、pwd、git、python等）或查看系统信息时调用。
 
-【当前环境信息】
-- 操作系统：{platform_info}
-- Shell：{shell_info}
-- 当前目录：{cwd}
+当前环境：{platform_info}系统，{shell_info} shell，当前目录：{cwd}
 
-【何时必须调用】
-- 当用户要求执行任何系统命令时（如"打开浏览器"、"查看文件"、"运行脚本"）
-- 当用户需要系统信息时（如"查看进程"、"查看磁盘空间"、"列出文件"）
-- 当用户输入单个命令时（如"ls"、"pwd"、"cd"、"ps"）
-- 当用户使用自然语言描述需要操作电脑时（如"查看当前目录"、"打开火狐浏览器"）
-
-【{platform_info} 支持的命令示例】
-1. 文件操作：ls/dir, cd, pwd, cat/type, cp/copy, mv/move, rm/del, mkdir/md, touch
-2. 程序启动：firefox, chrome, python, npm, git, docker, code, notepad, explorer
-3. 系统管理：ps/tasklist, kill/taskkill, top/Get-Process, df/Get-PSDrive
-4. 文本搜索：grep/Select-String, find/Get-ChildItem, cat/Get-Content
-5. 网络工具：ping/Test-Connection, curl, wget
-
-【重要提示】
-- 工具会自动适配不同平台的命令（Linux使用Bash，Windows使用PowerShell）
-- 在 Windows 上，可以使用 PowerShell 命令（如 Get-ChildItem, Get-Process, Set-Location）
-- 在 Linux/macOS 上，使用标准 Bash 命令（如 ls, ps, grep）
-- 创建文件并写入内容：Windows和Linux都使用 'echo 内容 > 文件名' 语法
-- 路径中的 ~ 符号会自动展开（如 ~/Desktop 会自动展开为用户桌面路径）
-- **对于文件创建任务，只需要一个命令即可**，例如：'echo "内容" > ~/Desktop/文件名.txt'
-- 危险命令会显示警告并要求确认
-- 命令执行结果会记录到记忆系统
-- **不要自己猜测命令执行结果，必须调用此工具获取实际结果**""",
+重要：如果用户要求"创建终端"、"打开终端"或"新建窗口"，必须调用multi_terminal工具，而不是此工具！""",
             "parameters": {
                 "type": "object",
                 "properties": {

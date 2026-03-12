@@ -8,5 +8,6 @@ TerminalNet - 终端命令子网
 - 稳定、独立、可维修、故障隔离
 """
 from .terminal_command import TerminalCommandTool
+from .multi_terminal import MultiTerminalTool
 
-__all__ = ['TerminalCommandTool']
+__all__ = ['TerminalCommandTool', 'MultiTerminalTool']
