@@ -634,24 +634,34 @@ class LocalTerminalManager:
                 
             elif terminal_type == TerminalType.WSL:
                 # 打开 WSL 窗口并启动终端代理
+                # 使用 start wsl 命令打开可见的WSL窗口
                 # Windows路径需要转换为WSL路径格式 (/mnt/c/...)
                 wsl_work_dir = work_dir.replace("\\", "/").replace(":", "")
                 if wsl_work_dir[1:3].lower() in ["c", "d", "e"]:
                     # 转换为 /mnt/c/, /mnt/d/, /mnt/e/ 格式
                     wsl_work_dir = f"/mnt/{wsl_work_dir[0].lower()}{wsl_work_dir[2:]}"
                 
-                # 使用 wsl bash 命令直接打开WSL窗口
-                # 先cd到工作目录，然后运行python3启动终端代理
-                # 使用 nohup 在后台运行，并打开新窗口
-                wsl_cmd = f'wsl bash -c "cd {wsl_work_dir} && echo 正在启动弥娅终端代理... && python3 {agent_script} --session-id {session_id}"'
-                
-                subprocess.Popen(
-                    wsl_cmd,
-                    shell=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                logger.info(f"已打开 WSL 窗口并启动弥娅代理: {session_id}")
+                # 方案1: 使用 Windows Terminal 的 wt.exe 打开新的WSL标签页
+                try:
+                    wsl_cmd = f'wt.exe -w 0 new-tab --profile "Ubuntu" -- wsl.exe -- bash -c "cd {wsl_work_dir} && echo 正在启动弥娅终端代理... && python3 {agent_script} --session-id {session_id} && exec bash"'
+                    subprocess.Popen(
+                        wsl_cmd,
+                        shell=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                    logger.info(f"已使用 Windows Terminal 打开 WSL 窗口并启动弥娅代理: {session_id}")
+                except FileNotFoundError:
+                    # 方案2: 如果没有 Windows Terminal，使用 start wsl
+                    logger.warning("Windows Terminal 未找到，使用 start wsl 命令")
+                    wsl_cmd = f'start wsl bash -c "cd {wsl_work_dir} && echo 正在启动弥娅终端代理... && python3 {agent_script} --session-id {session_id} && exec bash"'
+                    subprocess.Popen(
+                        wsl_cmd,
+                        shell=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                    logger.info(f"已使用 start wsl 打开 WSL 窗口并启动弥娅代理: {session_id}")
                 
             elif terminal_type == TerminalType.BASH:
                 # 打开 Git Bash 窗口并运行终端代理
