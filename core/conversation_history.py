@@ -203,7 +203,11 @@ class ConversationHistoryManager:
 
         # 添加完成回调，确保任务完成时清理引用
         def _task_done(t: asyncio.Task):
-            if t.exception():
+            if t.cancelled():
+                # 任务被取消是正常情况，不记录错误
+                logger.debug(f"会话保存任务被取消: {session_id}")
+            elif t.exception():
+                # 只有真正的异常才记录错误
                 logger.error(f"会话保存任务异常: {t.exception()}", exc_info=t.exception())
             self._save_tasks.pop(session_id, None)
 

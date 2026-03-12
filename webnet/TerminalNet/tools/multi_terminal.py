@@ -74,15 +74,19 @@ class MultiTerminalTool(BaseTool):
 
         return {
             "name": "multi_terminal",
-            "description": f"""管理多个终端窗口的创建、切换和关闭。仅当用户明确要求"创建终端"、"打开终端"、"新建窗口"、"切换终端"、"关闭终端"时调用。
+            "description": f"""管理多个终端窗口的创建、切换和关闭。当用户要求创建、打开、新建任何类型的终端时调用。
 
 当前环境：{platform_info}系统，{shell_info} shell，当前目录：{cwd}
 
-⚡ 【重要】创建终端时，AI 必须根据当前操作系统自动选择合适的终端类型：
-- Windows系统：自动使用 powershell
-- Linux/BSD系统：自动使用 bash
-- macOS系统：自动使用 zsh
-不要询问用户选择终端类型，直接根据系统自动推断！
+⚡ 【重要】创建终端时，AI 必须根据用户请求的终端类型自动执行：
+
+支持的终端创建方式：
+1. "打开一个WSL" → 调用 create_terminal，terminal_type="wsl"
+2. "打开一个PowerShell" → 调用 create_terminal，terminal_type="powershell"
+3. "打开一个CMD" → 调用 create_terminal，terminal_type="cmd"
+4. "打开一个Bash" → 调用 create_terminal，terminal_type="bash"
+5. "新建终端" → 调用 create_terminal，使用默认终端类型
+6. "列出所有终端" → 调用 list_terminals
 
 操作类型：
 - create_terminal: 创建新终端（需要参数：name, terminal_type）
@@ -92,7 +96,15 @@ class MultiTerminalTool(BaseTool):
 - execute_parallel: 在多个终端并行执行命令（需要参数：commands）
 - execute_sequence: 在指定终端顺序执行命令（需要参数：session_id, sequence_commands）
 
-终端类型：cmd(仅Windows), powershell(Windows/Linux), bash(Linux/macOS/Windows), zsh(macOS), sh(Unix)""",
+终端类型（terminal_type参数）：
+- cmd: Windows CMD
+- powershell: Windows PowerShell（Windows默认）
+- bash: Linux Bash（Linux/macOS默认，Windows Git Bash也可用）
+- wsl: Windows Subsystem for Linux
+- zsh: macOS Zsh
+- sh: Unix Shell
+- git_bash: Git Bash（Windows）
+- venv: Python虚拟环境""",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -114,7 +126,7 @@ class MultiTerminalTool(BaseTool):
                     },
                     "terminal_type": {
                         "type": "string",
-                        "enum": ["cmd", "powershell", "bash", "zsh", "sh"],
+                        "enum": ["cmd", "powershell", "bash", "zsh", "sh", "wsl", "git_bash", "venv"],
                         "description": "终端类型（create_terminal时必填）"
                     },
                     "session_id": {
