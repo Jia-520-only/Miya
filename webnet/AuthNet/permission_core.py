@@ -130,10 +130,20 @@ class PermissionCore:
                 break
         
         if not user:
-            # 用户不存在，只能使用默认权限组
+            # 用户不存在，根据平台自动分配权限组
+            # 桌面端用户自动获得 User 权限组
+            default_groups = ["Default"]
+            
+            # 桌面端用户自动获得 User 权限组
+            if user_id.startswith("desktop_") or (context and context.get("platform") == "desktop"):
+                default_groups = ["User"]
+            # 终端用户自动获得 User 权限组
+            elif user_id.startswith("terminal_") or (context and context.get("platform") == "terminal"):
+                default_groups = ["User"]
+            
             user = {
                 "user_id": user_id,
-                "permission_groups": ["Default"],
+                "permission_groups": default_groups,
                 "permissions": []
             }
         
