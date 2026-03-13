@@ -3,6 +3,7 @@ import { computed, nextTick, ref } from 'vue'
 import { useSettingsStore } from '../stores/settings'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import { copyToClipboard, formatTimestamp } from '../utils'
+import { ttsApi, playAudioFromBase64, stopAudio, isPlaying } from '../api/tts'
 import type { ChatMessage } from '../stores/chat'
 
 interface Props {
@@ -23,6 +24,7 @@ const emit = defineEmits<{
 const settings = useSettingsStore()
 const showActionsMenu = ref(false)
 const copied = ref(false)
+const isSpeaking = ref(false)
 
 const isUser = computed(() => props.message.role === 'user')
 const isAssistant = computed(() => props.message.role === 'assistant')
@@ -45,6 +47,42 @@ function handleRegenerate() {
 function handleDelete() {
   emit('delete', props.message)
 }
+
+async function handleSpeak() {
+  if (isSpeaking.value) {
+    stopAudio()
+    isSpeaking.value = false
+    return
+  }
+  
+  isSpeaking.value = true
+  try {
+    const result = await ttsApi.speak({
+      text: props.message.content,
+      engine: 'gpt_sovits'
+    })
+    
+    if (result.success && result.audio_data) {
+      playAudioFromBase64(result.audio_data, result.format)
+      
+      // 监听播放结束
+      const audio = new Audio()
+      audio.src = `data:audio/${result.format || 'mpeg'};base64,${result.audio_data}`
+      audio.onended = () => {
+        isSpeaking.value = false
+      }
+      audio.onerror = () => {
+        isSpeaking.value = false
+      }
+    } else {
+      console.error('TTS生成失败:', result.error)
+      isSpeaking.value = false
+    }
+  } catch (error) {
+    console.error('TTS错误:', error)
+    isSpeaking.value = false
+  }
+}
 </script>
 
 <template>
@@ -58,6 +96,15 @@ function handleDelete() {
           title="重新生成"
         >
           <i class="pi pi-refresh"></i>
+        </button>
+        <button
+          v-if="isAssistant"
+          class="action-button speak"
+          :class="{ speaking: isSpeaking }"
+          @click="handleSpeak"
+          :title="isSpeaking ? '停止播放' : '语音朗读'"
+        >
+          <i :class="isSpeaking ? 'pi pi-stop-circle' : 'pi pi-volume-up'"></i>
         </button>
         <button
           class="action-button"
@@ -177,6 +224,24 @@ function handleDelete() {
   background: rgba(239, 68, 68, 0.15);
   border-color: rgba(239, 68, 68, 0.3);
   color: #ef4444;
+}
+
+.action-button.speak:hover {
+  background: rgba(168, 85, 247, 0.15);
+  border-color: rgba(168, 85, 247, 0.3);
+  color: #a855f7;
+}
+
+.action-button.speaking {
+  background: rgba(168, 85, 247, 0.2);
+  border-color: rgba(168, 85, 247, 0.4);
+  color: #a855f7;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
 
 .bubble-time {

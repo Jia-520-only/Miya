@@ -87,11 +87,41 @@ class MiyaDesktop:
 
         self.logger.info("弥娅核心系统初始化完成")
 
+        # 初始化TTS系统
+        self.tts_net = None
+        self._init_tts_system()
+
         # 获取 Web API 实例
         if self.miya.web_api:
             self.web_api = self.miya.web_api
+            # 将TTS系统传递给Web API
+            if self.tts_net:
+                self.web_api.tts_net = self.tts_net
         else:
             self.logger.warning("Web API 未初始化")
+
+    def _init_tts_system(self):
+        """初始化TTS系统"""
+        try:
+            import json
+            from pathlib import Path
+            from core.constants import Encoding
+            
+            from webnet.tts import TTSNet
+            # 初始化 TTSNet
+            self.tts_net = TTSNet(self.miya.mlink if hasattr(self.miya, 'mlink') else None)
+            # 加载TTS配置
+            tts_config_path = Path(__file__).parent.parent / 'config' / 'tts_config.json'
+            if tts_config_path.exists():
+                with open(tts_config_path, 'r', encoding=Encoding.UTF8) as f:
+                    tts_config = json.load(f)
+                self.tts_net.initialize(tts_config)
+                self.logger.info("TTS系统初始化成功")
+            else:
+                self.logger.warning("TTS配置文件不存在，使用默认配置")
+        except Exception as e:
+            self.logger.warning(f"TTS系统初始化失败: {e}")
+            self.tts_net = None
 
     def start_server(self, host: str = "127.0.0.1", port: int = 8000):
         """启动 Web 服务器"""
