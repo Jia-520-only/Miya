@@ -325,6 +325,8 @@ class Miya:
             # 初始化 MemoryNet 全局记忆子网
             self.memory_net = MemoryNet(self.mlink)
             self.logger.info("MemoryNet 全局记忆子网初始化成功")
+            
+            # 清除对话历史移到异步初始化之后，此处不再处理
 
             # 初始化Neo4j知识图谱（使用已连接的neo4j客户端）
             self._init_neo4j_system()
@@ -340,6 +342,16 @@ class Miya:
             try:
                 await self.memory_net.initialize()
                 self.logger.info("MemoryNet 初始化完成")
+                
+                # 清除之前的终端对话历史，确保新会话是干净的
+                try:
+                    if self.memory_net.conversation_history:
+                        session_to_clear = "terminal_default"
+                        await self.memory_net.conversation_history.clear_session(session_to_clear)
+                        self.logger.info("已清除之前的终端对话历史（新会话开始）")
+                except Exception as e:
+                    self.logger.warning(f"清除对话历史失败: {e}")
+                    
             except Exception as e:
                 self.logger.error(f"MemoryNet 初始化失败: {e}")
 
@@ -517,13 +529,12 @@ class Miya:
         try:
             import threading
             import uvicorn
-            
+
             def run_server():
                 if self.web_api and self.web_api.router:
-                    # 创建 FastAPI app 并包含 router
                     from fastapi import FastAPI
                     from fastapi.middleware.cors import CORSMiddleware
-                    
+
                     app = FastAPI(title="弥娅终端API")
                     app.add_middleware(
                         CORSMiddleware,
@@ -533,16 +544,19 @@ class Miya:
                         allow_headers=["*"],
                     )
                     app.include_router(self.web_api.router)
-                    
-                    # 运行服务器
-                    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="warning")
-            
-            # 在后台线程启动服务器
-            server_thread = threading.Thread(target=run_server, daemon=True)
+
+                    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning")
+
+            server_thread = threading.Thread(target=run_server, daemon=False)
             server_thread.start()
-            self.logger.info("Web API 服务器已在后台启动 (http://127.0.0.1:8000)")
+
+            import time
+            time.sleep(2)
+
+            self.logger.info("Web API 服务器已在后台启动 (http://0.0.0.0:8000)")
         except Exception as e:
             self.logger.warning(f"API 服务器启动失败: {e}")
+
 
     def _init_neo4j_system(self):
         """初始化Neo4j知识图谱系统"""
@@ -582,7 +596,6 @@ class Miya:
         Returns:
             系统响应
         """
-        print(f"[调试] process_input_async 开始处理: {user_input}", file=sys.stderr)
         # self.logger.info(f"用户输入: {user_input}")  # 注释掉，避免终端输出冗余日志
 
 
@@ -614,7 +627,6 @@ class Miya:
 
         # 使用DecisionHub处理（跨平台统一流程）
         response = await self.decision_hub.process_perception_cross_platform(message)
-        print(f"[调试] process_perception_cross_platform返回: {response[:100] if response else '(空)'}", file=sys.stderr)
 
         # DecisionHub 已经将响应设置到 message.content 中
         # 直接返回响应，如果是 None 则返回空字符串
@@ -637,7 +649,6 @@ class Miya:
         asyncio.set_event_loop(loop)
         try:
             response = loop.run_until_complete(self.process_input_async(user_input, user_id))
-            print(f"[调试] process_input返回: {response[:100] if response else '(空)'}", file=sys.stderr)
             return response
         finally:
             loop.close()
@@ -789,6 +800,22 @@ def main():
 
                     if user_input.lower() in ['exit', 'quit', '退出', '再见']:
                         print(f"{miya.identity.name}: 再见！")
+                        # 保存对话历史到 Lifebook
+                        if miya.decision_hub:
+                            try:
+                                import asyncio
+                                loop = asyncio.get_event_loop()
+                                if loop.is_running():
+                                    asyncio.create_task(
+                                        miya.decision_hub.handle_session_end("default", platform="terminal")
+                                    )
+                                else:
+                                    loop.run_until_complete(
+                                        miya.decision_hub.handle_session_end("default", platform="terminal")
+                                    )
+                                print("对话历史已保存")
+                            except Exception as e:
+                                print(f"保存对话历史失败: {e}")
                         break
 
                     if user_input.lower() in ['status', '状态']:

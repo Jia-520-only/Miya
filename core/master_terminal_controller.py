@@ -22,6 +22,95 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _should_stream_output(text: str) -> bool:
+    """
+    判断是否应该使用流式输出（逐字显示）
+    
+    规则：
+    - 聊天/文本内容 → 流式输出
+    - 系统目录/状态/命令结果 → 一次性输出
+    """
+    if not text:
+        return False
+    
+    text_lower = text.lower().strip()
+    
+    # 系统类内容模式（不需要流式输出）
+    system_patterns = [
+        # 目录列表
+        text.startswith('/') or '目录' in text or '文件夹' in text,
+        text.startswith('d:') or text.startswith('c:') or text.startswith('e:') or text.startswith('f:'),
+        'total ' in text_lower and 'drwxr-xr-x' in text_lower,  # Linux目录
+        # 命令提示符
+        'root@' in text or ':~' in text or ':/$' in text,
+        # 状态信息
+        'status:' in text_lower or '状态:' in text,
+        # 错误信息
+        text.startswith('error') or text.startswith('error:') or text.startswith('错误'),
+        # JSON/XML结构
+        (text.strip().startswith('{') and text.strip().endswith('}')),
+        (text.strip().startswith('[') and text.strip().endswith(']')),
+        # 纯数字/符号
+        text.isdigit(),
+        # 命令执行结果（通常有分隔线）
+        ('=' * 20 in text or '-' * 20 in text),
+    ]
+    
+    # 如果匹配任何系统模式，不使用流式输出
+    if any(system_patterns):
+        return False
+    
+    # 检查是否像正常的对话文本
+    chat_indicators = [
+        '你好', '您好', '我知道了', '明白了', '好的', '可以', '没问题',
+        '请问', '有什么', '帮助', '是的', '不是', '但是', '因为', '所以',
+        '我建议', '你可以', '让我', '我来', '推荐', '今天', '天气',
+    ]
+    
+    # 统计中文字符和标点
+    chinese_count = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+    punctuation_count = sum(1 for c in text if c in '，。！？；：""''（）')
+    
+    # 如果有足够的中文字符或对话关键词，认为是聊天内容
+    if chinese_count > 10 or any(indicator in text for indicator in chat_indicators):
+        return True
+    
+    # 如果标点比例较高，也认为是文本
+    if len(text) > 20 and punctuation_count / len(text) > 0.05:
+        return True
+    
+    # 默认返回True（流式输出）
+    return True
+
+
+def _stream_print(text: str, delay: float = 0.02):
+    """流式输出（逐字显示）
+    
+    Args:
+        text: 要输出的文本
+        delay: 每个字符的延迟（秒），默认0.02秒
+    """
+    if not text:
+        print()
+        return
+    
+    import sys
+    import time
+    
+    # 逐字输出
+    for i, char in enumerate(text):
+        sys.stdout.write(char)
+        sys.stdout.flush()
+        # 最后一个字符或遇到句末标点时停顿稍长
+        if i < len(text) - 1:
+            if char in '。！？；：\n':
+                time.sleep(delay * 3)
+            else:
+                time.sleep(delay)
+    
+    print()  # 最后换行
+
+
 class TaskPriority(Enum):
     """任务优先级"""
     HIGH = "high"
@@ -162,7 +251,12 @@ class MasterTerminalController:
         """
         if self.miya_callback:
             response = await self.miya_callback(input_text)
-            print(f"\n{response}\n")
+            # 根据内容类型决定输出方式
+            if _should_stream_output(response):
+                _stream_print(f"\n{response}")
+                print()
+            else:
+                print(f"\n{response}\n")
         else:
             print("\n[弥娅] AI回调未设置，无法处理对话请求\n")
 

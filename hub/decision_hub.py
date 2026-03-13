@@ -16,6 +16,7 @@ from pathlib import Path
 from mlink.message import Message, MessageType, FlowType
 from core.constants import Encoding
 from hub.decision_helper import count_memory_types
+from memory.session_manager import SessionManager, init_session_manager, get_session_manager, SessionCategory
 
 
 logger = logging.getLogger(__name__)
@@ -71,9 +72,11 @@ class DecisionHub:
         self.miya_instance = miya_instance  # 新增：Miya 实例
 
         # 【新增】对话历史上下文配置
-        self.enable_conversation_context = os.getenv('ENABLE_CONVERSATION_CONTEXT', 'false').lower() == 'true'
-        self.conversation_context_max_count = int(os.getenv('CONVERSATION_CONTEXT_MAX_COUNT', '5'))
-        self.conversation_context_max_tokens = int(os.getenv('CONVERSATION_CONTEXT_MAX_TOKENS', '1000'))
+        # 默认启用对话历史，让AI能够记住之前的上下文
+        # 注意：直接硬编码为True，避免Windows环境变量解析问题
+        self.enable_conversation_context = True  # 直接启用，不依赖环境变量
+        self.conversation_context_max_count = 10
+        self.conversation_context_max_tokens = 2000
 
         # 架构修复: 移除game_mode_manager,使用game_mode_adapter代替
         # self.game_mode_manager = None  # 已废弃
@@ -94,7 +97,10 @@ class DecisionHub:
         # 响应回调（用于发送回 QQNet）
         self.response_callback: Optional[callable] = None
 
-        logger.info("决策层 Hub 初始化成功（含跨平台、终端工具、高级编排器和鉴权支持）")
+        # 【新增】初始化统一会话管理器
+        self.session_manager = self._init_session_manager()
+
+        logger.info("决策层 Hub 初始化成功（含跨平台、终端工具、高级编排器、鉴权和会话管理支持）")
 
     def set_response_callback(self, callback: callable) -> None:
         """
@@ -104,6 +110,28 @@ class DecisionHub:
             callback: 回调函数，签名: callback(qq_message, response_text) -> None
         """
         self.response_callback = callback
+
+    def _init_session_manager(self) -> Optional[SessionManager]:
+        """
+        初始化统一会话管理器
+        
+        Returns:
+            SessionManager 实例
+        """
+        try:
+            # 总是重新初始化，确保有完整的组件引用
+            sm = init_session_manager(
+                memory_engine=self.memory_engine,
+                conversation_history=self.memory_net.conversation_history if self.memory_net else None,
+                scheduler=self.scheduler,
+                ai_client=self.ai_client
+            )
+            logger.info("[决策层] 会话管理器初始化完成")
+            return sm
+            
+        except Exception as e:
+            logger.warning(f"[决策层] 会话管理器初始化失败: {e}")
+            return None
 
     def _init_terminal_tool(self) -> None:
         """
@@ -576,6 +604,79 @@ class DecisionHub:
 
         logger.info(f"[决策层-跨平台] {sender_name} - {content[:50]}")
 
+        # 【新增】会话保存触发条件检测
+        session_id = f"{platform}_{user_id}"
+        
+        # 1. 检测是否触发保存（再见/晚安等关键词）
+        if self.session_manager and self.session_manager.should_save_on_message(content, platform):
+            logger.info(f"[决策层-跨平台] 检测到保存触发关键词: {content[:30]}")
+            # 获取对话历史并保存
+            messages = await self.session_manager.get_conversation_messages(
+                session_id=session_id,
+                platform=platform,
+                limit=50
+            )
+            if messages:
+                category = self.session_manager.platform_category_map.get(platform, SessionCategory.ACTIVITY)
+                
+                # 如果是"记日记"关键词，标记为日记
+                is_diary = self.session_manager.should_save_diary(content)
+                
+                # 检查消息中是否包含日记内容（"记录今天..."）
+                diary_content = None
+                if is_diary:
+                    # 提取日记内容（从关键词后开始）
+                    diary_content = ""
+                    for kw in ['记录今天', '记录一下', '记日记', '写日记']:
+                        if kw in content:
+                            idx = content.find(kw) + len(kw)
+                            diary_content = content[idx:].strip()
+                            break
+                
+                save_result = await self.session_manager.save_session(
+                    session_id=session_id,
+                    platform=platform,
+                    messages=messages,
+                    category=category,
+                    is_diary=is_diary,
+                    diary_content=diary_content if diary_content else None
+                )
+                
+                if save_result.get('success'):
+                    logger.info(f"[决策层-跨平台] 会话已保存: {save_result.get('title')}")
+                    
+                    # 根据保存类型返回不同的响应
+                    if is_diary:
+                        response = "好的，你的日记已经帮你记录下来了哦~ 这是一段珍贵的记忆呢！"
+                    else:
+                        response = "好的，我们的对话已经保存了。下次再见时我会记得我们的对话内容的~ 晚安！"
+                    
+                    response = self.emotion.influence_response(response)
+                    self.emotion.decay_coloring()
+                    return response
+        
+        # 2. 更新会话活动时间
+        if self.session_manager:
+            self.session_manager.update_activity(session_id)
+            
+            # 3. 检查超时自动保存
+            if self.session_manager.check_timeout_save(session_id):
+                logger.info(f"[决策层-跨平台] 检测到会话超时: {session_id}")
+                messages = await self.session_manager.get_conversation_messages(
+                    session_id=session_id,
+                    platform=platform,
+                    limit=50
+                )
+                if messages:
+                    category = self.session_manager.platform_category_map.get(platform, SessionCategory.ACTIVITY)
+                    await self.session_manager.save_session(
+                        session_id=session_id,
+                        platform=platform,
+                        messages=messages,
+                        category=category
+                    )
+                    logger.info(f"[决策层-跨平台] 超时会话已自动保存")
+
         # 【新增】检测是否是复杂任务，使用高级编排器
         if self._should_use_advanced_orchestration(content):
             logger.info(f"[决策层-跨平台] 检测到复杂任务，启动高级编排器")
@@ -658,7 +759,6 @@ class DecisionHub:
         message.content['platform'] = platform
 
         logger.info(f"[决策层-跨平台] 生成响应: {response[:50] if response else '(空)'}")
-        print(f"[调试] 决策层返回响应: {response[:100] if response else '(空)'}", file=sys.stderr)
         return response
 
     async def _store_unified_memory(self, perception: Dict, role: str = 'user') -> None:
@@ -717,7 +817,6 @@ class DecisionHub:
                         'sender_name': sender_name,
                     }
                 )
-                logger.debug(f"[决策层-跨平台] 对话历史已存储: {session_id}/{role}")
 
         except Exception as e:
             logger.error(f"[决策层-跨平台] 存储记忆失败: {e}")
@@ -780,7 +879,10 @@ class DecisionHub:
         Returns:
             对话历史列表（最多max_count条，或达到token限制）
         """
-        if not self.enable_conversation_context or not self.memory_net or not self.memory_net.conversation_history:
+        if not self.enable_conversation_context:
+            return []
+        
+        if not self.memory_net or not self.memory_net.conversation_history:
             return []
 
         try:
@@ -790,13 +892,21 @@ class DecisionHub:
                 limit=self.conversation_context_max_count
             )
 
-            if not messages:
-                return []
-
-            # 转换为字典格式
+            # 构建上下文
             context = []
             total_tokens = 0
 
+            # 如果是新会话（对话历史为空），不加载 Lifebook 摘要
+            # 这样可以避免旧会话的上下文干扰新会话
+            if not messages:
+                # 不再自动加载 Lifebook 摘要，避免上下文干扰
+                # 如果用户需要查看历史，可以手动询问
+                pass
+            
+            if not messages:
+                return context
+
+            # 转换为字典格式
             for msg in reversed(messages):  # 从旧到新
                 # 估算token数（简化：按字符数/4估算）
                 token_estimate = len(msg.content) // 4
@@ -813,12 +923,45 @@ class DecisionHub:
                 })
                 total_tokens += token_estimate
 
-            logger.info(f"[决策层-跨平台] 加载对话历史上下文: {len(context)}条, 约{total_tokens}tokens")
             return context
 
         except Exception as e:
-            logger.error(f"[决策层-跨平台] 获取对话历史失败: {e}", exc_info=True)
             return []
+
+    async def _get_lifebook_summary(self) -> str:
+        """
+        从记忆系统中获取 Lifebook 终端会话摘要
+        
+        Returns:
+            摘要文本，如果没有则返回空字符串
+        """
+        try:
+            if not self.memory_engine:
+                return ""
+            
+            # 搜索最近保存的终端会话记录
+            # 使用模糊搜索查找 terminal_session 类型的记录
+            results = self.memory_engine.search_tides(
+                query="终端会话",
+                limit=3
+            )
+            
+            if results:
+                summaries = []
+                for result in results:
+                    data = result.get('data', {})
+                    if data.get('type') == 'terminal_session':
+                        content = data.get('content', '')
+                        title = data.get('title', '')
+                        summaries.append(f"## {title}\n{content[:500]}")
+                
+                if summaries:
+                    return "\n\n".join(summaries)
+            
+            return ""
+        except Exception as e:
+            logger.debug(f"[决策层] 获取 Lifebook 摘要失败: {e}")
+            return ""
 
     async def _generate_response_cross_platform(self, content: str,
                                           platform: str,
@@ -857,6 +1000,7 @@ class DecisionHub:
 
             # 【新增】获取对话历史上下文
             session_id = f"{platform}_{user_id}"
+            
             conversation_context = await self._get_conversation_context(session_id)
 
             # 构建提示词（统一使用默认提示词，通过上下文传递平台信息）
@@ -919,13 +1063,25 @@ class DecisionHub:
                         logger.info(f"[决策层-跨平台] 使用模型 {model_key} 处理任务类型 {task_type.value}")
 
                 # 调用 AI（带工具）
-                print(f"[调试] 开始调用AI（带工具），提示词长度: {len(prompt_info['system'])}", file=sys.stderr)
-                response = await ai_client_to_use.chat_with_system_prompt(
-                    system_prompt=prompt_info['system'],
-                    user_message=prompt_info['user'],
-                    tools=self.tool_subnet.get_tools_schema()
-                )
-                print(f"[调试] AI调用完成（带工具），返回: {response[:100] if response else '(空)'}", file=sys.stderr)
+                try:
+                    response = await ai_client_to_use.chat_with_system_prompt(
+                        system_prompt=prompt_info['system'],
+                        user_message=prompt_info['user'],
+                        tools=self.tool_subnet.get_tools_schema()
+                    )
+                except Exception as tool_error:
+                    # 工具调用失败时,尝试不使用工具重新生成
+                    logger.warning(f"[决策层-跨平台] 工具调用失败: {tool_error}，尝试不使用工具...")
+                    try:
+                        response = await ai_client_to_use.chat_with_system_prompt(
+                            system_prompt=prompt_info['system'],
+                            user_message=prompt_info['user'],
+                            tools=None  # 不使用工具
+                        )
+                        # 添加后缀说明工具调用曾尝试过
+                        response += "\n\n[注: 系统尝试了自动处理但遇到了一些问题]"
+                    except Exception as e2:
+                        response = f"抱歉，处理你的请求时遇到了技术问题。请尝试直接告诉我你需要什么具体操作，我会尽力帮你完成。\n\n错误信息: {str(e2)[:100]}"
             else:
                 # 使用多模型管理器动态选择模型
                 ai_client_to_use = self.ai_client  # 默认使用传入的AI客户端
@@ -943,12 +1099,10 @@ class DecisionHub:
                         logger.info(f"[决策层-跨平台] 使用模型 {model_key} 处理任务类型 {task_type.value}")
 
                 # 调用 AI（不带工具）
-                print(f"[调试] 开始调用AI（不带工具），提示词长度: {len(prompt_info['system'])}", file=sys.stderr)
                 response = await ai_client_to_use.chat_with_system_prompt(
                     system_prompt=prompt_info['system'],
                     user_message=prompt_info['user']
                 )
-                print(f"[调试] AI调用完成（不带工具），返回: {response[:100] if response else '(空)'}", file=sys.stderr)
 
             return response
 
@@ -1219,4 +1373,211 @@ class DecisionHub:
                 return True
 
         return False
+
+    # ========== 会话结束处理 ==========
+
+    async def handle_session_end(self, session_id: str, platform: str = 'terminal') -> Dict:
+        """
+        处理会话结束，使用 SessionManager 保存对话历史到 LifeBook
+        
+        Args:
+            session_id: 会话ID
+            platform: 平台类型 (默认 'terminal')
+            
+        Returns:
+            处理结果字典
+        """
+        try:
+            logger.info(f"[决策层] 开始处理会话结束: {session_id} (平台: {platform})")
+            
+            # 使用 SessionManager 保存会话
+            if not self.session_manager:
+                logger.warning("[决策层] SessionManager 未初始化，使用旧方法保存")
+                return await self._handle_session_end_legacy(session_id, platform)
+            
+            # 获取对话历史
+            full_session_id = f"{platform}_{session_id}"
+            
+            messages = await self.session_manager.get_conversation_messages(
+                session_id=session_id,
+                platform=platform,
+                limit=100
+            )
+            
+            if not messages:
+                logger.info("[决策层] 对话历史为空，无需保存")
+                return {"success": True, "message": "对话历史为空"}
+            
+            # 使用 SessionManager 保存
+            category = self.session_manager.platform_category_map.get(platform, SessionCategory.TERMINAL)
+            result = await self.session_manager.save_session(
+                session_id=session_id,
+                platform=platform,
+                messages=messages,
+                category=category
+            )
+            
+            logger.info(f"[决策层] 会话结束处理完成: {result.get('message')}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"[决策层] 处理会话结束失败: {e}", exc_info=True)
+            return {"success": False, "message": str(e)}
+
+    async def _handle_session_end_legacy(self, session_id: str, platform: str = 'terminal') -> Dict:
+        """
+        传统会话结束处理方法（当 SessionManager 不可用时使用）
+        
+        Args:
+            session_id: 会话ID
+            platform: 平台类型
+            
+        Returns:
+            处理结果字典
+        """
+        try:
+            logger.info(f"[决策层-传统] 开始处理会话结束: {session_id}")
+            
+            # 1. 获取对话历史
+            user_id = 'default'
+            full_session_id = f"{platform}_{user_id}"
+            
+            if not self.memory_net or not self.memory_net.conversation_history:
+                logger.warning("[决策层-传统] memory_net 未初始化，无法保存对话历史")
+                return {"success": False, "message": "memory_net 未初始化"}
+            
+            messages = await self.memory_net.conversation_history.get_history(
+                full_session_id,
+                limit=100
+            )
+            
+            if not messages:
+                logger.info("[决策层-传统] 对话历史为空，无需保存")
+                return {"success": True, "message": "对话历史为空"}
+            
+            # 2. 压缩为 Markdown 摘要
+            summary = self._compress_conversation_to_markdown(messages)
+            
+            # 3. 存储到 LifeBook
+            if self.memory_engine:
+                from datetime import datetime
+                
+                # 创建标题
+                date_str = datetime.now().strftime("%Y-%m-%d")
+                title = f"终端会话 - {date_str}"
+                
+                # 存储到潮汐记忆（作为 LifeBook 的底层存储）
+                entry_id = f"terminal_session_{date_str}_{int(datetime.now().timestamp())}"
+                self.memory_engine.store_tide(
+                    entry_id,
+                    {
+                        'type': 'terminal_session',
+                        'title': title,
+                        'content': summary,
+                        'session_id': session_id,
+                        'date': date_str,
+                        'timestamp': datetime.now().isoformat(),
+                    }
+                )
+                logger.info(f"[决策层-传统] 对话历史已保存到记忆系统: {entry_id}")
+            
+            # 4. 清空短期对话历史
+            if self.memory_net and self.memory_net.conversation_history:
+                await self.memory_net.conversation_history.clear_session(full_session_id)
+                logger.info(f"[决策层-传统] 短期对话历史已清空: {full_session_id}")
+            
+            return {
+                "success": True, 
+                "message": "对话历史已保存，短期记忆已清空",
+                "summary": summary[:200] + "..." if len(summary) > 200 else summary
+            }
+            
+        except Exception as e:
+            logger.error(f"[决策层-传统] 处理会话结束失败: {e}", exc_info=True)
+            return {"success": False, "message": str(e)}
+
+    # ========== 日记提醒功能 ==========
+
+    async def set_diary_reminder(self, user_id: str, time: str = "21:00") -> Dict:
+        """
+        设置日记提醒
+        
+        Args:
+            user_id: 用户ID
+            time: 提醒时间（格式：HH:MM，默认 21:00）
+            
+        Returns:
+            设置结果
+        """
+        try:
+            if not self.session_manager:
+                return {"success": False, "message": "SessionManager 未初始化"}
+            
+            result = await self.session_manager.schedule_diary_reminder(user_id, time)
+            
+            if result:
+                return {
+                    "success": True,
+                    "message": f"已设置 {time} 的日记提醒，届时我会提醒你记日记哦~"
+                }
+            else:
+                return {"success": False, "message": "设置提醒失败"}
+                
+        except Exception as e:
+            logger.error(f"[决策层] 设置日记提醒失败: {e}")
+            return {"success": False, "message": str(e)}
+
+    def _compress_conversation_to_markdown(self, messages: List) -> str:
+        """
+        将对话历史压缩为 Markdown 格式摘要
+        
+        Args:
+            messages: 对话消息列表
+            
+        Returns:
+            Markdown 格式的摘要
+        """
+        if not messages:
+            return ""
+        
+        lines = [f"# 终端会话记录\n"]
+        lines.append(f"**时间**: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
+        lines.append(f"**会话ID**: {messages[0].session_id if hasattr(messages[0], 'session_id') else 'unknown'}\n")
+        lines.append("\n## 对话内容\n")
+        
+        # 简化对话，只保留关键信息
+        user_requests = []
+        miya_responses = []
+        
+        for msg in messages:
+            content = msg.content if hasattr(msg, 'content') else str(msg)
+            role = msg.role if hasattr(msg, 'role') else 'unknown'
+            
+            # 提取关键操作
+            if role == 'user':
+                # 提取用户意图
+                if any(kw in content for kw in ['打开', '启动', '运行', '执行', '安装', '检查']):
+                    user_requests.append(content)
+            elif role == 'assistant':
+                # 提取弥娅的关键回复
+                if '已打开' in content or '已启动' in content or '已创建' in content or '会话ID' in content:
+                    miya_responses.append(content.split('\n')[0][:100])  # 取第一行摘要
+        
+        # 生成摘要
+        if user_requests:
+            lines.append("### 用户操作\n")
+            for req in user_requests[-5:]:  # 最多5条
+                lines.append(f"- {req}\n")
+        
+        if miya_responses:
+            lines.append("\n### 系统响应\n")
+            for resp in miya_responses[-5:]:
+                lines.append(f"- {resp}\n")
+        
+        # 添加总结
+        lines.append("\n## 总结\n")
+        if user_requests:
+            lines.append(f"本次会话共执行了 {len(user_requests)} 个操作。\n")
+        
+        return "".join(lines)
 
