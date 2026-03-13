@@ -577,10 +577,13 @@ class DecisionHub:
         sender_name = perception.get('sender_name', '用户')
 
         # 【新增】权限检查（如果AuthNet可用）
-        # 跳过终端代理的权限检查（terminal_agent 来自独立终端窗口）
+        # 跳过终端代理和桌面端的权限检查（来自受信任的客户端）
         is_terminal_agent = perception.get('is_terminal_agent', False)
         
-        if self.auth_subnet and not is_terminal_agent:
+        # 桌面端用户自动获得权限
+        is_desktop = platform == 'desktop' or (user_id and user_id.startswith('desktop_'))
+        
+        if self.auth_subnet and not is_terminal_agent and not is_desktop:
             try:
                 # 检查用户是否有基础访问权限
                 from webnet.AuthNet.permission_core import PermissionCore
@@ -601,6 +604,8 @@ class DecisionHub:
             except Exception as e:
                 logger.error(f"[决策层-跨平台] 权限检查失败: {e}")
                 # 权限检查失败时，允许继续（降级处理）
+        elif is_desktop:
+            logger.debug(f"[决策层-跨平台] 桌面端用户 {user_id} 跳过权限检查")
 
         logger.info(f"[决策层-跨平台] {sender_name} - {content[:50]}")
 

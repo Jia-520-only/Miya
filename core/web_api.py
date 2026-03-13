@@ -560,6 +560,61 @@ class WebAPI:
                     "message": str(e)
                 }
 
+        # ========== 手动保存会话 API ==========
+        
+        @self.router.post("/terminal/save_session")
+        async def save_session(request: dict):
+            """手动保存会话到 LifeBook"""
+            try:
+                session_id = request.get("session_id", "default")
+                platform = request.get("platform", "terminal")
+                logger.info(f"[WebAPI] 收到手动保存请求: {session_id}, platform={platform}")
+                
+                # 调用 DecisionHub 处理会话结束
+                if hasattr(self.decision_hub, 'handle_session_end'):
+                    result = await self.decision_hub.handle_session_end(session_id, platform=platform)
+                    return result
+                else:
+                    return {
+                        "success": False,
+                        "message": "DecisionHub 未实现 handle_session_end 方法"
+                    }
+            except Exception as e:
+                logger.error(f"[WebAPI] 手动保存失败: {e}", exc_info=True)
+                return {
+                    "success": False,
+                    "message": str(e)
+                }
+
+        # ========== 终端会话结束 API ==========
+        
+        @self.router.post("/terminal/session_end")
+        async def terminal_session_end(request: dict):
+            """终端会话结束接口 - 触发对话历史存储到 LifeBook"""
+            try:
+                session_id = request.get("session_id", "unknown")
+                logger.info(f"[WebAPI] 收到终端会话结束请求: {session_id}")
+                
+                # 调用 DecisionHub 处理会话结束
+                if hasattr(self.decision_hub, 'handle_session_end'):
+                    result = await self.decision_hub.handle_session_end(session_id, platform='terminal')
+                    return {
+                        "success": True,
+                        "message": "对话历史已保存到 LifeBook",
+                        "session_id": session_id
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "message": "DecisionHub 未实现 handle_session_end 方法"
+                    }
+            except Exception as e:
+                logger.error(f"[WebAPI] 会话结束处理失败: {e}", exc_info=True)
+                return {
+                    "success": False,
+                    "message": str(e)
+                }
+
         @self.router.post("/terminal/execute")
         async def execute_terminal_command(
             command: str,
@@ -1562,7 +1617,17 @@ class WebAPI:
                         }
                 elif data:
                     # 转换为DataFrame
-                    df = pd.DataFrame(data)
+                    # 处理标量数据（单个字典）的情况
+                    if isinstance(data, dict) and data:
+                        # 检查是否是标量字典（如 {"x": 1, "y": 2}）
+                        first_val = next(iter(data.values()))
+                        if isinstance(first_val, (int, float, str)):
+                            # 标量字典，转换为列表格式
+                            df = pd.DataFrame([data])
+                        else:
+                            df = pd.DataFrame(data)
+                    else:
+                        df = pd.DataFrame(data)
                 else:
                     return {
                         "success": False,
