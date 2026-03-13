@@ -47,17 +47,32 @@ class WSLManagerTool(BaseTool):
         """工具配置（OpenAI Function Calling 格式）"""
         return {
             "name": "wsl_manager",
-            "description": """管理Windows Subsystem for Linux (WSL)环境。当用户要求检查WSL、打开WSL、启动WSL、管理WSL发行版或配置WSL环境时必须调用此工具。
+            "description": """管理Windows Subsystem for Linux (WSL)环境。当用户要求检查WSL、打开WSL、启动WSL终端、管理WSL发行版或配置WSL环境时必须调用此工具。
 
-【重要】当用户说以下任何内容时，必须调用此工具：
-- "打开WSL"、"启动WSL"、"创建WSL终端"
-- "查看WSL发行版"、"列出WSL"、"检查WSL"
-- "打开Ubuntu WSL"、"启动Debian WSL"等指定发行版时
+【关键触发词】当用户输入以下任何内容时，必须调用此工具：
+1. "打开WSL"、"启动WSL"、"创建WSL终端"、"WSL终端"
+2. "查看WSL"、"列出WSL"、"检查WSL"
+3. "打开Ubuntu"、"启动Debian"、"打开kali"等（任何WSL发行版名称）
+4. "Ubuntu WSL"、"Debian WSL"、"kali linux WSL"等（任何包含发行版名称的短语）
 
-工作流程：
-1. 用户要求"打开WSL"时，先调用 list_distributions 查看所有发行版
-2. 如果用户指定了发行版名称（如"打开Ubuntu"），直接调用 open_wsl
-3. 如果用户未指定，列出发行版后让用户选择，或使用默认发行版调用 open_wsl
+【工作流程】
+步骤1: 用户说"打开WSL"或类似时
+  → 调用 action="list_distributions" 查看所有可用发行版
+  → 列出发行版让用户选择，或使用默认发行版
+  
+步骤2: 用户说"打开Ubuntu WSL"或类似时
+  → 提取发行版名称："Ubuntu"、"Debian"、"kali"等
+  → 调用 action="open_wsl", distribution="Ubuntu"（实际名称，大小写要匹配wsl --list显示的）
+  → 如果环境检查失败，自动调用 install_environment
+
+步骤3: 用户说"安装WSL"、"配置WSL"时
+  → 先调用 check_environment 检查环境
+  → 如果缺少组件，调用 install_environment
+
+【发行版名称匹配】
+- 必须与 `wsl --list --verbose` 显示的名称完全匹配（区分大小写）
+- 常见名称：Ubuntu、Debian、kali-linux、archlinux、Ubuntu-24.04等
+- 不要猜测，必须使用list_distributions返回的准确名称
 
 操作类型：
 - check_wsl: 检查WSL是否安装
@@ -68,9 +83,14 @@ class WSLManagerTool(BaseTool):
 - get_default_distribution: 获取默认WSL发行版
 
 参数说明：
-- distribution: WSL发行版名称（如：Ubuntu、Debian、kali-linux、archlinux等）
+- distribution: WSL发行版名称（必须与list_distributions返回的名称完全匹配）
 - skip_python_check: 跳过Python检查（open_wsl时可选，默认false）
-- auto_install: 自动安装缺失的环境（check_environment时可选，默认false）""",
+- auto_install: 自动安装缺失的环境（check_environment时可选，默认false）
+
+【重要提示】
+- 用户说"打开Ubuntu WSL"时，distribution参数应该是"Ubuntu"（不是"Ubuntu-24.04"，除非用户明确指定）
+- 如果check_environment返回缺少组件，必须先调用install_environment再调用open_wsl
+- 永远不要使用multi_terminal工具打开WSL，只使用wsl_manager工具""",
             "parameters": {
                 "type": "object",
                 "properties": {
