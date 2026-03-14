@@ -79,17 +79,27 @@ class TerminalCommandTool(BaseTool):
 
         return {
             "name": "terminal_command",
-            "description": f"""执行单个系统命令。仅当用户要求执行明确的系统命令（如ls、cd、pwd、git、python等）或查看系统信息时调用。
+            "description": f"""执行单个系统命令。当用户请求查看系统状态、执行操作、操作文件时，必须调用此工具！
 
-当前环境：{platform_info}系统，{shell_info} shell，当前目录：{cwd}
+【调用场景 - 务必调用此工具】
+- 用户说"查看/检查/查询/看看..." → 调用此工具执行相应命令
+- 例如："查看8080端口" → 命令: netstat -ano | findstr 8080
+- 例如："检查内存" → 命令: systeminfo (Windows) 或 free -h (Linux)
+- 例如："查看进程" → 命令: tasklist (Windows) 或 ps aux (Linux)
+- 用户要求"运行/执行/打开/启动/关闭/停止/删除/创建/搜索"任何操作
 
-重要：如果用户要求"创建终端"、"打开终端"或"新建窗口"，必须调用multi_terminal工具，而不是此工具！""",
+【禁止调用】
+- 如果用户要求"创建终端"、"打开终端"、"新建窗口" → 调用 multi_terminal 工具
+
+当前环境：{platform_info}系统，{shell_info}，当前目录：{cwd}
+
+注意：你需要将自然语言转换为对应系统的命令！""",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "要执行的命令字符串。例如：'ls', 'firefox', 'python script.py', 'git status', 'npm install', 'pwd'"
+                        "description": "要执行的系统命令（不需要加引号）。Windows系统示例：'netstat -ano | findstr 8080', 'tasklist', 'systeminfo', 'dir', 'ipconfig', 'ping google.com'。Linux/Mac示例：'ls -la', 'ps aux', 'top', 'df -h', 'ifconfig', 'ping -c 4 google.com'"
                     }
                 },
                 "required": ["command"]
