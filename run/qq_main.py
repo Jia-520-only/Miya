@@ -385,8 +385,8 @@ class MiyaQQBot:
                         )
                         self.logger.info(f"多模型管理器初始化成功，已加载 {len(model_clients)} 个模型")
 
-                        # 使用 qwen_72b 作为默认模型（工具调用和任务规划的首选）
-                        default_client = model_clients.get('qwen_72b') or model_clients.get('deepseek_v3_official')
+                        # 使用 deepseek_v3_official 作为默认模型（明确支持工具调用）
+                        default_client = model_clients.get('deepseek_v3_official') or model_clients.get('qwen_72b')
                         if default_client:
                             self.logger.info(f"默认模型: {default_client.model}")
 
