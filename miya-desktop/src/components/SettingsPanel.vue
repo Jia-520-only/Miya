@@ -72,16 +72,52 @@
           </div>
         </div>
 
+        <!-- 预设主题 -->
         <div class="setting-item">
-          <label>强调色</label>
-          <div class="color-selector">
+          <label>预设主题</label>
+          <div class="preset-theme-grid">
             <button
-              v-for="color in accentColors"
-              :key="color.value"
-              :class="['color-btn', { active: accentColor === color.value }]"
-              :style="{ backgroundColor: color.value }"
-              @click="changeAccentColor(color.value)"
-            ></button>
+              v-for="(preset, key) in presetThemes"
+              :key="key"
+              :class="['preset-theme-btn', { active: currentPresetTheme === key }]"
+              @click="selectPresetTheme(key)"
+              :title="preset.name"
+            >
+              <div class="preset-preview" :style="{ background: preset.background }">
+                <div class="preset-accent" :style="{ background: preset.accent }"></div>
+              </div>
+              <span class="preset-name">{{ preset.name }}</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 自定义主题 -->
+        <div class="setting-item">
+          <label>自定义主题颜色</label>
+          <div class="custom-theme-section">
+            <div class="color-input-row">
+              <label>主色调</label>
+              <input type="color" v-model="customColors.primary" @change="applyCustomTheme" />
+            </div>
+            <div class="color-input-row">
+              <label>次色调</label>
+              <input type="color" v-model="customColors.secondary" @change="applyCustomTheme" />
+            </div>
+            <div class="color-input-row">
+              <label>强调色</label>
+              <input type="color" v-model="customColors.accent" @change="applyCustomTheme" />
+            </div>
+            <div class="color-input-row">
+              <label>背景色</label>
+              <input type="color" v-model="customColors.background" @change="applyCustomTheme" />
+            </div>
+            <div class="color-input-row">
+              <label>文字色</label>
+              <input type="color" v-model="customColors.text" @change="applyCustomTheme" />
+            </div>
+            <button class="btn-secondary" @click="resetToDefaultTheme">
+              恢复默认
+            </button>
           </div>
         </div>
       </section>
@@ -142,8 +178,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
-import { useSettingsStore } from '../stores/settings'
+import { ref, onMounted, watch, computed } from 'vue'
+import { useSettingsStore, PRESET_THEMES, type PresetTheme, type CustomThemeColors } from '../stores/settings'
 
 interface Props {
   modelPath?: string
@@ -166,11 +202,27 @@ const modelSize = ref('medium')
 const showEmotions = ref(true)
 const autoIdle = ref(true)
 const enableInteraction = ref(true)
-const currentTheme = ref('dark')
+const currentTheme = ref<'dark' | 'light'>('dark')
 const accentColor = ref('#3b82f6')
 const version = ref('1.0.0')
 const ttsEnabled = ref(false)
 const ttsAutoPlay = ref(false)
+
+// 主题相关状态
+const currentPresetTheme = ref<PresetTheme>('default')
+const useCustomTheme = ref(false)
+const customColors = ref<CustomThemeColors>({
+  primary: '#2dd4bf',
+  secondary: '#0ea5e9',
+  background: 'rgba(4, 47, 46, 0.95)',
+  backgroundSecondary: 'rgba(6, 78, 59, 0.6)',
+  text: '#f0fdfa',
+  textSecondary: '#94a3b8',
+  accent: '#2dd4bf'
+})
+
+// 预设主题列表
+const presetThemes = PRESET_THEMES
 
 // 配置选项
 const sizes = [
@@ -195,14 +247,12 @@ const accentColors = [
 
 // 方法
 function openModelSelector() {
-  // TODO: 实现模型选择器
   console.log('打开模型选择器')
 }
 
 function changeTheme(theme: string) {
-  currentTheme.value = theme
-  // TODO: 应用主题
-  console.log('切换主题:', theme)
+  currentTheme.value = theme as 'dark' | 'light'
+  settingsStore.updateSetting('theme', currentTheme.value)
 }
 
 function changeAccentColor(color: string) {
@@ -210,8 +260,36 @@ function changeAccentColor(color: string) {
   document.documentElement.style.setProperty('--accent-color', color)
 }
 
+// 选择预设主题
+function selectPresetTheme(presetKey: string) {
+  currentPresetTheme.value = presetKey as PresetTheme
+  useCustomTheme.value = false
+  settingsStore.setPresetTheme(presetKey as PresetTheme)
+}
+
+// 应用自定义主题
+function applyCustomTheme() {
+  useCustomTheme.value = true
+  settingsStore.setCustomTheme(customColors.value)
+}
+
+// 重置为默认主题
+function resetToDefaultTheme() {
+  currentPresetTheme.value = 'default'
+  useCustomTheme.value = false
+  customColors.value = {
+    primary: '#2dd4bf',
+    secondary: '#0ea5e9',
+    background: 'rgba(4, 47, 46, 0.95)',
+    backgroundSecondary: 'rgba(6, 78, 59, 0.6)',
+    text: '#f0fdfa',
+    textSecondary: '#94a3b8',
+    accent: '#2dd4bf'
+  }
+  settingsStore.setPresetTheme('default')
+}
+
 onMounted(() => {
-  // 加载保存的设置
   loadSettings()
 })
 
@@ -226,6 +304,12 @@ function loadSettings() {
       enableInteraction.value = settings.enableInteraction ?? true
       currentTheme.value = settings.theme || 'dark'
       accentColor.value = settings.accentColor || '#3b82f6'
+      // 主题设置
+      currentPresetTheme.value = settings.presetTheme || 'default'
+      useCustomTheme.value = settings.useCustomTheme ?? false
+      if (settings.customTheme) {
+        customColors.value = settings.customTheme
+      }
       // TTS 设置
       ttsEnabled.value = settings.ttsEnabled ?? false
       ttsAutoPlay.value = settings.ttsAutoPlay ?? false
@@ -244,6 +328,11 @@ function saveSettings() {
       enableInteraction: enableInteraction.value,
       theme: currentTheme.value,
       accentColor: accentColor.value,
+      // 主题设置
+      presetTheme: currentPresetTheme.value,
+      useCustomTheme: useCustomTheme.value,
+      customTheme: useCustomTheme.value ? customColors.value : null,
+      // TTS 设置
       ttsEnabled: ttsEnabled.value,
       ttsAutoPlay: ttsAutoPlay.value
     }
@@ -257,7 +346,7 @@ function saveSettings() {
 }
 
 // 监听设置变化并自动保存
-watch([modelSize, showEmotions, autoIdle, enableInteraction, currentTheme, accentColor, ttsEnabled, ttsAutoPlay], saveSettings)
+watch([modelSize, showEmotions, autoIdle, enableInteraction, currentTheme, accentColor, ttsEnabled, ttsAutoPlay, currentPresetTheme, useCustomTheme, customColors], saveSettings, { deep: true })
 </script>
 
 <style scoped>
@@ -517,5 +606,128 @@ kbd {
 
 .settings-content::-webkit-scrollbar-thumb:hover {
   background: var(--border-secondary);
+}
+
+/* 预设主题网格 */
+.preset-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--spacing-md);
+}
+
+.preset-theme-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm);
+  border: 2px solid var(--border-tertiary);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.preset-theme-btn:hover {
+  border-color: var(--border-secondary);
+  transform: translateY(-2px);
+}
+
+.preset-theme-btn.active {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px var(--accent-color);
+}
+
+.preset-preview {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.preset-accent {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.8);
+}
+
+.preset-name {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.preset-theme-btn.active .preset-name {
+  color: var(--accent-color);
+  font-weight: 500;
+}
+
+/* 自定义主题 */
+.custom-theme-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-tertiary);
+}
+
+.color-input-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+}
+
+.color-input-row label {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.color-input-row input[type="color"] {
+  width: 40px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border-tertiary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: transparent;
+}
+
+.color-input-row input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+.color-input-row input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 2px;
+}
+
+.btn-secondary {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-tertiary);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all var(--transition-base);
+}
+
+.btn-secondary:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 </style>

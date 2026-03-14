@@ -346,17 +346,17 @@ async function handleSpeak(isAutoPlay: boolean = false) {
 
 /* 亮色主题 */
 :deep(.light-mode .message-bubble.assistant .bubble-content) {
-  background: rgba(240, 253, 250, 0.8);
+  background: rgba(240, 253, 250, 0.9);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border-color: rgba(45, 212, 191, 0.3);
-  color: #042f2e;
+  color: #0f172a;
 }
 
 :deep(.light-mode .message-bubble.user .bubble-content) {
-  background: linear-gradient(135deg, #0d9488, #0ea5e9);
+  background: linear-gradient(135deg, #2dd4bf, #0ea5e9);
   color: white;
-  box-shadow: 0 4px 12px rgba(45, 212, 191, 0.4);
+  box-shadow: 0 4px 12px rgba(45, 212, 191, 0.3);
 }
 
 :deep(.light-mode .meta-item) {
