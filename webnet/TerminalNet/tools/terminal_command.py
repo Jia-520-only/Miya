@@ -79,27 +79,46 @@ class TerminalCommandTool(BaseTool):
 
         return {
             "name": "terminal_command",
-            "description": f"""执行单个系统命令。当用户请求查看系统状态、执行操作、操作文件时，必须调用此工具！
+            "description": f"""【强制执行】执行Windows/Linux/Mac系统命令。
 
-【调用场景 - 务必调用此工具】
-- 用户说"查看/检查/查询/看看..." → 调用此工具执行相应命令
-- 例如："查看8080端口" → 命令: netstat -ano | findstr 8080
-- 例如："检查内存" → 命令: systeminfo (Windows) 或 free -h (Linux)
-- 例如："查看进程" → 命令: tasklist (Windows) 或 ps aux (Linux)
-- 用户要求"运行/执行/打开/启动/关闭/停止/删除/创建/搜索"任何操作
+【必须立即执行的场景】
+用户说这些关键词时，必须立即调用此工具：
+- 查看、检查、查询 → 执行相应查看命令
+- 打开、启动 → 执行打开命令
+- 关闭、停止 → 执行关闭命令
+- 运行、执行 → 执行运行命令
 
-【禁止调用】
-- 如果用户要求"创建终端"、"打开终端"、"新建窗口" → 调用 multi_terminal 工具
+【常用命令】
+Windows:
+- 查看8080端口: netstat -ano | findstr 8080
+- 查看进程: tasklist
+- 查看IP: ipconfig /all
+- 查看电脑配置: systeminfo
+- 打开任务管理器: taskmgr
+- 打开计算器: calc
+- 打开记事本: notepad
+- 打开火狐: start firefox
+- 关闭火狐: taskkill /IM firefox.exe /F
 
-当前环境：{platform_info}系统，{shell_info}，当前目录：{cwd}
+Mac:
+- 查看端口: lsof -i :8080
+- 查看进程: ps aux
+- 打开应用: open -a Firefox
 
-注意：你需要将自然语言转换为对应系统的命令！""",
+Linux:
+- 查看端口: netstat -tulpn | grep 8080
+- 查看进程: ps aux
+
+当前环境: {platform_info} + {shell_info}
+工作目录: {cwd}
+
+【重要】直接执行，不要询问！""",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "要执行的系统命令（不需要加引号）。Windows系统示例：'netstat -ano | findstr 8080', 'tasklist', 'systeminfo', 'dir', 'ipconfig', 'ping google.com'。Linux/Mac示例：'ls -la', 'ps aux', 'top', 'df -h', 'ifconfig', 'ping -c 4 google.com'"
+                        "description": "系统命令字符串，如：netstat -ano、tasklist、start firefox、taskkill /IM firefox.exe /F"
                     }
                 },
                 "required": ["command"]
