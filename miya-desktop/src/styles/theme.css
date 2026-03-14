@@ -1,16 +1,14 @@
 /* ==========================================
-   弥娅桌面应用 - 专业深色主题
-   Design System v2.0
+   弥娅桌面应用 - 主题系统 v2.0
    ========================================== */
 
-:root {
-  /* ===== 主色调 ===== */
-  --primary: #3b82f6;
+/* 亮色模式 - 使用主题变量 */
+body.light-mode {
+  --primary: var(--theme-primary, #3b82f6);
   --primary-light: #60a5fa;
   --primary-dark: #2563eb;
   --primary-soft: rgba(59, 130, 246, 0.1);
   
-  /* ===== 语义色 ===== */
   --success: #10b981;
   --success-light: #34d399;
   --success-soft: rgba(16, 185, 129, 0.1);
@@ -27,46 +25,131 @@
   --info-light: #22d3ee;
   --info-soft: rgba(6, 182, 212, 0.1);
   
-  /* ===== 背景色 ===== */
+  --bg-primary: var(--theme-background, #f8fafc);
+  --bg-secondary: var(--theme-background-secondary, #f1f5f9);
+  --bg-tertiary: #e2e8f0;
+  --bg-elevated: #ffffff;
+  --bg-hover: rgba(0, 0, 0, 0.05);
+  
+  --border-primary: rgba(203, 213, 225, 1);
+  --border-secondary: rgba(203, 213, 225, 0.5);
+  --border-tertiary: rgba(203, 213, 225, 0.2);
+  --border-focus: rgba(59, 130, 246, 0.5);
+  
+  --text-primary: var(--theme-text, #1e293b);
+  --text-secondary: var(--theme-text-secondary, #475569);
+  --text-tertiary: #64748b;
+  --text-disabled: #94a3b8;
+  
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.15);
+  --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.15);
+}
+
+/* 深色模式（默认）- 使用主题变量 */
+body.dark-mode {
+  --primary: var(--theme-primary, #3b82f6);
+  --primary-light: #60a5fa;
+  --primary-dark: #2563eb;
+  --primary-soft: rgba(59, 130, 246, 0.1);
+  
+  --success: #10b981;
+  --success-light: #34d399;
+  --success-soft: rgba(16, 185, 129, 0.1);
+  
+  --warning: #f59e0b;
+  --warning-light: #fbbf24;
+  --warning-soft: rgba(245, 158, 11, 0.1);
+  
+  --error: #ef4444;
+  --error-light: #f87171;
+  --error-soft: rgba(239, 68, 68, 0.1);
+  
+  --info: #06b6d4;
+  --info-light: #22d3ee;
+  --info-soft: rgba(6, 182, 212, 0.1);
+  
+  --bg-primary: var(--theme-background, #0f1115);
+  --bg-secondary: var(--theme-background-secondary, #1a1d24);
+  --bg-tertiary: #252932;
+  --bg-elevated: #2d333f;
+  --bg-hover: rgba(45, 51, 63, 0.5);
+  
+  --border-primary: rgba(45, 51, 63, 1);
+  --border-secondary: rgba(45, 51, 63, 0.5);
+  --border-tertiary: rgba(45, 51, 63, 0.2);
+  --border-focus: rgba(59, 130, 246, 0.5);
+  
+  --text-primary: var(--theme-text, #f1f5f9);
+  --text-secondary: var(--theme-text-secondary, #94a3b8);
+  --text-tertiary: #64748b;
+  --text-disabled: #475569;
+  
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.15);
+  --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.2);
+  --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.3);
+}
+
+/* 基础变量（默认深色） */
+:root {
+  --primary: #3b82f6;
+  --primary-light: #60a5fa;
+  --primary-dark: #2563eb;
+  --primary-soft: rgba(59, 130, 246, 0.1);
+  
+  --success: #10b981;
+  --success-light: #34d399;
+  --success-soft: rgba(16, 185, 129, 0.1);
+  
+  --warning: #f59e0b;
+  --warning-light: #fbbf24;
+  --warning-soft: rgba(245, 158, 11, 0.1);
+  
+  --error: #ef4444;
+  --error-light: #f87171;
+  --error-soft: rgba(239, 68, 68, 0.1);
+  
+  --info: #06b6d4;
+  --info-light: #22d3ee;
+  --info-soft: rgba(6, 182, 212, 0.1);
+  
   --bg-primary: #0f1115;
   --bg-secondary: #1a1d24;
   --bg-tertiary: #252932;
   --bg-elevated: #2d333f;
   --bg-hover: rgba(45, 51, 63, 0.5);
   
-  /* ===== 边框色 ===== */
   --border-primary: rgba(45, 51, 63, 1);
   --border-secondary: rgba(45, 51, 63, 0.5);
   --border-tertiary: rgba(45, 51, 63, 0.2);
   --border-focus: rgba(59, 130, 246, 0.5);
   
-  /* ===== 文字色 ===== */
   --text-primary: #f1f5f9;
   --text-secondary: #94a3b8;
   --text-tertiary: #64748b;
   --text-disabled: #475569;
   
-  /* ===== 阴影 ===== */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
   --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.15);
   --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.2);
   --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.3);
   
-  /* ===== 圆角 ===== */
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
   --radius-xl: 20px;
   
-  /* ===== 间距 ===== */
   --spacing-xs: 4px;
   --spacing-sm: 8px;
   --spacing-md: 16px;
   --spacing-lg: 24px;
   --spacing-xl: 32px;
   
-  /* ===== 过渡 ===== */
   --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-base: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: 0.35s cubic-bezier(0.4, 0, 0.2, 1);
