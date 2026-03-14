@@ -251,8 +251,11 @@ function openModelSelector() {
 }
 
 function changeTheme(theme: string) {
+  console.log('切换主题模式:', theme)
   currentTheme.value = theme as 'dark' | 'light'
   settingsStore.updateSetting('theme', currentTheme.value)
+  // 强制更新主题
+  settingsStore.applyTheme(currentTheme.value)
 }
 
 function changeAccentColor(color: string) {
@@ -262,19 +265,26 @@ function changeAccentColor(color: string) {
 
 // 选择预设主题
 function selectPresetTheme(presetKey: string) {
+  console.log('选择预设主题:', presetKey)
   currentPresetTheme.value = presetKey as PresetTheme
   useCustomTheme.value = false
   settingsStore.setPresetTheme(presetKey as PresetTheme)
+  // 强制更新主题
+  settingsStore.applyTheme(currentTheme.value)
 }
 
 // 应用自定义主题
 function applyCustomTheme() {
+  console.log('应用自定义主题:', customColors.value)
   useCustomTheme.value = true
   settingsStore.setCustomTheme(customColors.value)
+  // 强制更新主题
+  settingsStore.applyTheme(currentTheme.value)
 }
 
 // 重置为默认主题
 function resetToDefaultTheme() {
+  console.log('重置为默认主题')
   currentPresetTheme.value = 'default'
   useCustomTheme.value = false
   customColors.value = {
@@ -287,6 +297,8 @@ function resetToDefaultTheme() {
     accent: '#2dd4bf'
   }
   settingsStore.setPresetTheme('default')
+  // 强制更新主题
+  settingsStore.applyTheme(currentTheme.value)
 }
 
 onMounted(() => {
