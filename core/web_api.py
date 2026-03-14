@@ -2284,18 +2284,20 @@ class WebAPI:
                     }
                 
                 # 调用TTS生成
-                result = await tts_net.generate_speech(text, engine=engine)
+                audio_data = await tts_net.synthesize(text, engine=engine)
                 
-                if result.get("success"):
+                if audio_data:
+                    import base64
+                    audio_base64 = base64.b64encode(audio_data).decode('utf-8')
                     return {
                         "success": True,
-                        "audio_data": result.get("audio_data"),
-                        "format": result.get("format", "mp3")
+                        "audio_data": audio_base64,
+                        "format": "mp3"
                     }
                 else:
                     return {
                         "success": False,
-                        "error": result.get("error", "TTS生成失败")
+                        "error": "TTS生成失败"
                     }
                     
             except Exception as e:
@@ -2315,18 +2317,52 @@ class WebAPI:
                         "success": False,
                         "error": "TTS系统未初始化"
                     }
-                
+
                 engines = list(tts_net.registry.engines.keys())
                 return {
                     "success": True,
                     "engines": engines
                 }
             except Exception as e:
+                logger.error(f"[WebAPI] TTS引擎列表获取失败: {e}")
                 return {
                     "success": False,
                     "error": str(e)
                 }
-    
+
+        @self.router.get("/tts/status")
+        async def tts_status():
+            """获取TTS系统状态"""
+            try:
+                tts_net = getattr(self, 'tts_net', None)
+                if not tts_net:
+                    return {
+                        "success": False,
+                        "error": "TTS系统未初始化",
+                        "initialized": False
+                    }
+
+                engines_status = {}
+                for name, engine in tts_net.registry.engines.items():
+                    engines_status[name] = {
+                        "initialized": getattr(engine, 'is_initialized', False),
+                        "available": getattr(engine, 'is_initialized', False)
+                    }
+
+                return {
+                    "success": True,
+                    "initialized": True,
+                    "current_engine": tts_net.registry.current_engine,
+                    "default_engine": tts_net.registry.default_engine,
+                    "engines": engines_status
+                }
+            except Exception as e:
+                logger.error(f"[WebAPI] TTS状态获取失败: {e}")
+                return {
+                    "success": False,
+                    "error": str(e)
+                }
+
     def get_router(self) -> Optional[APIRouter]:
         """获取 FastAPI 路由器"""
         return self.router

@@ -18,6 +18,8 @@ export interface Settings {
   showPersonality: boolean
   streamingResponse: boolean
   responseTimeout: number
+  ttsEnabled: boolean        // TTS总开关
+  ttsAutoPlay: boolean     // 自动播放
 }
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -35,7 +37,9 @@ export const useSettingsStore = defineStore('settings', () => {
     showEmotion: false,
     showPersonality: false,
     streamingResponse: true,
-    responseTimeout: 30000
+    responseTimeout: 30000,
+    ttsEnabled: false,
+    ttsAutoPlay: false
   }
 
   // State

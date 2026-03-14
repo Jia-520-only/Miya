@@ -101,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useChatStore } from '../stores/chat'
 import SessionSidebar from './SessionSidebar.vue'
 import MessageList from './MessageList.vue'
@@ -125,6 +125,39 @@ const currentTask = ref('')
 const currentResult = ref<any>(null)
 const currentModelPath = ref('/live2d/ht/ht.model3.json')
 const currentEmotion = ref('平静')
+
+// 键盘快捷键处理
+function handleKeydown(event: KeyboardEvent) {
+  // Ctrl + , 打开设置
+  if (event.ctrlKey && event.key === ',') {
+    event.preventDefault()
+    toggleSettings()
+  }
+  // Ctrl + K 打开快捷指令
+  else if (event.ctrlKey && event.key === 'k') {
+    event.preventDefault()
+    toggleQuickCommand()
+  }
+  // Ctrl + T 打开工具箱
+  else if (event.ctrlKey && event.key === 't') {
+    event.preventDefault()
+    toggleToolbox()
+  }
+  // Escape 关闭面板
+  else if (event.key === 'Escape') {
+    showQuickCommand.value = false
+    showToolbox.value = false
+    showSettings.value = false
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeydown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown)
+})
 
 // 计算属性
 const currentTitle = computed(() => chatStore.currentSession?.title || '新对话')

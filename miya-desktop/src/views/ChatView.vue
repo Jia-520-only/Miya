@@ -23,6 +23,7 @@ const messageContainer = ref<HTMLElement>()
 const showPersona = ref(false)
 const personaPanelRef = ref<HTMLElement>()
 const uiOpacity = ref(0.92) // UI 透明度控制
+const latestMessageId = ref<string | null>(null) // 用于追踪最新消息（用于TTS自动播放）
 
 // 桌宠模式状态
 const live2DWindowOpen = ref(false)
@@ -188,6 +189,7 @@ async function loadSystemStatus() {
 async function sendMessage(content: string) {
   chatStore.isLoading = true
   chatStore.isTyping = true
+  latestMessageId.value = null // 清除之前的最新消息标记
 
   // 添加用户消息
   chatStore.addMessage({
@@ -208,7 +210,7 @@ async function sendMessage(content: string) {
     })
 
     // 添加助手消息
-    chatStore.addMessage({
+    const assistantMsg = chatStore.addMessage({
       role: 'assistant',
       content: response.response || '抱歉,我遇到了一些问题。',
       emotion: response.emotion,
@@ -217,6 +219,8 @@ async function sendMessage(content: string) {
       memoryRetrieved: response.memory_retrieved,
       sessionId: chatStore.currentSessionId
     })
+    // 设置最新消息ID用于TTS自动播放
+    latestMessageId.value = assistantMsg.id
 
     // 更新系统状态
     if (response.emotion || response.personality) {
@@ -351,9 +355,11 @@ function exportCurrentSession(format: 'json' | 'markdown' | 'txt') {
             <div class="message-content-wrapper">
               <MessageBubble
                 :message="message"
+                :is-new="message.id === latestMessageId"
                 @regenerate="handleRegenerate"
                 @delete="handleDelete"
                 @copy="handleCopy"
+                @played="latestMessageId = null"
               />
             </div>
           </div>

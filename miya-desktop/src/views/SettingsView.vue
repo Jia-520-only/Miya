@@ -1,47 +1,58 @@
 <script setup lang="ts">
+import { useRouter } from 'vue-router'
+import SettingsPanel from '../components/SettingsPanel.vue'
+
+const router = useRouter()
+
+function goBack() {
+  router.push('/chat')
+}
 </script>
 
 <template>
   <div class="settings-view">
     <div class="settings-header">
-      <h2>设置</h2>
+      <button class="back-btn" @click="goBack">
+        <i class="pi pi-arrow-left"></i>
+        <span>返回</span>
+      </button>
     </div>
-
-    <div class="settings-content">
-      <div class="settings-section">
-        <h3>通用设置</h3>
-        <div class="setting-item">
-          <label>开机自启动</label>
-          <input type="checkbox" />
-        </div>
-        <div class="setting-item">
-          <label>系统托盘最小化</label>
-          <input type="checkbox" checked />
-        </div>
-      </div>
-
-      <div class="settings-section">
-        <h3>悬浮球设置</h3>
-        <div class="setting-item">
-          <label>启用悬浮球</label>
-          <input type="checkbox" checked />
-        </div>
-        <div class="setting-item">
-          <label>失焦自动收起</label>
-          <input type="checkbox" />
-        </div>
-      </div>
-
-      <div class="settings-section">
-        <h3>外观设置</h3>
-        <div class="setting-item">
-          <label>暗色模式</label>
-          <input type="checkbox" checked disabled />
-        </div>
-      </div>
-    </div>
+    <SettingsPanel />
   </div>
 </template>
+
+<style scoped>
+.settings-view {
+  height: 100%;
+  overflow-y: auto;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-secondary);
+}
+
+.back-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(45, 212, 191, 0.1);
+  border: 1px solid rgba(45, 212, 191, 0.3);
+  border-radius: 8px;
+  color: #2dd4bf;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.back-btn:hover {
+  background: rgba(45, 212, 191, 0.2);
+  border-color: rgba(45, 212, 191, 0.5);
+}
+</style>
 
 <style scoped>
 .settings-view {

@@ -245,10 +245,14 @@ class ToolRegistry:
         from webnet.TerminalNet.tools.terminal_command import TerminalCommandTool
         from webnet.TerminalNet.tools.multi_terminal import MultiTerminalTool
         from webnet.TerminalNet.tools.wsl_manager import WSLManagerTool
+        from webnet.TerminalNet.tools.environment_detector import EnvironmentDetectorTool
+        from webnet.TerminalNet.tools.system_info import SystemInfoTool
 
         self.register(TerminalCommandTool())
         self.register(MultiTerminalTool())
         self.register(WSLManagerTool())
+        self.register(EnvironmentDetectorTool())
+        self.register(SystemInfoTool())
 
     def _load_model_management_tools(self):
         """加载模型管理工具"""

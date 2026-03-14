@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch, onMounted } from 'vue'
 import { useSettingsStore } from '../stores/settings'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import { copyToClipboard, formatTimestamp } from '../utils'
@@ -9,16 +9,19 @@ import type { ChatMessage } from '../stores/chat'
 interface Props {
   message: ChatMessage
   showActions?: boolean
+  isNew?: boolean  // 是否是新消息，用于自动播放
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  showActions: true
+  showActions: true,
+  isNew: false
 })
 
 const emit = defineEmits<{
   (e: 'regenerate', message: ChatMessage): void
   (e: 'copy', content: string): void
   (e: 'delete', message: ChatMessage): void
+  (e: 'played'): void  // 播放完成事件
 }>()
 
 const settings = useSettingsStore()
@@ -28,6 +31,16 @@ const isSpeaking = ref(false)
 
 const isUser = computed(() => props.message.role === 'user')
 const isAssistant = computed(() => props.message.role === 'assistant')
+
+// 自动播放功能
+watch(() => props.isNew, (newVal) => {
+  if (newVal && isAssistant.value && settings.settings.ttsEnabled && settings.settings.ttsAutoPlay) {
+    // 延迟一下确保消息已渲染
+    setTimeout(() => {
+      handleSpeak(true)
+    }, 500)
+  }
+}, { immediate: true })
 
 async function handleCopy() {
   const success = await copyToClipboard(props.message.content)
@@ -48,39 +61,57 @@ function handleDelete() {
   emit('delete', props.message)
 }
 
-async function handleSpeak() {
+async function handleSpeak(isAutoPlay: boolean = false) {
   if (isSpeaking.value) {
     stopAudio()
     isSpeaking.value = false
     return
   }
-  
+
+  // 检查 TTS 设置
+  if (!settings.settings.ttsEnabled) {
+    console.log('TTS未启用')
+    return
+  }
+
   isSpeaking.value = true
   try {
     const result = await ttsApi.speak({
       text: props.message.content,
       engine: 'gpt_sovits'
     })
-    
+
     if (result.success && result.audio_data) {
       playAudioFromBase64(result.audio_data, result.format)
-      
+
       // 监听播放结束
       const audio = new Audio()
       audio.src = `data:audio/${result.format || 'mpeg'};base64,${result.audio_data}`
       audio.onended = () => {
         isSpeaking.value = false
+        if (isAutoPlay) {
+          emit('played')
+        }
       }
       audio.onerror = () => {
         isSpeaking.value = false
+        if (isAutoPlay) {
+          emit('played')
+        }
       }
     } else {
       console.error('TTS生成失败:', result.error)
       isSpeaking.value = false
+      if (isAutoPlay) {
+        emit('played')
+      }
     }
   } catch (error) {
     console.error('TTS错误:', error)
     isSpeaking.value = false
+    if (isAutoPlay) {
+      emit('played')
+    }
   }
 }
 </script>

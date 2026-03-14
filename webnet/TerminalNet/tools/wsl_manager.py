@@ -377,6 +377,40 @@ class WSLManagerTool(BaseTool):
         except Exception as e:
             return f"❌ 安装环境时出错: {str(e)}"
 
+    async def _find_distribution_by_name(self, name_hint: str) -> Optional[str]:
+        """根据名称提示智能匹配WSL发行版"""
+        try:
+            result = subprocess.run(
+                ["wsl", "--list", "--verbose"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode != 0:
+                return None
+            
+            lines = result.stdout.strip().split('\n')
+            name_hint_lower = name_hint.lower().replace("-", "").replace("_", "")
+            
+            for line in lines[1:]:  # 跳过标题行
+                if line.strip():
+                    parts = line.split()
+                    if len(parts) >= 1:
+                        dist_name = parts[0].replace('*', '').strip()
+                        dist_name_lower = dist_name.lower().replace("-", "").replace("_", "")
+                        
+                        # 完全匹配
+                        if dist_name_lower == name_hint_lower:
+                            return dist_name
+                        # 部分匹配（如 "kali" 匹配 "kali-linux"）
+                        if name_hint_lower in dist_name_lower or dist_name_lower in name_hint_lower:
+                            return dist_name
+            
+            return None
+        except:
+            return None
+
     async def _open_wsl(self, args: Dict[str, Any], context: ToolContext) -> str:
         """打开指定发行版的WSL终端"""
         distribution = args.get("distribution")
@@ -389,17 +423,19 @@ class WSLManagerTool(BaseTool):
                 distribution = default_dist
             else:
                 return "❌ 请指定WSL发行版名称"
+        else:
+            # 智能匹配发行版名称（如 "Kali" -> "kali-linux"）
+            matched = await self._find_distribution_by_name(distribution)
+            if matched:
+                distribution = matched
+                self.logger.info(f"智能匹配发行版: {args.get('distribution')} -> {distribution}")
 
-        # 如果需要检查环境
-        if not skip_python_check:
-            env_check = await self._check_environment(args, context)
-            # 检查是否所有组件都已安装
-            if "❌ 未安装" in env_check:
-                return env_check + "\n\n请先安装环境，或者使用 skip_python_check=true 跳过检查"
+        # 如果需要检查环境 - 跳过预检查，直接在打开终端时安装依赖
+        # 避免在打开前预检查导致超时
 
         try:
             # 获取项目根目录
-            work_dir = str(Path(__file__).parent.parent.parent)
+            work_dir = str(Path(__file__).parent.parent.parent.parent)
 
             # Windows路径转换为WSL路径
             wsl_work_dir = work_dir.replace("\\", "/")
@@ -416,10 +452,21 @@ class WSLManagerTool(BaseTool):
 
             # 方案1: 使用 Windows Terminal 的 wt.exe
             try:
-                # 根据发行版名称调整profile参数
-                # Ubuntu发行版可能叫 "Ubuntu" 或 "Ubuntu-24.04"
-                profile_name = distribution
-                wsl_cmd = f'wt.exe -w 0 new-tab --profile "{profile_name}" -- wsl.exe -d {distribution} -- bash -c "cd {wsl_work_dir} && echo 正在启动弥娅终端代理... && python3 {wsl_agent_script} --session-id {session_id} && exec bash"'
+                # 获取Windows主机IP（供WSL中的代理连接）
+                import socket
+                try:
+                    # 尝试连接DNS获取主机IP
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    s.connect(("8.8.8.8", 80))
+                    host_ip = s.getsockname()[0]
+                    s.close()
+                except:
+                    host_ip = "localhost"
+                
+                # 构建WSL中运行的命令
+                # 先检查并安装依赖，然后启动terminal_agent
+                # 注意：某些发行版（如Kali）使用外部管理的Python，需要 --break-system-packages
+                wsl_cmd = f'''wt.exe -w 0 new-tab --profile "{distribution}" -- wsl.exe -d {distribution} bash -c "cd {wsl_work_dir} && echo '正在检查Python环境...' && python3 --version && pip3 install --break-system-packages -q aiohttp requests && echo '正在启动弥娅终端代理...' && python3 {wsl_agent_script} --session-id {session_id} --host {host_ip} --port 8000 && exec bash"'''
 
                 subprocess.Popen(
                     wsl_cmd,
@@ -427,19 +474,32 @@ class WSLManagerTool(BaseTool):
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
                 )
-                self.logger.info(f"已使用 Windows Terminal 打开 WSL [{distribution}] 窗口: {session_id}")
+                self.logger.info(f"已使用 Windows Terminal 打开 WSL [{distribution}] 窗口并启动弥娅代理")
 
                 result = f"✅ 已打开WSL终端\n"
                 result += f"发行版: {distribution}\n"
                 result += f"会话ID: {session_id}\n"
-                result += f"工作目录: {work_dir}"
+                result += f"工作目录: {work_dir}\n"
+                result += f"提示: 弥娅已连接到终端，你可以在WSL中与她对话"
 
                 return result
 
             except FileNotFoundError:
                 # 方案2: 使用 start wsl
                 self.logger.warning("Windows Terminal 未找到，使用 start wsl 命令")
-                wsl_cmd = f'start wsl -d {distribution} bash -c "cd {wsl_work_dir} && echo 正在启动弥娅终端代理... && python3 {wsl_agent_script} --session-id {session_id} && exec bash"'
+                
+                # 获取Windows主机IP
+                import socket
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    s.connect(("8.8.8.8", 80))
+                    host_ip = s.getsockname()[0]
+                    s.close()
+                except:
+                    host_ip = "localhost"
+                
+                # 启动terminal_agent
+                wsl_cmd = f'start wsl -d {distribution} bash -c "cd {wsl_work_dir} && pip3 install --break-system-packages -q aiohttp requests && python3 {wsl_agent_script} --session-id {session_id} --host {host_ip} --port 8000"'
 
                 subprocess.Popen(
                     wsl_cmd,
@@ -447,7 +507,7 @@ class WSLManagerTool(BaseTool):
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
                 )
-                self.logger.info(f"已使用 start wsl 打开 WSL [{distribution}] 窗口: {session_id}")
+                self.logger.info(f"已使用 start wsl 打开 WSL [{distribution}] 窗口并启动弥娅代理")
 
                 result = f"✅ 已打开WSL终端\n"
                 result += f"发行版: {distribution}\n"

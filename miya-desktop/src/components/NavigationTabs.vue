@@ -13,7 +13,8 @@ const tabs = [
   { name: '分析', path: '/analytics', icon: 'pi-chart-line' },
   { name: '调研', path: '/research', icon: 'pi-search' },
   { name: '任务', path: '/tasks', icon: 'pi-bolt' },
-  { name: '监控', path: '/monitor', icon: 'pi-chart-bar' }
+  { name: '监控', path: '/monitor', icon: 'pi-chart-bar' },
+  { name: '设置', path: '/settings', icon: 'pi-cog' }
 ]
 
 const activeTab = computed(() => {

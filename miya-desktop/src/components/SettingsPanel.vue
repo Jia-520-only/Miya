@@ -86,6 +86,30 @@
         </div>
       </section>
 
+      <!-- TTS 语音设置 -->
+      <section class="settings-section">
+        <h3>语音合成 (TTS)</h3>
+        <div class="setting-item">
+          <label>语音功能</label>
+          <div class="toggle-group">
+            <label class="toggle-label">
+              <input type="checkbox" v-model="ttsEnabled" />
+              <span>启用语音合成</span>
+            </label>
+            <label class="toggle-label" :class="{ disabled: !ttsEnabled }">
+              <input type="checkbox" v-model="ttsAutoPlay" :disabled="!ttsEnabled" />
+              <span>自动播放新消息语音</span>
+            </label>
+          </div>
+        </div>
+        <div class="setting-item">
+          <label>说明</label>
+          <p class="setting-hint">
+            启用后，AI回复将自动转为语音播放。您也可以点击消息旁的扬声器图标手动播放。
+          </p>
+        </div>
+      </section>
+
       <!-- 快捷键设置 -->
       <section class="settings-section">
         <h3>快捷键</h3>
@@ -118,7 +142,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
+import { useSettingsStore } from '../stores/settings'
 
 interface Props {
   modelPath?: string
@@ -127,6 +152,8 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   modelPath: '/live2d/ht/ht.model3.json'
 })
+
+const settingsStore = useSettingsStore()
 
 const emit = defineEmits<{
   close: []
@@ -142,6 +169,8 @@ const enableInteraction = ref(true)
 const currentTheme = ref('dark')
 const accentColor = ref('#3b82f6')
 const version = ref('1.0.0')
+const ttsEnabled = ref(false)
+const ttsAutoPlay = ref(false)
 
 // 配置选项
 const sizes = [
@@ -197,6 +226,9 @@ function loadSettings() {
       enableInteraction.value = settings.enableInteraction ?? true
       currentTheme.value = settings.theme || 'dark'
       accentColor.value = settings.accentColor || '#3b82f6'
+      // TTS 设置
+      ttsEnabled.value = settings.ttsEnabled ?? false
+      ttsAutoPlay.value = settings.ttsAutoPlay ?? false
     }
   } catch (error) {
     console.error('加载设置失败:', error)
@@ -211,17 +243,21 @@ function saveSettings() {
       autoIdle: autoIdle.value,
       enableInteraction: enableInteraction.value,
       theme: currentTheme.value,
-      accentColor: accentColor.value
+      accentColor: accentColor.value,
+      ttsEnabled: ttsEnabled.value,
+      ttsAutoPlay: ttsAutoPlay.value
     }
     localStorage.setItem('miya-settings', JSON.stringify(settings))
+    // 同时更新 settings store
+    settingsStore.updateSetting('ttsEnabled', ttsEnabled.value)
+    settingsStore.updateSetting('ttsAutoPlay', ttsAutoPlay.value)
   } catch (error) {
     console.error('保存设置失败:', error)
   }
 }
 
 // 监听设置变化并自动保存
-import { watch } from 'vue'
-watch([modelSize, showEmotions, autoIdle, enableInteraction, currentTheme, accentColor], saveSettings)
+watch([modelSize, showEmotions, autoIdle, enableInteraction, currentTheme, accentColor, ttsEnabled, ttsAutoPlay], saveSettings)
 </script>
 
 <style scoped>
@@ -376,10 +412,30 @@ watch([modelSize, showEmotions, autoIdle, enableInteraction, currentTheme, accen
   border-color: var(--border-secondary);
 }
 
+.toggle-label.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.toggle-label.disabled input[type="checkbox"] {
+  cursor: not-allowed;
+}
+
 .toggle-label input[type="checkbox"] {
   width: 18px;
   height: 18px;
   accent-color: var(--accent-color);
+}
+
+.setting-hint {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+  padding: var(--spacing-sm);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-tertiary);
 }
 
 .color-selector {

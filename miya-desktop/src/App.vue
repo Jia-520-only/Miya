@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useSettingsStore } from './stores/settings'
 import { useRoute } from 'vue-router'
 import TitleBar from '@components/TitleBar.vue'
@@ -95,8 +95,29 @@ onMounted(() => {
   // 应用主题
   settingsStore.applyTheme(settingsStore.settings.theme)
 
+  // 全局快捷键监听
+  window.addEventListener('keydown', handleGlobalKeydown)
+
+  // 监听设置面板打开事件
+  window.addEventListener('open-settings-panel', () => {
+    console.log('收到打开设置面板事件')
+  })
+
   console.log('弥娅桌面应用已启动')
 })
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown)
+})
+
+// 全局键盘快捷键
+function handleGlobalKeydown(event: KeyboardEvent) {
+  // Ctrl + , 打开设置
+  if (event.ctrlKey && event.key === ',') {
+    event.preventDefault()
+    window.dispatchEvent(new CustomEvent('open-settings-panel'))
+  }
+}
 </script>
 
 <template>

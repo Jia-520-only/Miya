@@ -24,8 +24,8 @@ class PromptManager:
         self.config_path = config_path or Path(__file__).parent.parent / 'config' / '.env'
         self.personality = personality  # 依赖人格模块
         self.user_prompt_template = "用户输入：{user_input}"
-        self.memory_context_enabled = False
-        self.memory_context_max_count = 5
+        self.memory_context_enabled = True  # 默认启用记忆上下文
+        self.memory_context_max_count = 10  # 增加到10条
         self._custom_system_prompt = None  # 自定义系统提示词
 
         # 加载配置
@@ -471,13 +471,27 @@ class PromptManager:
         if not memories:
             return ""
 
-        lines = ["最近的对话历史："]
+        lines = ["【对话历史上下文】"]
 
         for i, memory in enumerate(memories, 1):
-            input_text = memory.get('input', '')
-            response_text = memory.get('response', '')
-            lines.append(f"{i}. 用户：{input_text}")
-            lines.append(f"   弥娅：{response_text}")
+            # 支持两种格式：1) input/response 格式 2) role/content 格式
+            role = memory.get('role', '')
+            content = memory.get('content', '')
+            
+            # 如果是 role/content 格式
+            if role and content:
+                if role == 'user':
+                    lines.append(f"用户说：{content}")
+                elif role == 'assistant':
+                    lines.append(f"弥娅回复：{content}")
+                else:
+                    lines.append(f"{role}：{content}")
+            # 如果是 input/response 格式
+            else:
+                input_text = memory.get('input', '')
+                response_text = memory.get('response', '')
+                lines.append(f"{i}. 用户：{input_text}")
+                lines.append(f"   弥娅：{response_text}")
 
         return "\n".join(lines)
 

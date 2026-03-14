@@ -81,20 +81,17 @@ class MultiTerminalTool(BaseTool):
 ⚡ 【重要】创建终端时，AI 必须根据用户请求的终端类型自动执行：
 
 支持的终端创建方式：
-1. "打开一个WSL" → 先调用 wsl_manager 工具检查环境，然后调用 create_terminal，terminal_type="wsl"
-2. "打开一个PowerShell" → 调用 create_terminal，terminal_type="powershell"
-3. "打开一个CMD" → 调用 create_terminal，terminal_type="cmd"
-4. "打开一个Bash" → 调用 create_terminal，terminal_type="bash"
-5. "新建终端" → 调用 create_terminal，使用默认终端类型
-6. "列出所有终端" → 调用 list_terminals
+1. "打开一个PowerShell" → 调用 create_terminal，terminal_type="powershell"
+2. "打开一个CMD" → 调用 create_terminal，terminal_type="cmd"
+3. "打开一个Bash" → 调用 create_terminal，terminal_type="bash"
+4. "新建终端" → 调用 create_terminal，使用默认终端类型
+5. "列出所有终端" → 调用 list_terminals
 
-🔧 【WSL专用】如果用户要求打开WSL终端，AI应该：
-1. 先调用 wsl_manager 工具的 list_distributions 操作查看所有WSL发行版
-2. 如果用户指定了发行版（如"打开Ubuntu WSL"），使用指定的发行版
-3. 如果用户没有指定，使用默认发行版
-4. 调用 wsl_manager 工具的 check_environment 检查Python环境
-5. 如果环境缺失，调用 install_environment 安装环境
-6. 最后调用 wsl_manager 工具的 open_wsl 打开WSL终端
+🚫 【WSL专用】如果用户要求打开WSL终端或管理WSL发行版：
+❌ 绝对不要调用本工具(multi_terminal)来处理WSL相关请求
+✅ 必须直接调用 wsl_manager 工具，它会处理所有WSL相关的操作
+- wsl_manager工具包含：检查WSL环境、列出发行版、打开指定发行版、安装环境等完整功能
+- wsl_manager工具会自动处理终端创建，无需通过multi_terminal
 
 操作类型：
 - create_terminal: 创建新终端（需要参数：name, terminal_type）
@@ -108,7 +105,6 @@ class MultiTerminalTool(BaseTool):
 - cmd: Windows CMD
 - powershell: Windows PowerShell（Windows默认）
 - bash: Linux Bash（Linux/macOS默认，Windows Git Bash也可用）
-- wsl: Windows Subsystem for Linux（建议配合 wsl_manager 工具使用）
 - zsh: macOS Zsh
 - sh: Unix Shell
 - git_bash: Git Bash（Windows）

@@ -24,10 +24,13 @@
           />
         </div>
 
-        <!-- 快捷操作栏 - 简化为仅桌宠按钮 -->
+        <!-- 快捷操作栏 -->
         <div class="quick-actions">
           <button @click="$emit('toggle-desktop')" class="action-btn" title="桌宠模式">
             <i class="pi pi-paw"></i>
+          </button>
+          <button @click="$emit('open-settings')" class="action-btn" title="设置 (Ctrl+,)">
+            <i class="pi pi-cog"></i>
           </button>
         </div>
 
