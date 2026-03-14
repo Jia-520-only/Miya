@@ -32,9 +32,55 @@ const isSpeaking = ref(false)
 const isUser = computed(() => props.message.role === 'user')
 const isAssistant = computed(() => props.message.role === 'assistant')
 
+// 检测是否为系统日志/代码类型内容（不需要TTS播放）
+function isSystemLogContent(content: string): boolean {
+  if (!content) return false
+  
+  // 检查是否包含代码块（多个```）
+  const codeBlockCount = (content.match(/```/g) || []).length
+  if (codeBlockCount >= 2) return true
+  
+  // 检查是否包含堆栈跟踪特征
+  if (/Traceback \(most recent call last\)|Error:|Exception:|at\s+\w+\(|Stack trace:/.test(content)) {
+    return true
+  }
+  
+  // 检查是否包含日志级别标识
+  if (/^\[INFO\]|\[DEBUG\]|\[ERROR\]|\[WARN\]|\[WARNING\]|\[FATAL\]/m.test(content)) {
+    return true
+  }
+  
+  // 检查是否主要是JSON输出
+  if (/^\s*\{[\s\S]*\}\s*$/.test(content) && content.includes('"')) {
+    const tryParse = content.trim()
+    try {
+      JSON.parse(tryParse)
+      return true // JSON输出不需要朗读
+    } catch {}
+  }
+  
+  // 检查是否包含文件路径模式
+  const pathPattern = /(\/[\w\-./]+\.[\w]+|\w:\\[\w\-\\.]+|~\/[\w\-./]+)/
+  if (pathPattern.test(content) && content.length > 200) {
+    return true
+  }
+  
+  // 检查是否包含命令输出特征
+  if (/^\$|^\s*>\s+/m.test(content) && content.includes('\n')) {
+    return true
+  }
+  
+  return false
+}
+
 // 自动播放功能
 watch(() => props.isNew, (newVal) => {
   if (newVal && isAssistant.value && settings.settings.ttsEnabled && settings.settings.ttsAutoPlay) {
+    // 检查是否是系统日志/代码类型内容，如果是则跳过TTS
+    if (isSystemLogContent(props.message.content)) {
+      console.log('跳过系统日志内容的TTS播放')
+      return
+    }
     // 延迟一下确保消息已渲染
     setTimeout(() => {
       handleSpeak(true)
@@ -71,6 +117,12 @@ async function handleSpeak(isAutoPlay: boolean = false) {
   // 检查 TTS 设置
   if (!settings.settings.ttsEnabled) {
     console.log('TTS未启用')
+    return
+  }
+
+  // 检查是否是系统日志内容（手动点击也检查）
+  if (isSystemLogContent(props.message.content)) {
+    console.log('系统日志/代码内容不适宜TTS播放')
     return
   }
 
