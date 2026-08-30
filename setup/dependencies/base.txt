@@ -1,0 +1,41 @@
+# Miya - Core Dependencies
+# Minimum requirements for Miya to run
+# Install: pip install -r setup/dependencies/base.txt
+
+# Web Framework
+fastapi>=0.100.0,<1.0.0
+uvicorn[standard]>=0.22.0,<1.0.0
+pydantic>=2.0.0,<3.0.0
+python-multipart>=0.0.6
+starlette>=0.30.0,<1.0.0
+
+# Async Communication
+aiohttp>=3.8.0,<4.0.0
+aiofiles>=23.0.0
+
+# Configuration
+python-dotenv>=1.0.0
+pyyaml>=6.0
+tomli>=2.0.0
+
+# Security / Auth
+PyJWT>=2.8.0,<2.9.0
+cryptography>=41.0.0
+email-validator>=2.0.0
+
+# System Utilities
+psutil>=5.9.0
+watchdog>=3.0.0
+requests>=2.31.0
+click>=8.1.0
+packaging>=23.0
+certifi>=2024.0.0
+
+# Data Processing
+numpy>=1.26.4,<2.0.0
+
+# Template Engine
+jinja2>=3.1.0
+
+# Type Hints
+typing-extensions>=4.8.0

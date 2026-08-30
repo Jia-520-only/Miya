@@ -1,0 +1,138 @@
+# 表情包配置文件
+# 注意: 文本相关配置已移至 config/text_config.json
+# 本文件仅保留结构化和性能配置
+
+emoji:
+  # 基础配置
+  enabled: true
+  auto_respond: true
+  random_emoji_probability: 0.3  # 随机发送表情的概率
+  
+  # 资源路径配置（路径配置，非文本）
+  resources:
+    emoji_dir: "data/emoji"
+    stickers_dir: "data/stickers"
+    backup_dir: "data/.emoji_backups"
+    
+    # 支持的文件格式
+    allowed_formats: [".gif", ".jpg", ".jpeg", ".png", ".webp", ".bmp"]
+    
+    # 文件大小限制（单位：字节）
+    max_file_size: 5242880  # 5MB
+    
+    # 缓存配置
+    cache_size_mb: 100
+    cache_ttl_hours: 24
+    
+  # 表情包分类配置（结构配置）
+  categories:
+    custom:
+      enabled: true
+      type: "image"
+      dir: "custom"
+      max_files: 100
+      
+    miya_special:
+      enabled: true
+      type: "image"
+      dir: "miya_special"
+      max_files: 50
+      
+    user_uploaded:
+      enabled: true
+      type: "image"
+      dir: "user_uploaded"
+      max_files: 200
+      
+    standard:
+      enabled: true
+      type: "image"
+      dir: "standard"
+      max_files: 50
+      
+  # 贴纸分类配置
+  stickers:
+    cute:
+      enabled: true
+      dir: "cute"
+      max_files: 50
+      
+    reaction:
+      enabled: true
+      dir: "reaction"
+      max_files: 30
+      
+    seasonal:
+      enabled: true
+      dir: "seasonal"
+      max_files: 20
+      
+    memes:
+      enabled: true
+      dir: "memes"
+      max_files: 40
+      
+  # 发送策略
+  sending_strategy:
+    context_based: true
+    random_enabled: true
+    random_interval_minutes: 30
+    random_max_per_day: 10
+    
+  # 性能配置
+  performance:
+    max_concurrent_uploads: 3
+    upload_timeout_seconds: 30
+    image_compression_enabled: true
+    compression_quality: 85
+    
+  # 访问控制
+  access_control:
+    allow_user_upload: true
+    max_user_upload_size_mb: 5
+    allowed_upload_groups: []
+    allowed_upload_users: []
+    
+  # 自动保存用户表情包配置
+  auto_save_user_emojis:
+    enabled: true
+    save_category: "user_uploaded"
+    max_user_uploads_per_user: 50
+    min_image_size_kb: 10
+    max_image_size_kb: 5120
+    
+    smart_filtering:
+      enabled: true
+      min_width: 50
+      min_height: 50
+      max_aspect_ratio: 4.0
+      min_aspect_ratio: 0.25
+      allow_animated: true
+      
+    duplicate_detection:
+      enabled: true
+      similarity_threshold: 0.95
+      hash_method: "md5"
+      
+    naming_strategy:
+      method: "timestamp_user"
+      user_naming_enabled: true
+      default_prefix: "user_upload_"
+      
+    notifications:
+      on_save_success: true
+      on_save_fail: false
+      success_message_key: "emoji_notifications.save_success"
+    
+  # 统计和日志
+  statistics:
+    enabled: true
+    track_usage: true
+    log_file: "logs/emoji_usage.log"
+    daily_report: true
+    
+  # 调试配置
+  debug:
+    log_emoji_selection: false
+    log_upload_details: false
+    log_sending_details: true

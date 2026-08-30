@@ -1,0 +1,165 @@
+{
+  "enabled": true,
+  "preferred_engine": "builtin",
+  "ai_song_parse_enabled": true,
+  "_ai_song_parse_comment": "常规搜索失败时用弥娅 AI 解析点歌意图提取歌名 (理解颜文字/口语描述)",
+  "output_dir": "data",
+  "playback_volume_vocal": 70,
+  "playback_volume_accompany": 70,
+  "check_play_interval": 3,
+  "_comment_paths": "==================== 换机器零配置 (留空自动探测) — 也支持手动显式配置 ====================",
+  "paths": {
+    "_comment": "外部工具路径 (绝对路径或相对项目根目录). 显式填写后优先使用; 留空则自动探测: 扫描项目父目录/tools/各盘符根/AIvoice 等常见位置, 按目录特征识别 RVC (start_api.bat+assets/weights) 与 GPT-SoVITS (tools/uvr5/uvr5_weights); 支持 RVCxxx/RVCxxx 双层嵌套结构. 示例: rvc_root 填 'D:/AIvoice/RVC20240604Nvidia50x0/RVC20240604Nvidia50x0'",
+    "rvc_root": "",
+    "gpt_sovits_root": "",
+    "mdx_root": "",
+    "ffmpeg": ""
+  },
+  "_comment_paths2": "rvc_root: RVC 整合包 (含 assets/weights 模型, runtime/python.exe, start_api.bat, ffmpeg.exe, mdx/ 分离部件); gpt_sovits_root: GPT-SoVITS 整合包 (UVR5 人声分离用); mdx_root: MDX 分离部件 (推荐随 RVC 包放 {rvc_root}/mdx/, 留空自动探测; 也可指向独立 Live2D 整合包); ffmpeg 留空自动探测",
+  "engines": {
+    "builtin": {
+      "enabled": true,
+      "is_default": true,
+      "_comment": "内置唱歌引擎 — 本地全流程管线",
+      "output_dir": "data/singing",
+      "volume_vocal": 70,
+      "volume_accompany": 70,
+      "learn_timeout": 300,
+      "music_source": "auto",
+      "_music_source_options": "auto | local | netease | bilibili",
+      "source_config": {
+        "input_dirs": [
+          "data/singing_input",
+          "data/singing"
+        ],
+        "_input_dirs_comment": "本地音乐库目录 (递归扫描)",
+        "timeout": 30,
+        "_netease_options": {
+          "netease_api": "http://localhost:3000",
+          "quality": "exhigh"
+        },
+        "_bilibili_options": {
+          "bilibili_python": ""
+        }
+      },
+      "_comment_pythons": "demucs_python/uvr5_python 留空时自动用 paths.rvc_root / paths.gpt_sovits_root 的 runtime python",
+      "demucs_python": "",
+      "demucs_models": [
+        "htdemucs_ft",
+        "htdemucs",
+        "mdx_extra"
+      ],
+      "demucs_timeout": 300,
+      "uvr5_python": "",
+      "uvr5_models": [],
+      "_uvr5_models_comment": "留空自动用 {gpt_sovits_root}/tools/uvr5/uvr5_weights 下的 bs_roformer + HP5 模型; 也可显式指定 (支持 {gpt_sovits_root} 模板)",
+      "rvc_uvr5_model": "HP5_only_main_vocal",
+      "_rvc_uvr5_model_comment": "无 GPT-SoVITS 时回退用 RVC 自带的 UVR5 模型 (assets/uvr5_weights: HP2_all_vocals | HP3_all_vocals | HP5_only_main_vocal)",
+      "uvr5_device": "cuda",
+      "uvr5_timeout": 600,
+      "rvc_api_url": "http://127.0.0.1:7897",
+      "_rvc_api_comment": "RVC WebUI Gradio API (infer-web.py, start_api.bat 启动, 端口 7897)",
+      "rvc_model": "xiadie",
+      "_rvc_model_comment": "遐蝶新模型 (200epoch, 2026-08 新训练) | 备选: guanguanV1 | keruanV1 | kikiV1 | youzhanv2-xi",
+      "rvc_f0_up_key": 0,
+      "rvc_auto_pitch": true,
+      "_rvc_auto_pitch_comment": "自动变调: 按 源平均基频 与 模型音域中心 的比值自动计算变调 (任意男女声源自适应)",
+      "rvc_auto_pitch_clamp": 5,
+      "_rvc_auto_pitch_clamp_comment": "自动变调幅度上限 (±半音) — RVC 大跨度变调(>6半音)音色劣化明显, 默认限幅±5 (男声源不再硬顶+8)",
+      "rvc_model_pitch_center": 300,
+      "_rvc_model_pitch_center_comment": "模型音域中心 (Hz) — 女声模型约300, 男声模型约160; 源音域低于此值自动升调, 高于自动降调",
+      "rvc_auto_pitch_max_hz": 1000,
+      "_rvc_auto_pitch_max_hz_comment": "变调后输出音高上限 (Hz) — 超高音帧占比过多时整体下调变调(保持旋律音程一致, 不产生局部跑调); 0=关闭",
+      "rvc_transpose_accompany": true,
+      "_rvc_transpose_accompany_comment": "自动变调时伴奏/和声轨同步整曲移调 (ffmpeg) — 人声与伴奏必须同调, 只移人声不移伴奏会整首跑调",
+      "rvc_f0_method": "rmvpe",
+      "_rvc_f0_method_options": "pm | harvest | crepe | rmvpe (rmvpe 综合音质最稳; harvest 高音易金属音/破音)",
+      "rvc_index_path": "{rvc_root}/assets/indices/xiadie.index",
+      "rvc_index_rate": 0.7,
+      "rvc_filter_radius": 3,
+      "_rvc_filter_radius_comment": "音高中值滤波半径 — 官方默认3; 过大(5+)会抹平颤音使唱腔呆板机械",
+      "rvc_resample_sr": 44100,
+      "_rvc_resample_sr_comment": "RVC 输出重采样目标采样率 (Hz) — 44100 由服务端 librosa 高质量重采样 (模型原生 48k), 避免混音时 pydub 用线性插值重采样导致高频劣化; 0=不重采样",
+      "rvc_rms_mix_rate": 0.25,
+      "_rvc_rms_mix_rate_comment": "音量包络混合比例, 官方默认0.25 (过大高音易爆音)",
+      "rvc_protect": 0.33,
+      "_rvc_protect_comment": "保护清辅音/呼吸声 (0.33参考值, 防电音撕裂)",
+      "rvc_server": {
+        "_comment": "RVC 服务未运行时自动拉起 start_api.bat (弥娅退出时自动关闭). launch_bat 留空自动用 {rvc_root}/start_api.bat",
+        "auto_launch": true,
+        "launch_bat": "",
+        "health_timeout": 180
+      },
+      "_comment_separation": "多轮人声分离 — 参考项目原版配方: MDX Inst_HQ_3(伴奏分离) → MDX KARA_2(和声提取) → 混音时和声以低音量加回, 歌声更丰满",
+      "separation_stages_enabled": true,
+      "separation_stages": [
+        {
+          "_name": "Stage0: 人声+伴奏分离 (MDX Inst_HQ_3)",
+          "model_type": "mdx",
+          "model_path": "{mdx_root}/models/UVR/UVR-MDX-NET-Inst_HQ_3.onnx"
+        },
+        {
+          "_name": "Stage1: 和声提取 (MDX KARA_2)",
+          "model_type": "mdx",
+          "model_path": "{mdx_root}/models/UVR/UVR_MDXNET_KARA_2.onnx"
+        }
+      ],
+      "_comment_effects": "RVC 换声后人声后处理 — 轻量链路: HPF→轻压缩→(仅过载时)限幅→增益 (保留动态与高频细节, 防爆音); 压缩不宜过重, 否则唱腔动态被压平、呼吸声放大",
+      "vocal_effects": {
+        "enabled": true,
+        "compressor_threshold_db": -14,
+        "compressor_ratio": 1.8,
+        "highpass_hz": 80,
+        "highshelf_gain_db": 0,
+        "highshelf_freq_hz": 8000,
+        "limiter_threshold_db": -1.5,
+        "gain_db": 1.5,
+        "reverb_room_size": 0.0,
+        "reverb_wet_level": 0.0
+      },
+      "_comment_mix": "混音时混入和声轨使歌声更丰满",
+      "mix_chord_enabled": true,
+      "mix_chord_volume": 50
+    },
+    "auto_convert_music": {
+      "enabled": false,
+      "is_default": false,
+      "api_url": "http://127.0.0.1:1717",
+      "timeout": 30,
+      "learn_timeout": 500,
+      "output_dir": "data/singing",
+      "volume_vocal": 70,
+      "volume_accompany": 70,
+      "speaker": "遐蝶",
+      "skip_convert_pattern": "(三国演义\\d+|粤剧|京剧|易经)"
+    },
+    "rvc": {
+      "enabled": false,
+      "is_default": false,
+      "_comment": "RVC 直连引擎 — 与 builtin 共享同一 RVC 后端 (Gradio API)",
+      "api_url": "http://127.0.0.1:7897",
+      "model_name": "guanguanV1",
+      "timeout": 60,
+      "learn_timeout": 500,
+      "output_dir": "data/singing_rvc",
+      "volume_vocal": 70,
+      "volume_accompany": 70,
+      "f0_up_key": 0,
+      "f0_method": "rmvpe",
+      "index_path": "",
+      "index_rate": 0.7,
+      "filter_radius": 3,
+      "resample_sr": 0,
+      "rms_mix_rate": 0.5,
+      "protect": 0.3,
+      "rvc_auto_pitch": true,
+      "rvc_model_pitch_center": 300,
+      "rvc_auto_pitch_max_hz": 1000,
+      "rvc_server": {
+        "auto_launch": false,
+        "launch_bat": "",
+        "health_timeout": 180
+      }
+    }
+  }
+}

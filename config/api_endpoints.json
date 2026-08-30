@@ -1,0 +1,73 @@
+{
+  "description": "API端点配置 - 统一管理所有外部API地址",
+  
+  "ai_providers": {
+    "openai": {
+      "base_url": "https://api.openai.com/v1",
+      "chat_endpoint": "/chat/completions",
+      "embedding_endpoint": "/embeddings"
+    },
+    "deepseek": {
+      "base_url": "https://api.deepseek.com/v1",
+      "chat_endpoint": "/chat/completions",
+      "embedding_endpoint": "/embeddings"
+    },
+    "siliconflow": {
+      "base_url": "https://api.siliconflow.cn/v1",
+      "chat_endpoint": "/chat/completions",
+      "embedding_endpoint": "/embeddings"
+    },
+    "zhipu": {
+      "base_url": "https://open.bigmodel.cn/api/paas/v4",
+      "chat_endpoint": "/chat/completions",
+      "vision_endpoint": "/vision/chat"
+    },
+    "dashscope": {
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "chat_endpoint": "/chat/completions"
+    },
+    "anthropic": {
+      "base_url": "https://api.anthropic.com/v1",
+      "chat_endpoint": "/messages"
+    }
+  },
+
+  "web_services": {
+    "xxapi": {
+      "base_url": "https://v2.xxapi.cn"
+    },
+    "wenchang_api": {
+      "base_url": "https://api.xygeng.cn/one/wenchangdijunrandom.php"
+    },
+    "horoscope_api": {
+      "base_url": "https://api.xygeng.cn/one/horoscope.php"
+    },
+    "grok_api": {
+      "base_url": "https://api.xai.ai/v1/chat/completions"
+    },
+    "serpapi": {
+      "base_url": "https://serapi.com/search"
+    },
+    "bing_search": {
+      "base_url": "https://api.bing.microsoft.com/v7.0/search"
+    },
+    "duckduckgo": {
+      "base_url": "https://api.duckduckgo.com/"
+    }
+  },
+
+  "internal_services": {
+    "tts_server": {
+      "base_url": "http://localhost:5000"
+    },
+    "runtime_api": {
+      "base_url": "http://localhost:8001"
+    },
+    "web_api": {
+      "base_url": "http://localhost:8000"
+    },
+    "homeassistant": {
+      "url": "http://homeassistant.local:8123"
+    }
+  }
+}

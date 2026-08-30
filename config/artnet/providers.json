@@ -1,0 +1,46 @@
+{
+  "priority": ["proxy_image", "comfyui", "dalle", "novelai", "cogview", "tongyi"],
+  "providers": {
+    "proxy_image": {
+      "enabled": true,
+      "base_url": "https://api.yinziapi.top",
+      "model": "gpt-image-2",
+      "env_key": "PROXY_API_KEY",
+      "quality": "standard",
+      "timeout": 120
+    },
+    "stable_diffusion": {
+      "enabled": false,
+      "base_url": "http://127.0.0.1:7860",
+      "sampler": "Euler a",
+      "timeout": 120
+    },
+    "dalle": {
+      "enabled": false,
+      "model": "dall-e-3",
+      "quality": "standard",
+      "timeout": 120
+    },
+    "novelai": {
+      "enabled": false,
+      "model": "nai-diffusion-4-5-full",
+      "sampler": "k_euler_ancestral",
+      "timeout": 180
+    },
+    "cogview": {
+      "enabled": false,
+      "model": "cogview-3-plus",
+      "timeout": 120
+    },
+    "tongyi": {
+      "enabled": false,
+      "model": "wanx2.1-t2i-turbo",
+      "timeout": 120
+    },
+    "comfyui": {
+      "enabled": true,
+      "base_url": "http://127.0.0.1:3198",
+      "timeout": 300
+    }
+  }
+}

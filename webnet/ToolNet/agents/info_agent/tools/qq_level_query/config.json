@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "qq_level_query",
+        "description": "查询指定QQ号的等级、活跃天数及升级进度。当用户问'QQ等级'、'查询QQ等级'时使用。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "qq": {
+                    "type": "string",
+                    "description": "要查询的QQ号"
+                }
+            },
+            "required": ["qq"]
+        }
+    }
+}

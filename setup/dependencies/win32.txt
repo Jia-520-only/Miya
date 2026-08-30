@@ -1,0 +1,7 @@
+# Miya - Windows Platform Extras
+# Optional packages for Windows platform
+# Install: pip install -r setup/dependencies/win32.txt
+
+# Windows API
+comtypes>=1.4.0; sys_platform == "win32"
+pywinauto>=0.6.8; sys_platform == "win32"

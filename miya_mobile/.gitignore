@@ -1,0 +1,17 @@
+*.iml
+.gradle/
+build/
+*/build/
+local.properties
+.idea/
+.DS_Store
+*.xcworkspace
+xcuserdata/
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+Pods/
+Carthage/
+node_modules/

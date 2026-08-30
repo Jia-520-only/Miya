@@ -1,0 +1,35 @@
+{
+  "name": "database",
+  "displayName": "数据库服务",
+  "description": "SQLite 数据库操作服务",
+  "agentType": "mcp",
+  "entryPoint": {
+    "module": "mcpserver.database.service",
+    "class": "DatabaseService"
+  },
+  "capabilities": {
+    "tools": [
+      {
+        "name": "query",
+        "description": "查询数据 (SELECT)",
+        "parameters": {
+          "sql": "string"
+        }
+      },
+      {
+        "name": "execute",
+        "description": "执行 SQL (INSERT/UPDATE/DELETE)",
+        "parameters": {
+          "sql": "string"
+        }
+      },
+      {
+        "name": "schema",
+        "description": "获取表结构",
+        "parameters": {}
+      }
+    ]
+  },
+  "version": "1.0.0",
+  "enabled": true
+}

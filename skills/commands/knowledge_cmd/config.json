@@ -1,0 +1,21 @@
+{
+    "name": "knowledge",
+    "description": "管理本地知识库（搜索/添加/删除/统计）",
+    "permission": "public",
+    "allow_in_private": true,
+    "rate_limit": {"user": 10, "admin": 3, "superadmin": 0},
+    "show_in_help": true,
+    "order": 60,
+    "aliases": ["k", "kb", "知识"],
+    "subcommands": {
+        "search": {"description": "搜索知识库", "args": "<关键词>"},
+        "add": {"description": "添加知识（管理员）", "permission": "admin", "args": "<标题> | <内容>"},
+        "del": {"description": "删除知识（管理员）", "permission": "admin", "args": "<ID>"},
+        "stats": {"description": "知识库统计"},
+        "categories": {"description": "查看分类列表"}
+    },
+    "inference": {
+        "default": "stats",
+        "fallback": "search"
+    }
+}

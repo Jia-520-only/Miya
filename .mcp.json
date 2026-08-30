@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "miya-soul": {
+      "command": "python",
+      "args": ["mcpserver/miya/server.py"],
+      "env": {},
+      "disabled": false,
+      "autoApprove": []
+    },
+    "miya-mineradio": {
+      "command": "python",
+      "args": ["mcpserver/miya_mineradio/server.py"],
+      "env": {},
+      "disabled": false,
+      "autoApprove": [
+        "mineradio_get_status",
+        "mineradio_play",
+        "mineradio_pause",
+        "mineradio_toggle_play",
+        "mineradio_next",
+        "mineradio_prev",
+        "mineradio_search",
+        "mineradio_get_queue",
+        "mineradio_get_playlists",
+        "mineradio_get_lyrics",
+        "mineradio_health",
+        "mineradio_set_mode"
+      ]
+    }
+  }
+}

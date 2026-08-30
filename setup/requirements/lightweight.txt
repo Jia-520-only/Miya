@@ -1,0 +1,20 @@
+# Miya - Lightweight Install (No External DB)
+# Minimal install with Mock fallback for all database operations
+# External database features will use in-memory simulation
+# Install: pip install -r setup/requirements/lightweight.txt
+
+# Core
+-r ../dependencies/base.txt
+
+# AI Models
+-r ../dependencies/ai.txt
+
+# Mock Mode Info
+# The following features use Mock mode when external DBs are absent:
+# - Redis: MockRedisAsyncClient (in-memory dict)
+# - Milvus: in-memory vector storage
+# - Neo4j: graph dictionary simulation
+# - ChromaDB: simulated collection
+#
+# Enable in config/.env:
+#   SIMULATION_MODE=true

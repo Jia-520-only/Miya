@@ -1,0 +1,28 @@
+# 弥娅屏幕感知配置
+# 控制弥娅如何「看见」佳的屏幕
+
+screen_aware:
+  enabled: true
+  min_interval_seconds: 30
+
+  # ── 本地 OCR 模型目录 ──
+  # PaddleOCR 模型存放路径。留空则自动使用 models/paddle_ocr/
+  model_dir: ""
+
+  # ── OCR 启动宽限期（秒）──
+  # 启动后延迟加载 PaddleOCR，避免阻塞 daemon 启动
+  # PaddleOCR 需加载 5 个模型约 60s，宽限期内 OCR 暂不可用
+  ocr_startup_grace_seconds: 120
+
+  # ── 感知模式 ──
+  # ocr_only:  纯本地 OCR，零 API 调用，零 token
+  # api_only:  纯 API 视觉模型，跳过 OCR，结果更精准但费 token
+  # hybrid:    混合 — 先 OCR 识字，不确定时再 fallback 视觉模型（推荐，默认）
+  vision_mode: "ocr_only"
+
+  # ── Token 预算（api_only / hybrid 模式生效）──
+  vision_cooldown_seconds: 300
+  vision_daily_quota: 24
+  vision_trigger_light_count: 10
+
+  hash_similarity_threshold: 8

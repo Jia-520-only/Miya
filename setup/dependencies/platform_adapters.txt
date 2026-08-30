@@ -1,0 +1,31 @@
+# Miya - Multi-Platform Bot SDKs
+# QQ, Telegram, Discord, Lark, WeChat, Slack, LINE, Mattermost
+# Install: pip install -r setup/dependencies/platform_adapters.txt
+
+# QQ Official Bot
+qq-botpy>=1.0.0
+
+# Telegram
+python-telegram-bot>=20.0
+telegramify-markdown>=0.1.0
+
+# Discord
+discord.py>=2.0.0
+
+# Lark (Feishu)
+lark-oapi>=1.0.0
+
+# WeChat
+wechatpy>=1.8.0
+pycryptodome>=3.20.0
+weixin-ilink-client>=0.1.0
+
+# Slack
+slack-bolt>=1.18.0
+slack-sdk>=3.20.0
+
+# LINE
+line-bot-sdk>=3.0.0
+
+# Mattermost
+MattermostDriver>=7.0.0

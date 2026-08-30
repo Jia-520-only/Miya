@@ -1,0 +1,10 @@
+{
+    "name": "profile",
+    "description": "查看用户或群聊的认知侧写",
+    "permission": "public",
+    "allow_in_private": true,
+    "rate_limit": {"user": 60, "admin": 10, "superadmin": 0},
+    "show_in_help": true,
+    "order": 20,
+    "aliases": ["p", "me", "侧写"]
+}

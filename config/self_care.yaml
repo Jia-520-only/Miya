@@ -1,0 +1,38 @@
+# 弥娅自检看护 (MiyaSelfCareOrgan) 配置
+# 掉线告警 / 自动重启 / 资源告警 / 每日简报 / 记忆归档
+self_care:
+  enabled: true
+
+  # ── 看护巡检 ──
+  # 巡检本身是纯代码、零 token（不调 LLM）；花 token 的只有每轮对话注入的一行
+  # 状态、事件记忆和每日简报。间隔只影响状态新鲜度，120s 足够。
+  watch_interval: 120
+  health_failure_threshold: 3   # 连续健康检查失败次数达到即视为异常
+
+  # ── 掉线自动重启 ──
+  auto_restart: true
+  max_restarts_per_hour: 3      # 每平台每小时重启上限（防重启风暴）
+  restart_verify_seconds: 10    # 重启后等待验证在线的窗口（秒）
+
+  # ── 告警冷却 ──
+  alert_cooldown_minutes: 30            # 同一平台掉线告警冷却
+  resource_alert_cooldown_minutes: 60   # 资源/任务告警冷却
+
+  # ── 资源与任务阈值 ──
+  disk_percent_threshold: 90
+  memory_percent_threshold: 90
+  cpu_percent_threshold: 95
+  task_failure_rate_threshold: 0.3   # 失败率超过 30% 且失败数达标才告警
+  task_failure_min_count: 5
+
+  # ── 主动通知与记忆 ──
+  notify_owner: true             # 掉线/告警/简报主动说给主人听
+  max_proactive_notifications_per_hour: 3  # 所有自检主动消息的全局上限
+  proactive_notification_cooldown_minutes: 30  # 同类事件的主动通知冷却
+  store_memory: true             # 检查报告写入长期记忆（tags: 系统记忆/自检报告）
+
+  # ── 每日简报 ──
+  daily_briefing:
+    enabled: true
+    hours: [8, 22]                       # 每天 8 点、22 点各一次
+    quiet_hours: [0, 1, 2, 3, 4, 5, 6, 7] # 静默时段只存记忆不发消息

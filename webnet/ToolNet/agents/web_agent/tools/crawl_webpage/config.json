@@ -1,0 +1,22 @@
+{
+    "type": "function",
+    "function": {
+        "name": "crawl_webpage",
+        "description": "爬取指定URL的网页内容。当用户发送链接，想要获取页面主要内容时使用。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "要爬取的网页URL"
+                },
+                "max_length": {
+                    "type": "integer",
+                    "description": "最大返回字符数，默认为2000",
+                    "default": 2000
+                }
+            },
+            "required": ["url"]
+        }
+    }
+}

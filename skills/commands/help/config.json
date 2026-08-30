@@ -1,0 +1,10 @@
+{
+    "name": "help",
+    "description": "查看所有可用命令或指定命令的帮助",
+    "permission": "public",
+    "allow_in_private": true,
+    "rate_limit": {"user": 5, "admin": 0, "superadmin": 0},
+    "show_in_help": true,
+    "order": 1,
+    "aliases": ["h", "帮助", "菜单", "命令"]
+}

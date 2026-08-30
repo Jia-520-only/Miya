@@ -1,0 +1,11 @@
+# Miya bandit profile
+#
+# B104: LAN/mobile clients intentionally reach the daemon; runtime binding is
+#       controlled by config/.env.
+# B324: MD5/SHA1 here are used for cache keys, audio/image fingerprints and the
+#       WebSocket handshake, not for password hashing.
+# B608: SQL identifiers are internally whitelisted; values use bound parameters.
+skips:
+  - B104
+  - B324
+  - B608

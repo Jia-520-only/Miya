@@ -1,0 +1,10 @@
+# Miya - Minimal Install (Core Only)
+# Minimum packages needed for basic core functionality
+# Suitable for quick startup and testing
+# Install: pip install -r setup/requirements/minimal.txt
+
+# Core
+-r ../dependencies/base.txt
+
+# AI Model (minimal)
+openai>=1.3.0,<2.0.0

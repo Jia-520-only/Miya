@@ -1,0 +1,31 @@
+{
+  "name": "screen_vision",
+  "displayName": "屏幕视觉",
+  "description": "让弥娅「看到」用户屏幕——截图+视觉AI分析，识别界面内容、错误弹窗、游戏场景等",
+  "agentType": "mcp",
+  "entryPoint": {
+    "module": "mcpserver.screen_vision.service",
+    "class": "ScreenVisionService"
+  },
+  "capabilities": {
+    "tools": [
+      {
+        "name": "look_screen",
+        "description": "截取当前屏幕并用视觉 AI 分析内容。适用场景：'我屏幕上有什么'、'这个界面怎么操作'、'帮我看看这个报错'、'右边是什么按钮'",
+        "parameters": {
+          "query": "string - 要针对屏幕提出的问题（可选，默认描述屏幕上所有内容）",
+          "compress": "boolean - 是否压缩截图（默认 true，1280px 宽 JPEG）"
+        }
+      },
+      {
+        "name": "screenshot",
+        "description": "只截图不分析，返回截图 data URL",
+        "parameters": {
+          "compress": "boolean - 是否压缩（默认 true）"
+        }
+      }
+    ]
+  },
+  "version": "1.0.0",
+  "enabled": true
+}

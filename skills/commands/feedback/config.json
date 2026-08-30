@@ -1,0 +1,19 @@
+{
+    "name": "feedback",
+    "description": "提交意见反馈或查看反馈列表",
+    "permission": "public",
+    "allow_in_private": true,
+    "rate_limit": {"user": 30, "admin": 5, "superadmin": 0},
+    "show_in_help": true,
+    "order": 31,
+    "aliases": ["fb", "反馈"],
+    "subcommands": {
+        "add": {"description": "提交反馈", "args": "<内容>"},
+        "view": {"description": "查看反馈"},
+        "del": {"description": "删除反馈（超管）", "permission": "superadmin", "args": "<ID>"}
+    },
+    "inference": {
+        "default": "view",
+        "fallback": "add"
+    }
+}

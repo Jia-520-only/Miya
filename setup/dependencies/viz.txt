@@ -1,0 +1,9 @@
+# Miya - Data Visualization
+# Plotting and charting
+# Install: pip install -r setup/dependencies/viz.txt
+
+# Charting
+matplotlib>=3.7.0,<4.0.0
+
+# Interactive Charts (optional)
+# plotly>=5.14.0

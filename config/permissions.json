@@ -1,0 +1,341 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2026-04-02",
+  "description": "弥娅系统统一权限配置文件",
+
+  "superadmins": {
+    "佳": {
+      "name": "佳",
+      "ids": {
+        "qq": ["1523878699"],
+        "qqofficial": ["1523878699", "7C22343989F081B759F6DADC99148E17"],
+        "aiocqhttp": ["1523878699"],
+        "terminal": ["1523878699"],
+        "desktop": ["1523878699"],
+        "mobile": ["default"],
+        "webchat": ["1523878699"],
+        "telegram": [],
+        "discord": [],
+        "lark": ["452c3ccc"],
+        "weixin_ilink": ["o9cq806WYR-N8Zxxg94EyHYgUXwY@im.wechat"]
+      }
+    }
+  },
+
+  "permission_groups": {
+    "Default": {
+      "name": "默认权限组",
+      "description": "所有用户默认拥有的基本权限",
+      "permissions": [
+        "tool.get_current_time",
+        "tool.web_search",
+        "tool.baiduhot",
+        "tool.weibohot",
+        "tool.douyinhot",
+        "tool.weather_query",
+        "memory.read",
+        "knowledge.search",
+        "agent.chat"
+      ]
+    },
+    "Admin": {
+      "name": "管理员",
+      "description": "拥有系统的所有权限",
+      "permissions": [
+        "*.*"
+      ]
+    },
+    "Terminal": {
+      "name": "终端用户",
+      "description": "终端平台用户的基础权限",
+      "permissions": [
+        "tool.terminal.execute",
+        "tool.web_search",
+        "tool.get_current_time",
+        "memory.read",
+        "memory.write",
+        "knowledge.search",
+        "agent.chat"
+      ]
+    },
+    "Web": {
+      "name": "Web用户",
+      "description": "Web平台用户的基础权限",
+      "permissions": [
+        "tool.web_search",
+        "tool.get_current_time",
+        "memory.read",
+        "memory.write",
+        "knowledge.search",
+        "agent.chat"
+      ]
+    },
+    "Desktop": {
+      "name": "Desktop用户",
+      "description": "Desktop平台用户的基础权限",
+      "permissions": [
+        "tool.web_search",
+        "tool.get_current_time",
+        "memory.read",
+        "memory.write",
+        "knowledge.search",
+        "agent.chat",
+        "system.config.read"
+      ]
+    },
+    "QQ": {
+      "name": "QQ用户",
+      "description": "QQ平台用户的基础权限",
+      "permissions": [
+        "tool.web_search",
+        "tool.get_current_time",
+        "tool.baiduhot",
+        "tool.weibohot",
+        "tool.douyinhot",
+        "tool.weather_query",
+        "memory.read",
+        "knowledge.search",
+        "agent.chat"
+      ]
+    },
+    "Developer": {
+      "name": "开发者",
+      "description": "开发者权限，可访问调试和系统信息",
+      "permissions": [
+        "tool.*",
+        "memory.*",
+        "knowledge.*",
+        "agent.*",
+        "system.*",
+        "config.*"
+      ]
+    }
+  },
+
+  "platform_defaults": {
+    "terminal": ["Terminal"],
+    "mobile": ["Mobile"],
+    "desktop": ["Desktop"],
+    "qq": ["QQ"],
+    "qqofficial": ["QQ"],
+    "aiocqhttp": ["QQ"],
+    "lark": ["QQ"],
+    "discord": ["Default"],
+    "telegram": ["Default"],
+    "weixin_ilink": ["QQ"]
+  },
+
+  "users": [
+    {
+      "user_id": "terminal_default",
+      "username": "默认终端用户",
+      "platform": "terminal",
+      "permission_groups": ["Admin"],
+      "description": "终端平台的默认管理员用户",
+      "created_at": "2026-03-11T00:00:00"
+    },
+    {
+      "user_id": "desktop_default",
+      "username": "默认Desktop用户",
+      "platform": "desktop",
+      "permission_groups": ["Desktop"],
+      "description": "Desktop平台的默认用户",
+      "created_at": "2026-03-11T00:00:00"
+    },
+    {
+      "user_id": "1523878699",
+      "username": "佳",
+      "platform": "qq",
+      "permission_groups": ["Admin", "Developer"],
+      "description": "超级管理员 - 拥有所有权限",
+      "created_at": "2026-03-15T10:00:00"
+    },
+    {
+      "user_id": "qq_1523878699",
+      "username": "佳",
+      "platform": "qq",
+      "permission_groups": ["Admin", "Developer"],
+      "description": "超级管理员 - 拥有所有权限",
+      "created_at": "2026-03-15T10:00:00"
+    },
+    {
+      "user_id": "terminal_1523878699",
+      "username": "佳",
+      "platform": "terminal",
+      "permission_groups": ["Admin", "Developer"],
+      "description": "超级管理员 - 拥有所有权限",
+      "created_at": "2026-03-15T10:00:00"
+    },
+    {
+      "user_id": "desktop_user",
+      "username": "佳",
+      "platform": "desktop",
+      "linked_to": "1523878699",
+      "permission_groups": ["Admin", "Developer"],
+      "description": "桌面端用户 - 关联到QQ的佳",
+      "created_at": "2026-04-23T14:00:00"
+    },
+    {
+      "user_id": "mobile_default",
+      "username": "佳",
+      "platform": "mobile",
+      "linked_to": "1523878699",
+      "permission_groups": ["Admin", "Developer"],
+      "description": "移动端默认用户",
+      "created_at": "2026-07-12T00:00:00"
+    },
+    {
+      "user_id": "default",
+      "username": "佳",
+      "platform": "mobile",
+      "linked_to": "1523878699",
+      "permission_groups": ["Admin", "Developer"],
+      "description": "移动/桌面端未登录用户 - 关联到QQ的佳",
+      "created_at": "2026-07-21T00:00:00"
+    },
+    {
+      "user_id": "weixin_ilink_o9cq806WYR-N8Zxxg94EyHYgUXwY@im.wechat",
+      "username": "佳",
+      "platform": "weixin_ilink",
+      "permission_groups": ["Admin", "Developer"],
+      "description": "微信 iLink 用户 - 佳",
+      "created_at": "2026-07-15T00:00:00"
+    }
+  ],
+
+  "command_permissions": {
+    "enabled": true,
+    "description": "命令执行权限配置",
+    "roles": ["superadmin", "group_owner", "group_admin"],
+    "denied_message": "抱歉，你没有权限执行此命令哦～ 只有{roles}才能使用呢。",
+    "commands": {
+      "/状态": {
+        "description": "查看弥娅状态",
+        "required_roles": ["superadmin", "group_owner", "group_admin"]
+      },
+      "/查看状态": {
+        "description": "查看弥娅状态",
+        "required_roles": ["superadmin", "group_owner", "group_admin"]
+      },
+      "状态查询": {
+        "description": "查看弥娅状态",
+        "required_roles": ["superadmin", "group_owner", "group_admin"]
+      },
+      "状态": {
+        "description": "查看弥娅状态",
+        "required_roles": ["superadmin", "group_owner", "group_admin"]
+      },
+      "/形态": {
+        "description": "切换人格形态",
+        "required_roles": ["superadmin", "group_owner", "group_admin"]
+      },
+      "/form": {
+        "description": "切换人格形态",
+        "required_roles": ["superadmin", "group_owner", "group_admin"]
+      },
+      "/说话": {
+        "description": "切换说话模式",
+        "required_roles": ["superadmin", "group_owner", "group_admin"]
+      },
+      "/speak": {
+        "description": "切换说话模式",
+        "required_roles": ["superadmin", "group_owner", "group_admin"]
+      },
+      "/存在": {
+        "description": "存在性情感命令",
+        "required_roles": ["superadmin", "group_owner", "group_admin"]
+      },
+      "/exist": {
+        "description": "存在性情感命令",
+        "required_roles": ["superadmin", "group_owner", "group_admin"]
+      }
+    }
+  },
+
+  "tool_permissions": {
+    "enabled": true,
+    "description": "工具执行权限配置",
+    "denied_message": "❌ 权限不足：执行工具 '{tool_name}' 需要权限 '{permission}'",
+    "game_exit_denied": "⚠️ 只有群管理员或超级管理员才能结束游戏模式哦～",
+    "game_save_denied": "只有管理员才能保存游戏存档",
+    "game_export_denied": "只有管理员才能导出游戏存档",
+    "game_import_denied": "只有管理员才能导入游戏存档",
+    "character_edit_denied": "设置失败: 你没有权限修改此角色卡",
+    "program_launch_denied": "❌ 没有权限启动程序: {program_name}",
+    "api_denied": "权限不足",
+    "process_kill_denied": "权限不足"
+  },
+
+  "role_names": {
+    "superadmin": "超级管理员",
+    "group_owner": "群主",
+    "group_admin": "群管理员",
+    "group_member": "群成员"
+  },
+
+  "special_rules": {
+    "admin_whitelist": [
+      "terminal_default",
+      "1523878699",
+      "qq_1523878699",
+      "terminal_1523878699",
+      "qqofficial_1523878699",
+      "aiocqhttp_1523878699",
+      "lark_452c3ccc",
+      "desktop_user",
+      "mobile_default",
+      "webchat_1523878699",
+      "weixin_ilink_o9cq806WYR-N8Zxxg94EyHYgUXwY@im.wechat"
+    ],
+    "super_admin_whitelist": [
+      "terminal_default",
+      "1523878699",
+      "qq_1523878699",
+      "terminal_1523878699",
+      "qqofficial_1523878699",
+      "qqofficial_7C22343989F081B759F6DADC99148E17",
+      "aiocqhttp_1523878699",
+      "lark_452c3ccc",
+      "desktop_user",
+      "mobile_default",
+      "webchat_1523878699",
+      "weixin_ilink_o9cq806WYR-N8Zxxg94EyHYgUXwY@im.wechat"
+    ]
+  },
+
+  "disabled_permissions": [],
+
+  "platform_restrictions": {
+    "terminal": {
+      "allowed_groups": [],
+      "forbidden_groups": []
+    },
+    "mobile": {
+      "allowed_groups": [],
+      "forbidden_groups": ["Terminal"]
+    },
+    "desktop": {
+      "allowed_groups": [],
+      "forbidden_groups": []
+    },
+    "qq": {
+      "allowed_groups": ["Default", "QQ", "Web", "Admin", "Developer"],
+      "forbidden_groups": []
+    }
+  },
+
+  "security": {
+    "enable_audit": true,
+    "enable_cache": true,
+    "cache_ttl": 300,
+    "log_denied": true,
+    "log_allowed": false,
+    "whitelist_mode": false,
+    "user_whitelist": [
+      "terminal_default",
+      "1523878699",
+      "qq_1523878699",
+      "terminal_1523878699"
+    ]
+  }
+}

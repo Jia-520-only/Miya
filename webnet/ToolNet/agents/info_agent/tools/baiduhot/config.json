@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "baiduhot",
+        "description": "获取百度热搜榜单。当用户问'百度热搜'、'baidu热榜'时使用。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "返回条数，默认为10",
+                    "default": 10
+                }
+            }
+        }
+    }
+}

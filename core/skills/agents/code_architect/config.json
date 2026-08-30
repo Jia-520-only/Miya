@@ -1,0 +1,35 @@
+{
+  "name": "code_architect",
+  "description": "代码架构Agent - 设计系统架构、规划模块结构、重构指导",
+  "version": "1.0.0",
+  "capabilities": [
+    "architecture_design",
+    "module_planning",
+    "refactoring",
+    "dependency_planning",
+    "code_structure"
+  ],
+  "function": {
+    "name": "code_architect",
+    "description": "设计和规划代码架构，提供重构建议",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": ["design", "plan_modules", "refactor", "analyze_dependencies", "structure"],
+          "description": "执行的操作类型"
+        },
+        "target": {
+          "type": "string",
+          "description": "目标项目或模块"
+        },
+        "requirements": {
+          "type": "string",
+          "description": "需求描述"
+        }
+      },
+      "required": ["action", "target"]
+    }
+  }
+}

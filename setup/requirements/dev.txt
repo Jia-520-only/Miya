@@ -1,0 +1,10 @@
+# Miya - Development Environment
+# Full production dependencies + dev tools
+# Suitable for development: testing, debugging, documentation
+# Install: pip install -r setup/requirements/dev.txt
+
+# Full Production Deps
+-r full.txt
+
+# Dev Tools
+-r ../dependencies/dev.txt

@@ -1,0 +1,20 @@
+{
+    "type": "function",
+    "function": {
+        "name": "weibohot",
+        "description": "获取微博实时热搜榜单。当用户问'热搜'、'微博热搜'、'微博热门'、'有什么新闻'时使用此工具。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "返回热搜条数，范围1-50，默认为10",
+                    "default": 10,
+                    "minimum": 1,
+                    "maximum": 50
+                }
+            },
+            "required": []
+        }
+    }
+}

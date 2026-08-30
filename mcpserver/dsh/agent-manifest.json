@@ -1,0 +1,30 @@
+{
+  "name": "dsh",
+  "displayName": "DSH 执行引擎",
+  "description": "弥娅的「手」/肢体工具 — 通过 DeepSeek Harness (DSH) 执行文件操作、命令执行、代码生成等任务。DSH 是 DeepSeek 官方开源 agent harness，内置文件读写/搜索、bash/pwsh 命令、子代理、技能、工作流、多阶段规划等工具，可自主规划并执行复杂任务。",
+  "agentType": "mcp",
+  "entryPoint": {
+    "module": "mcpserver.dsh.service",
+    "class": "DSHEngineService"
+  },
+  "capabilities": {
+    "tools": [
+      {
+        "name": "execute",
+        "description": "通过 DSH (DeepSeek Harness) 执行自然语言任务。DSH 内置文件读写/搜索、bash/pwsh 命令执行、代码分析、子代理、技能、工作流编排等工具。用自然语言描述要 DSH 做什么。适合：创建项目结构、运行终端命令、安装依赖、多文件编辑、代码分析、批量重构等复杂操作。",
+        "parameters": {
+          "task": "string (自然语言任务描述，如: 在桌面创建 hello.py 并写入 Hello World)",
+          "working_dir": "string (工作目录路径，默认项目根目录)",
+          "timeout": "number (超时秒数，默认300)"
+        }
+      },
+      {
+        "name": "get_status",
+        "description": "查询 DSH 引擎的可用状态和版本信息",
+        "parameters": {}
+      }
+    ]
+  },
+  "version": "1.0.0",
+  "enabled": true
+}

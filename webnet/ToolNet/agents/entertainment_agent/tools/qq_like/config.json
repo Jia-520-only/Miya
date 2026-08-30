@@ -1,0 +1,22 @@
+{
+    "type": "function",
+    "function": {
+        "name": "qq_like",
+        "description": "给指定QQ号点赞。当用户说'点赞'、'点个赞'、'给我点赞'时使用此工具。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "target_user_id": {
+                    "type": "integer",
+                    "description": "要点赞的QQ号"
+                },
+                "times": {
+                    "type": "integer",
+                    "description": "点赞次数，默认1次",
+                    "default": 1
+                }
+            },
+            "required": ["target_user_id"]
+        }
+    }
+}

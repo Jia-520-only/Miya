@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "react_emoji",
+        "description": "消息回复emoji表情。当用户说'回复表情'、'发个表情'、'加个emoji'时使用此工具。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string",
+                    "description": "要回复的消息ID"
+                },
+                "emoji": {
+                    "type": "string",
+                    "description": "emoji表情名称，如'心', '赞', '哈哈'等"
+                }
+            },
+            "required": ["message_id", "emoji"]
+        }
+    }
+}

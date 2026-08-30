@@ -1,0 +1,82 @@
+# 吟美虚拟主播插件配置
+ai_name: "弥娅"
+mode:
+  - "api"
+port: 1800
+
+# OBS 直播控制
+obs_switch: false
+obs_host: "127.0.0.1"
+obs_port: 4455
+obs_password: ""
+obs_dance_path: ""
+obs_emote_path: ""
+obs_emote_font: ""
+
+# 场景背景音乐
+song_background:
+  "海岸花坊": ""
+  "神社": ""
+  "清晨房间": ""
+  "粉色房间": ""
+  "花房": ""
+
+# LLM 聊天
+cmd:
+  - ""
+relations:
+  "佳": "亲爱的"
+split_flag: ",|，|。|!|！|?|？|\n"
+split_limit: 4
+public_sentiment_key: "(爱|喵|女仆|老婆|比心|喜欢|乖|亲)"
+is_llm_welcome: false
+welcome_not_allow: []
+
+# TTS 语音
+tts_engine: "edge-tts"
+tts_speaker: "zh-CN-XiaoxiaoNeural"
+speech_max_threads: 5
+
+# 绘画
+draw_url: ""
+draw_width: 980
+draw_height: 500
+draw_physical_save_folder: "./output/"
+draw_proxies: {}
+
+# 唱歌
+sing_url: ""
+song_not_convert: "(三国演义\\d+|粤剧|京剧|易经)"
+create_song_timout: 500
+
+# 鉴黄
+nsfw_server: ""
+nsfw_filter_en: ""
+nsfw_filter_ch: ""
+nsfw_progress_limit: 1
+nsfw_limit: 0.2
+nsfw_progress_nsfw_limit: 0.2
+
+# 搜图
+search_img_num: 10
+search_img_width: 980
+search_img_height: 500
+search_img_physical_save_folder: "./output/"
+
+# 搜索
+search_num: 5
+
+# B站弹幕
+bilibili_room_id: 0
+bilibili_sessdata: ""
+bilibili_access_key_id: ""
+bilibili_access_key_secret: ""
+bilibili_app_id: 0
+bilibili_auth_code: ""
+
+# VTube Studio (可选)
+vtuber_switch: false
+vtuber_websocket: "127.0.0.1:8001"
+vtuber_plugin_name: "winlonebot"
+vtuber_plugin_developer: "winlone"
+vtuber_auth_token: ""

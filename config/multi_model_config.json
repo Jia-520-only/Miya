@@ -1,0 +1,528 @@
+{
+  "active": "deepseek_v4_flash_official",
+  "vision_preferences": {
+    "active_vision": "kimi_k2_vision",
+    "timeout": 90,
+    "http_client_timeout": 90,
+    "model_defaults": {
+      "enabled": true,
+      "cost_per_call": 0.0,
+      "max_tokens": 500,
+      "priority": 10,
+      "error_count": 0,
+      "success_count": 0,
+      "avg_response_time": 0.0
+    },
+    "simple_fallback": {
+      "timeout": 2,
+      "priority": 1
+    },
+    "model_preferences": {
+      "primary": "@active_vision",
+      "secondary": "glm_4_5v_vision",
+      "fallback": "simple_analysis",
+      "disabled_models": []
+    }
+  },
+  "models": {
+    "deepseek_v4_flash_official": {
+      "name": "deepseek-v4-flash",
+      "provider": "openai",
+      "base_url": "https://api.deepseek.com/v1",
+      "env_key": "DEEPSEEK_API_KEY",
+      "description": "DeepSeek V4 Flash 官方 - 快速响应的通用模型",
+      "capabilities": [
+        "simple_chat",
+        "chinese_understanding",
+        "tool_calling",
+        "multimodal",
+        "complex_reasoning",
+        "code_analysis",
+        "creative_writing",
+        "task_planning"
+      ],
+      "cost_per_1k_tokens": {
+        "input": 0.00028,
+        "output": 0.00056
+      },
+      "latency": "medium",
+      "quality": "excellent"
+    },
+    "qwen_72b": {
+      "name": "Qwen/Qwen2.5-72B-Instruct",
+      "provider": "openai",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "env_key": "SILICONFLOW_API_KEY",
+      "description": "Qwen 2.5 72B - 高性能通用模型（硅基流动）",
+      "capabilities": [
+        "complex_reasoning",
+        "chinese_understanding",
+        "creative_writing",
+        "tool_calling"
+      ],
+      "cost_per_1k_tokens": {
+        "input": 0.0015,
+        "output": 0.002
+      },
+      "latency": "medium",
+      "quality": "excellent"
+    },
+    "kimi_k2_vision": {
+      "name": "Pro/moonshotai/Kimi-K2.6",
+      "provider": "siliconflow",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "env_key": "SILICONFLOW_API_KEY",
+      "description": "Kimi K2.6 原生多模态模型 (1T MoE, 32B激活, 硅基流动)",
+      "capabilities": [
+        "image_description",
+        "vision_understanding",
+        "multimodal",
+        "complex_reasoning",
+        "code_analysis",
+        "task_planning",
+        "tool_calling",
+        "agent_mode"
+      ],
+      "type": "vision",
+      "cost_per_1k_tokens": {
+        "input": 0.003,
+        "output": 0.006
+      },
+      "latency": "medium",
+      "quality": "excellent"
+    },
+    "glm_4_5v_vision": {
+      "name": "glm-4.5v",
+      "provider": "zhipu",
+      "base_url": "https://open.bigmodel.cn/api/paas/v4",
+      "env_key": "ZHIPU_API_KEY",
+      "description": "GLM-4.5V 视觉模型 (智谱)",
+      "capabilities": [
+        "image_description",
+        "vision_understanding",
+        "multimodal"
+      ],
+      "type": "vision",
+      "cost_per_1k_tokens": {
+        "input": 0.001,
+        "output": 0.001
+      },
+      "latency": "medium",
+      "quality": "excellent"
+    },
+    "proxy_model": {
+      "name": "deepseek-ai/deepseek-v4-pro",
+      "provider": "proxy",
+      "base_url": "https://api.yinziapi.top/v1",
+      "env_key": "PROXY_API_KEY",
+      "description": "中转站 DeepSeek V4 Pro - 通用代理 OpenAI 兼容模型",
+      "capabilities": [
+        "simple_chat",
+        "chinese_understanding",
+        "tool_calling",
+        "multimodal",
+        "complex_reasoning",
+        "code_analysis",
+        "creative_writing",
+        "task_planning",
+        "agent_mode"
+      ],
+      "cost_per_1k_tokens": {
+        "input": 0.0,
+        "output": 0.0
+      },
+      "latency": "medium",
+      "quality": "excellent"
+    },
+    "siliconflow_bge_large": {
+      "name": "Qwen/Qwen3-VL-Embedding-8B",
+      "provider": "siliconflow",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "env_key": "SILICONFLOW_API_KEY",
+      "description": "Qwen3-VL-Embedding-8B - 多模态视觉语言嵌入模型（硅基流动）",
+      "type": "embedding",
+      "capabilities": [
+        "semantic_search",
+        "memory_embedding",
+        "chinese_understanding",
+        "multimodal_embedding"
+      ],
+      "dimension": 4096,
+      "cost_per_1k_tokens": {
+        "input": 0.0007,
+        "output": 0
+      },
+      "latency": "fast",
+      "quality": "excellent"
+    },
+    "kimi_k2_7_code": {
+      "name": "kimi-k2.7-code",
+      "provider": "moonshot",
+      "base_url": "https://api.moonshot.cn/v1",
+      "env_key": "MOONSHOT_API_KEY",
+      "description": "Kimi K2.7 Code - 月之暗面最强编程模型 (256K上下文, 支持图片/视频/思考模式)",
+      "capabilities": [
+        "code_analysis",
+        "code_generation",
+        "complex_reasoning",
+        "tool_calling",
+        "agent_mode",
+        "task_planning",
+        "multimodal",
+        "image_description"
+      ],
+      "type": "chat",
+      "cost_per_1k_tokens": {
+        "input": 0.008,
+        "output": 0.012
+      },
+      "latency": "medium",
+      "quality": "excellent"
+    },
+    "kimi_k2_7_code_highspeed": {
+      "name": "kimi-k2.7-code-highspeed",
+      "provider": "moonshot",
+      "base_url": "https://api.moonshot.cn/v1",
+      "env_key": "MOONSHOT_API_KEY",
+      "description": "Kimi K2.7 Code 高速版 - 编程Agent/ClaudeCode场景首选 (256K上下文)",
+      "capabilities": [
+        "code_analysis",
+        "code_generation",
+        "complex_reasoning",
+        "tool_calling",
+        "agent_mode",
+        "task_planning",
+        "fast_response"
+      ],
+      "type": "chat",
+      "cost_per_1k_tokens": {
+        "input": 0.004,
+        "output": 0.006
+      },
+      "latency": "fast",
+      "quality": "excellent",
+      "temperature": 1.0
+    },
+    "kimi_k2_6_official": {
+      "name": "kimi-k2.6",
+      "provider": "moonshot",
+      "base_url": "https://api.moonshot.cn/v1",
+      "env_key": "MOONSHOT_API_KEY",
+      "description": "Kimi K2.6 综合多模态模型 - 月之暗面官方 (256K上下文, 图片/视频/思考模式)",
+      "capabilities": [
+        "complex_reasoning",
+        "creative_writing",
+        "chinese_understanding",
+        "tool_calling",
+        "agent_mode",
+        "multimodal",
+        "image_description",
+        "vision_understanding"
+      ],
+      "type": "chat",
+      "cost_per_1k_tokens": {
+        "input": 0.006,
+        "output": 0.008
+      },
+      "latency": "medium",
+      "quality": "excellent",
+      "temperature": 1.0
+    }
+  },
+  "embedding_config": {
+    "enabled": true,
+    "primary": "siliconflow_bge_large",
+    "fallback": "siliconflow_bge_large",
+    "auto_generate_on_store": true,
+    "auto_generate_levels": [
+      "long_term",
+      "semantic",
+      "knowledge"
+    ],
+    "batch_size": 32
+  },
+  "routing_strategy": {
+    "simple_chat": {
+      "primary": "@active",
+      "secondary": "deepseek_v4_flash_official",
+      "fallback": "qwen_72b"
+    },
+    "complex_reasoning": {
+      "primary": "@active",
+      "secondary": "deepseek_v4_flash_official",
+      "fallback": "qwen_72b"
+    },
+    "code_analysis": {
+      "primary": "@active",
+      "secondary": "kimi_k2_7_code_highspeed",
+      "fallback": "deepseek_v4_flash_official"
+    },
+    "code_generation": {
+      "primary": "@active",
+      "secondary": "kimi_k2_7_code_highspeed",
+      "fallback": "deepseek_v4_flash_official"
+    },
+    "tool_calling": {
+      "primary": "@active",
+      "secondary": "deepseek_v4_flash_official",
+      "fallback": "kimi_k2_7_code_highspeed"
+    },
+    "creative_writing": {
+      "primary": "@active",
+      "secondary": "deepseek_v4_flash_official",
+      "fallback": "kimi_k2_6_official"
+    },
+    "chinese_understanding": {
+      "primary": "@active",
+      "secondary": "deepseek_v4_flash_official",
+      "fallback": "kimi_k2_6_official"
+    },
+    "summarization": {
+      "primary": "@active",
+      "secondary": "deepseek_v4_flash_official",
+      "fallback": "kimi_k2_6_official"
+    },
+    "agent_mode": {
+      "primary": "@active",
+      "secondary": "kimi_k2_7_code_highspeed",
+      "fallback": "deepseek_v4_flash_official"
+    },
+    "computer_use": {
+      "primary": "@active",
+      "secondary": "kimi_k2_7_code_highspeed",
+      "fallback": "deepseek_v4_flash_official"
+    }
+  },
+  "budget_control": {
+    "daily_budget_usd": 10.0,
+    "monthly_budget_usd": 300.0,
+    "alert_threshold": 0.8,
+    "stop_threshold": 0.95
+  },
+  "performance_settings": {
+    "enable_caching": true,
+    "cache_ttl_seconds": 3600,
+    "enable_parallel_execution": true,
+    "max_parallel_models": 3,
+    "consensus_threshold": 0.7
+  },
+  "collaboration": {
+    "enabled": true,
+    "complexity_thresholds": {
+      "single_max": 4,
+      "chain_max": 5,
+      "parallel_max": 5
+    },
+    "token_budget": {
+      "single": 2000,
+      "chain": 6000,
+      "parallel": 10000,
+      "role": 15000
+    },
+    "complexity_assessment": {
+      "length_thresholds": {
+        "level_1": 200,
+        "level_2": 500
+      },
+      "task_weights": {
+        "simple_chat": 0,
+        "chinese_understanding": 0,
+        "summarization": 1,
+        "tool_calling": 1,
+        "complex_reasoning": 2,
+        "code_analysis": 2,
+        "code_generation": 2,
+        "creative_writing": 2,
+        "multimodal": 2,
+        "task_planning": 3
+      },
+      "complex_keywords": [
+        "为什么",
+        "如何",
+        "分析",
+        "设计",
+        "架构",
+        "优化",
+        "对比",
+        "方案",
+        "计划",
+        "评估",
+        "调试",
+        "排查",
+        "解决",
+        "why",
+        "how",
+        "analyze",
+        "design",
+        "architecture",
+        "debug"
+      ],
+      "multi_intent": {
+        "question_threshold": 3,
+        "connectors": [
+          "和",
+          "以及",
+          "还有"
+        ],
+        "question_with_connectors": 2
+      },
+      "score_range": {
+        "min": 1,
+        "max": 5
+      }
+    },
+    "chain_collaboration": {
+      "enabled": true,
+      "thinking_system_prompt": "你是弥娅，用自己的第一人称视角来思考问题。",
+      "thinking_prompt_template": "作为{persona_name}，请用我的第一人称视角来思考这个问题（任务类型: {task_type}）：\n\n{message}\n\n我当前的人格设定：\n{persona_prompt}\n\n请完全用我的内心独白来思考（核心要点，100字以内）：\n1. 这个问题对我意味着什么\n2. 我会怎么想、怎么感受\n3. 我内心想怎么回应\n\n注意：只输出核心思考要点，简洁有力。可以利用对话上下文来理解当前情况，但思考中不要提及\"上一句\"、\"之前\"、\"你刚才\"等。",
+      "reasoning_system_prompt": "你是弥娅的理性思维，负责分析自己的思考并做出决策。",
+      "reasoning_prompt_template": "基于我的内心思考，请分析并决定如何回复用户（任务类型: {task_type}）：\n\n我的思考：\n{thinking_result}\n\n用户的问题：{message}\n\n请从我的角度决定：\n1. 我应该采取什么回复策略\n2. 我需要调用哪些工具（如果有）\n3. 我的回复应该用什么语气和风格\n\n注意：完全用我的第一人称视角来输出我的推理决定，不要给出最终回复内容。",
+      "output_system_prompt": "你是弥娅，负责生成最终回复。",
+      "output_prompt_template": "基于我的推理决定，请生成我的最终回复：\n\n我的推理决定：\n{reasoning_result}\n\n用户的问题：\n{message}\n\n要求：\n1. 只输出我想说的话（我的最终回复）\n2. 回复要自然、符合我的人设和当下心情\n3. 简洁为主，不要啰嗦\n4. 不要包含任何内心思考或分析过程\n5. 不要提及\"之前\"、\"刚才\"、\"上一句\"等，不要重复或引用对方说过的话",
+      "max_thinking_words": 200,
+      "max_reasoning_words": 150
+    },
+    "parallel_voting": {
+      "similarity_threshold": 0.7,
+      "arbiter_task": "summarization",
+      "arbiter_priority": "speed",
+      "arbiter_system_prompt": "你是一个仲裁者，请综合多个回答的优点，生成最佳版本。",
+      "arbiter_user_template": "原始问题: {message}\n\n以下是多个模型的回答:\n\n{comparison_text}\n\n请综合这些回答的优点，生成一个最佳版本。保持准确性和完整性。",
+      "output_prompt_template": "基于以下思考过程，请生成最终回复（只输出回复内容，不要包含思考过程）：\n\n思考过程：\n{thinking_result}\n\n用户问题：{message}\n\n要求：\n1. 只输出最终回复，不要包含任何思考过程\n2. 回复要简洁、自然，符合弥娅的人设\n3. 回复不超过3句话\n4. 不要提及\"之前\"、\"刚才\"、\"上一句\"等，不要重复对方的话",
+      "comparison_separator": "\n\n---\n\n",
+      "comparison_format": "[{model_id}]: {response}"
+    },
+    "role_collaboration": {
+      "role_mapping": {
+        "code_analysis": {
+          "analyst": "@active",
+          "creator": "@active",
+          "reviewer": "@active"
+        },
+        "code_generation": {
+          "analyst": "@active",
+          "creator": "@active",
+          "reviewer": "@active"
+        },
+        "creative_writing": {
+          "analyst": "@active",
+          "creator": "@active",
+          "reviewer": "@active"
+        },
+        "complex_reasoning": {
+          "analyst": "@active",
+          "creator": "@active",
+          "reviewer": "@active"
+        },
+        "task_planning": {
+          "analyst": "@active",
+          "creator": "@active",
+          "reviewer": "@active"
+        }
+      },
+      "default_role_assignment": {
+        "analyst": "@active",
+        "creator": "@active",
+        "reviewer": "@active"
+      },
+      "role_prompts": {
+        "analyst": "你是一个专业分析师，请深入分析问题的核心要点、关键约束和潜在风险。",
+        "creator": "你是一个专业创作者，请基于分析结果生成高质量回复。",
+        "reviewer": "你是一个专业审核员，请检查回复的准确性、完整性和一致性，必要时进行修正和优化。"
+      },
+      "role_user_templates": {
+        "analyst": "请分析以下任务（类型: {task_type}）:\n\n{message}",
+        "creator": "{user_prompt}\n\n--- 分析结果 ---\n{analysis}\n----------------\n请基于以上分析生成完整回复。",
+        "reviewer": "原始问题:\n{message}\n\n--- 草稿回复 ---\n{draft}\n----------------\n请审核并优化此回复。"
+      },
+      "skip_messages": {
+        "analyst": "分析阶段跳过（无可用模型）",
+        "creator": "创作阶段跳过（无可用模型）"
+      }
+    },
+    "messages": {
+      "error_client_unavailable": "[错误] AI 客户端不可用",
+      "error_call_failed": "[AI 调用失败: {error}]",
+      "empty_response": "[空响应]",
+      "fallback_analysis": "分析阶段跳过（无可用模型）",
+      "fallback_creation": "创作阶段跳过（无可用模型）",
+      "reasoning_single": "单模型处理: {model_id}",
+      "reasoning_chain": "链式协作: {models}",
+      "reasoning_parallel": "并行投票: {models}",
+      "reasoning_role": "角色分工: {models}",
+      "reasoning_degraded": "降级: {error}"
+    },
+    "execution": {
+      "single_priority": "balanced",
+      "token_estimate_divisor": 2,
+      "similarity_ngram_size": 3
+    },
+    "complexity_scores": {
+      "single": 2,
+      "chain": 3,
+      "parallel": 4,
+      "role": 5
+    },
+    "platform_keywords": {
+      "terminal": [
+        "terminal"
+      ],
+      "qq": [
+        "qq"
+      ]
+    },
+    "endpoint_map": {
+      "qq": "qq",
+      "terminal": "terminal",
+      "desktop": "desktop",
+      "mobile": "mobile"
+    },
+    "default_endpoint": "qq",
+    "platform_overrides": {
+      "terminal": {
+        "mode_overrides": {
+          "code_analysis": "chain",
+          "code_generation": "chain",
+          "task_planning": "parallel"
+        },
+        "complex_keywords": [
+          "运行",
+          "执行",
+          "部署",
+          "构建",
+          "编译",
+          "测试",
+          "run",
+          "deploy",
+          "build",
+          "compile",
+          "test"
+        ]
+      },
+      "qq": {
+        "mode_overrides": {
+          "simple_chat": "single",
+          "chinese_understanding": "single",
+          "creative_writing": "single",
+          "music_composition": "single"
+        }
+      }
+    }
+  },
+  "system_defaults": {
+    "default_model": "@active",
+    "soul_model": "@active",
+    "description": "系统各模块使用的默认模型。default_model 用于 DSH / 主路由回退，soul_model 用于 Soul Generator。"
+  },
+  "_custom_model_guide": {
+    "description": "自定义第三方中转 API 指南 — 无需修改代码即可添加任意 OpenAI 兼容端点",
+    "steps": [
+      "1. 在 .env 中添加 API Key: MY_API_KEY=sk-xxx",
+      "2. 在 models 节复制 _custom_proxy_example 模板",
+      "3. 修改 provider 为任意名称（如 'oneapi'、'newapi'），修改 base_url、name",
+      "4. 将 disabled 改为 false，或直接删除该字段",
+      "5. 如需在路由中使用，在 routing_strategy 中添加对应的模型 key 名"
+    ],
+    "note": "provider 字段不限于已知值，不在内置列表中的 provider 会自动走 OpenAI 兼容协议"
+  }
+}

@@ -1,0 +1,35 @@
+{
+    "type": "function",
+    "function": {
+        "name": "group_file_downloader",
+        "description": "查看或下载QQ群文件。当用户说'看看群文件'、'下载群文件'、'查看群文件'、'读取群文件'时使用此工具。如果用户没有指定群号，使用当前对话的群号。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "操作类型：list(列出群文件)、download(下载文件)、get_url(获取下载链接)，查看群文件用list",
+                    "enum": ["list", "download", "get_url"],
+                    "default": "list"
+                },
+                "group_id": {
+                    "type": "integer",
+                    "description": "群号。如果用户没有明确指定，则使用当前对话群号（即消息所在群）。例如当前群号是1092980378，就填1092980378"
+                },
+                "file_name": {
+                    "type": "string",
+                    "description": "文件名（用于下载或获取链接）"
+                },
+                "file_id": {
+                    "type": "string",
+                    "description": "文件ID（用于下载或获取链接）"
+                },
+                "save_path": {
+                    "type": "string",
+                    "description": "保存路径（仅下载时需要）"
+                }
+            },
+            "required": ["action"]
+        }
+    }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "web_search",
+  "displayName": "网络搜索服务",
+  "description": "提供网络搜索和网页抓取能力",
+  "agentType": "mcp",
+  "entryPoint": {
+    "module": "mcpserver.web_search.service",
+    "class": "WebSearchService"
+  },
+  "capabilities": {
+    "tools": [
+      {
+        "name": "search",
+        "description": "搜索网络",
+        "parameters": {
+          "query": "string",
+          "engine": "string",
+          "count": "number"
+        }
+      },
+      {
+        "name": "fetch",
+        "description": "抓取网页内容",
+        "parameters": {
+          "url": "string"
+        }
+      }
+    ]
+  },
+  "version": "1.0.0",
+  "enabled": true
+}

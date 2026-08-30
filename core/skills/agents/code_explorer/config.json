@@ -1,0 +1,35 @@
+{
+  "name": "code_explorer",
+  "description": "代码探索Agent - 分析项目结构、理解代码关系、搜索符号定义",
+  "version": "1.0.0",
+  "capabilities": [
+    "code_analysis",
+    "symbol_search",
+    "project_structure",
+    "file_search",
+    "dependency_analysis"
+  ],
+  "function": {
+    "name": "code_explorer",
+    "description": "分析项目代码结构，查找文件和符号，理解代码关系",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": ["explore", "find_symbol", "find_definitions", "find_references", "analyze_structure"],
+          "description": "执行的操作类型"
+        },
+        "target": {
+          "type": "string",
+          "description": "目标路径、文件名或符号名"
+        },
+        "path": {
+          "type": "string",
+          "description": "搜索路径，默认为当前目录"
+        }
+      },
+      "required": ["action", "target"]
+    }
+  }
+}

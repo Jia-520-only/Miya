@@ -1,0 +1,49 @@
+{
+  "name": "memory",
+  "displayName": "记忆服务",
+  "description": "持久化记忆存储服务",
+  "agentType": "mcp",
+  "entryPoint": {
+    "module": "mcpserver.memory.service",
+    "class": "MemoryService"
+  },
+  "capabilities": {
+    "tools": [
+      {
+        "name": "store",
+        "description": "存储记忆",
+        "parameters": {
+          "key": "string",
+          "value": "string",
+          "tags": "array",
+          "category": "string"
+        }
+      },
+      {
+        "name": "recall",
+        "description": "检索记忆",
+        "parameters": {
+          "query": "string",
+          "key": "string",
+          "id": "string"
+        }
+      },
+      {
+        "name": "delete",
+        "description": "删除记忆",
+        "parameters": {
+          "id": "string"
+        }
+      },
+      {
+        "name": "list",
+        "description": "列出记忆",
+        "parameters": {
+          "category": "string"
+        }
+      }
+    ]
+  },
+  "version": "1.0.0",
+  "enabled": true
+}

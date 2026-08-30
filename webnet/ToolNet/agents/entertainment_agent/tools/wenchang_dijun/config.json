@@ -1,0 +1,17 @@
+{
+    "type": "function",
+    "function": {
+        "name": "wenchang_dijun",
+        "description": "文昌帝君灵签抽签。当用户说'抽签'、'求签'、'算一卦'、'文昌帝君'时使用此工具。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "求签者的问题，如'考试运程'、'事业发展'等"
+                }
+            },
+            "required": ["question"]
+        }
+    }
+}

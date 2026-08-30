@@ -1,0 +1,21 @@
+{
+    "type": "function",
+    "function": {
+        "name": "send_poke",
+        "description": "拍一拍功能。当用户说'拍一拍'、'戳一戳'、'打招呼'时使用此工具。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "target_user_id": {
+                    "type": "integer",
+                    "description": "被拍一拍的QQ号"
+                },
+                "group_id": {
+                    "type": "integer",
+                    "description": "群号（拍群成员时需要）"
+                }
+            },
+            "required": ["target_user_id"]
+        }
+    }
+}

@@ -1,0 +1,32 @@
+# Miya - QQ Platform Extras
+# Image processing, file detection, Chinese NLP, logging, automation
+# Install: pip install -r setup/dependencies/qq_extras.txt
+
+# Image Processing
+pillow>=10.0.0
+
+# File Detection
+chardet>=5.1.0
+python-magic>=0.4.27; sys_platform != "win32"
+python-magic-bin>=0.4.14; sys_platform == "win32"
+
+# Async Retry
+tenacity>=8.2.0
+
+# Chinese Text Processing
+jieba>=0.42.1
+
+# Enhanced Logging
+loguru>=0.7.0
+
+# QR Code
+qrcode>=7.4.0
+
+# Browser Automation
+playwright>=1.40.0
+
+# Serial Communication
+pyserial>=3.5
+
+# Text Search
+python-ripgrep

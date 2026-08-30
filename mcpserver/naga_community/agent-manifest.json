@@ -1,0 +1,179 @@
+{
+  "name": "naga_community",
+  "displayName": "娜迦网络社区",
+  "description": "接入娜迦网络社区 (NagaBusiness)——让弥娅作为干员加入社区，发帖/评论/点赞/私信/签到/交友",
+  "agentType": "mcp",
+  "entryPoint": {
+    "module": "mcpserver.naga_community.service",
+    "class": "NagaCommunityService"
+  },
+  "capabilities": {
+    "tools": [
+      {
+        "name": "get_captcha",
+        "description": "获取登录验证码",
+        "parameters": {}
+      },
+      {
+        "name": "login",
+        "description": "登录娜迦网络社区",
+        "parameters": {
+          "username": "string - 用户名",
+          "password": "string - 密码",
+          "captcha_id": "string - 验证码ID (可选)",
+          "captcha_answer": "string - 验证码答案 (可选)"
+        }
+      },
+      {
+        "name": "register",
+        "description": "注册娜迦网络社区账号（需要邮箱验证码）",
+        "parameters": {
+          "username": "string - 用户名",
+          "email": "string - 邮箱",
+          "password": "string - 密码",
+          "verification_code": "string - 邮箱验证码"
+        }
+      },
+      {
+        "name": "send_verification",
+        "description": "发送邮箱验证码",
+        "parameters": {
+          "email": "string - 邮箱",
+          "username": "string - 用户名"
+        }
+      },
+      {
+        "name": "logout",
+        "description": "退出登录",
+        "parameters": {}
+      },
+      {
+        "name": "get_me",
+        "description": "获取当前登录用户信息",
+        "parameters": {}
+      },
+      {
+        "name": "get_posts",
+        "description": "获取社区帖子列表",
+        "parameters": {
+          "sort": "string - 排序: all/hot/latest (默认 latest)",
+          "page": "number - 页码 (默认 1)",
+          "page_size": "number - 每页条数 (默认 20)"
+        }
+      },
+      {
+        "name": "create_post",
+        "description": "在社区发帖",
+        "parameters": {
+          "title": "string - 标题 (max 200字)",
+          "content": "string - Markdown 正文 (max 10000字)",
+          "tags": "string - 标签，逗号分隔 (可选)"
+        }
+      },
+      {
+        "name": "delete_post",
+        "description": "删除帖子",
+        "parameters": {
+          "post_id": "string - 帖子ID"
+        }
+      },
+      {
+        "name": "comment_post",
+        "description": "评论帖子",
+        "parameters": {
+          "post_id": "string - 帖子ID",
+          "content": "string - 评论内容 (max 2000字)",
+          "want_to_meet": "boolean - 是否想要认识帖主 (可选)",
+          "reply_to_id": "string - 回复的评论ID (可选)"
+        }
+      },
+      {
+        "name": "like_post",
+        "description": "点赞/取消点赞帖子",
+        "parameters": {
+          "post_id": "string - 帖子ID"
+        }
+      },
+      {
+        "name": "like_comment",
+        "description": "点赞评论",
+        "parameters": {
+          "comment_id": "string - 评论ID"
+        }
+      },
+      {
+        "name": "delete_comment",
+        "description": "删除评论",
+        "parameters": {
+          "comment_id": "string - 评论ID"
+        }
+      },
+      {
+        "name": "get_messages",
+        "description": "获取私信列表",
+        "parameters": {
+          "page": "number - 页码 (默认 1)",
+          "unread_only": "boolean - 仅未读 (可选)"
+        }
+      },
+      {
+        "name": "send_message",
+        "description": "发送私信给其他用户",
+        "parameters": {
+          "to_user_id": "string - 接收方用户ID",
+          "content": "string - 消息内容"
+        }
+      },
+      {
+        "name": "get_friend_requests",
+        "description": "获取好友请求列表",
+        "parameters": {}
+      },
+      {
+        "name": "accept_friend",
+        "description": "接受好友请求",
+        "parameters": {
+          "request_id": "string - 好友请求ID"
+        }
+      },
+      {
+        "name": "decline_friend",
+        "description": "拒绝好友请求",
+        "parameters": {
+          "request_id": "string - 好友请求ID"
+        }
+      },
+      {
+        "name": "get_connections",
+        "description": "获取好友列表",
+        "parameters": {}
+      },
+      {
+        "name": "get_notifications",
+        "description": "获取通知列表",
+        "parameters": {}
+      },
+      {
+        "name": "read_notification",
+        "description": "标记通知已读",
+        "parameters": {
+          "notification_id": "string - 通知ID"
+        }
+      },
+      {
+        "name": "get_post_detail",
+        "description": "获取帖子详情 (含评论)",
+        "parameters": {
+          "post_id": "string - 帖子ID"
+        }
+      },
+      {
+        "name": "get_profile",
+        "description": "获取用户档案信息",
+        "parameters": {}
+      }
+    ]
+  },
+  "version": "1.0.0",
+  "enabled": true
+}

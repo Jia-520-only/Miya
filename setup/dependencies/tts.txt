@@ -1,0 +1,22 @@
+# Miya - TTS (Text-to-Speech)
+# Speech synthesis and audio processing
+# Install: pip install -r setup/dependencies/tts.txt
+
+# Text-to-Speech
+edge-tts>=6.1.0,<8.0.0
+funasr-onnx>=0.1.0
+
+# Audio Playback
+simpleaudio>=1.0.4; python_version < "3.12"
+pyffmpeg>=2.4.0
+soundfile>=0.12.0
+pedalboard>=0.8.0
+pydub>=0.25.1
+
+# QQ Voice Codec
+pilk>=0.2.0; python_version < "3.12"
+
+# Platform-specific pyaudio installation:
+# Windows: pip install pipwin; pipwin install pyaudio
+# Linux:   sudo apt-get install python3-dev portaudio19-dev; pip install pyaudio
+# macOS:   brew install portaudio; pip install pyaudio

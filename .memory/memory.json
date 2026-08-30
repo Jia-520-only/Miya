@@ -1,0 +1,22 @@
+{
+  "memories": [
+    {
+      "id": "opt-20260507-arch-migration",
+      "type": "fix_history",
+      "key": "2026-05-07_onebot_full_migration",
+      "value": {
+        "title": "v7.0 OneBot 全功能迁移 & 架构重构",
+        "date": "2026-05-07",
+        "summary": "佳将 qq_main.py 中 53 项核心功能迁移至统一 OneBot 平台层，重构了 MessageMixin 后处理架构。修复了 7 个关键 bug。新增 15 项以上功能。",
+        "features": ["@检测+at列表(CQ码)", "图片AI视觉分析+引用图片CQ分析", "视觉模型失败回退PIL", "黑白名单+群名解析+消息拆分", "输出过滤+离别检测+LifeBook", "拍一拍冷却+并发锁", "调度器+M-Link+DecisionHub引用", "扩展OneBot API 10个", "自动保存表情包", "MessageMixin通用后处理", "QQOfficial+飞书同步升级"]
+      },
+      "metadata": {"commits": 5, "files": ["onebot_platform.py", "message_mixin.py", "qq_official_platform.py", "webhook_platforms.py", "ai_client.py", "multi_vision_analyzer.py", "multi_model_config.json"]},
+      "confidence": 1.0,
+      "access_count": 0,
+      "last_accessed": "2026-05-07T22:30:00",
+      "created_at": "2026-05-07T21:30:00",
+      "updated_at": "2026-05-07T22:30:00"
+    }
+  ],
+  "fix_records": []
+}

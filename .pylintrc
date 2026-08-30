@@ -1,0 +1,30 @@
+[MASTER]
+ignore=venv,tests,docs,examples,.git,__pycache__,node_modules
+init-hook='import sys; sys.setrecursionlimit(2000)'
+
+[MESSAGES CONTROL]
+disable=
+    C0114,  # missing-module-docstring
+    C0115,  # missing-class-docstring
+    C0116,  # missing-function-docstring
+    R0903,  # too-few-public-methods
+    R0801,  # duplicate-code
+    W0212,  # protected-access
+    W0511,  # fixme
+    C0301,  # line-too-long (handled by ruff)
+
+[FORMAT]
+max-line-length=120
+indent-string='    '
+
+[BASIC]
+good-names=i,j,k,v,_,id,db,os,ex,ax,pk,fn,fp,ok
+
+[DESIGN]
+max-args=8
+max-attributes=12
+max-locals=20
+
+[SIMILARITIES]
+min-similarity-lines=8
+ignore-comments=yes

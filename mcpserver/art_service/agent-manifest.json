@@ -1,0 +1,41 @@
+{
+  "name": "art_service",
+  "displayName": "AI 绘画",
+  "description": "让弥娅主动调用 AI 绘画引擎生成图片——支持 ComfyUI、DALL·E、NovelAI、CogView、通义万相",
+  "agentType": "mcp",
+  "entryPoint": {
+    "module": "mcpserver.art_service.service",
+    "class": "ArtService"
+  },
+  "capabilities": {
+    "tools": [
+      {
+        "name": "generate_image",
+        "description": "生成一张 AI 绘画图片。支持多引擎：ComfyUI(本地)、DALL·E、NovelAI、CogView、通义万相。生成后返回 local_paths(绝对路径可直接用于 send_platform_file) 和 image_urls。适用场景：'帮我画一幅...'、'生成一张...的图'、'画一个动漫角色'",
+        "parameters": {
+          "prompt": "string - 画面描述",
+          "provider": "string - 绘画引擎 (comfyui/dalle/novelai/cogview/tongyi, 默认自动选择)",
+          "negative_prompt": "string - 负面提示词（不希望出现的元素）",
+          "width": "int - 宽度 (默认 1024)",
+          "height": "int - 高度 (默认 1024)",
+          "style": "string - 风格标签 (如: 动漫/写实/油画/赛博朋克)"
+        }
+      },
+      {
+        "name": "list_providers",
+        "description": "列出当前可用的绘画引擎及状态",
+        "parameters": {}
+      },
+      {
+        "name": "get_gallery",
+        "description": "获取已生成的画板作品列表",
+        "parameters": {
+          "provider": "string - 按引擎筛选（可选）",
+          "limit": "int - 返回数量 (默认 20)"
+        }
+      }
+    ]
+  },
+  "version": "1.0.0",
+  "enabled": true
+}

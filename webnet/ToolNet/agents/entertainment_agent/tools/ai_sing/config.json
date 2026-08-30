@@ -1,0 +1,22 @@
+{
+    "type": "function",
+    "function": {
+        "name": "ai_sing",
+        "description": "让弥娅用AI翻唱服务模仿唱歌。注意：这只是AI模仿演唱，不是真正的音乐播放。当用户明确要求「唱一首」「你唱」「弥娅自己唱」「翻唱」时使用。用户要求「放歌」「播放音乐」「听歌」「用播放器放」时应使用mcp_miya_mineradio相关工具控制真实的Mineradio桌面音乐播放器。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "song_name": {
+                    "type": "string",
+                    "description": "歌曲名称，如'青花瓷'、'夜曲'、'晴天'等"
+                },
+                "username": {
+                    "type": "string",
+                    "description": "点歌用户的昵称",
+                    "default": "亲爱的"
+                }
+            },
+            "required": ["song_name"]
+        }
+    }
+}

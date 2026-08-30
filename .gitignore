@@ -1,0 +1,270 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+!miya_frontend/build/
+!miya_frontend/build/icon.ico
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv/
+
+# uv
+uv.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# Data
+volumes/
+*.db
+*.sqlite
+
+# Config
+.env
+config/.env
+.env.local
+.env.*.local
+config/.env.local
+
+# Sensitive config files (use .example versions instead)
+config/.env.backup
+config/.env.bak
+config/multi_model_config.json
+config/terminal_config.json
+config/advanced_config.json
+config/tts_config.json
+config/web_search_config.json
+config/terminal_whitelist.json
+config/api_keys.json
+config/api_keys.example.json
+
+# Memory and conversation data (runtime generated)
+data/memory/
+miya_frontend/data/memory/
+data/conversations/
+data/user_personas/
+data/lifebook/
+data/.emoji_backups/
+data/backups/
+
+# AP runtime state (generated at runtime)
+data/ap_state.json
+data/ap_training.json
+data/cognition_cache.db
+data/downloads/
+data/emoji/user_uploaded/
+data/singing/
+data/singing_input/
+data/auth/
+data/blog/
+data/interaction_scenarios/
+data/working_memory.json
+data/agent_memory/
+data/blog_cache/
+data/singing_input/
+# DSH (DeepSeek Harness) 运行时配置 — 含注入的 API 凭据，禁止入库
+data/dsh/
+*.db-shm
+*.db-wal
+run/data/
+
+# Claude settings (may contain API keys)
+.claude/settings.json
+.claude/settings.local.json
+
+# Cache
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+
+# Temporary
+*.tmp
+*.temp
+tmp/
+temp/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# User Data
+userData/
+data/emoji/user_uploaded/*.jpg
+data/emoji/user_uploaded/*.gif
+data/emoji/user_uploaded/*.png
+data/emoji/user_uploaded/*.jpeg
+
+# Runtime Data - Keep all data files as requested
+# (All data directory contents should be uploaded per user request)
+# Note: API key files and generated memory files are excluded above in Config section
+
+# Cache
+Cache/
+
+# Live2D cached files
+*.cache
+*.cdi3.json
+*.physics3.json
+*.vtube.json
+*.exp3.json
+
+# Old frontend artifacts (deprecated)
+
+# Git
+.git/
+
+# npm / pnpm
+node_modules
+.pnpm-store
+.cache/
+# Local backups of committed npm lockfiles
+/miya_frontend/package-lock.json.bak
+/tools/dsh-tui/package-lock.json.bak
+
+# Temporary files
+$null
+
+
+
+
+
+
+
+
+
+
+
+
+# Miya Bridge PID
+.miya_bridge.pid
+
+# ── MIYA 编译产物 ──
+build_assets/
+miya_frontend/release/
+miya_frontend/resources/backend/
+miya_frontend/resources/deepseek-harness/
+miya_frontend/resources/dsh-tui/
+tools/dsh-tui/node_modules/
+miya_frontend/dist/
+miya_frontend/dist-electron/
+release/
+
+# Terminal type preference
+.miya_terminal_type
+
+# Bridge logs
+bridge.log
+bridge_stdout.log
+mcpserver/model-bridge/bridge.log
+mcpserver/model-bridge/__pycache__/
+
+# Kill scripts
+kill_bridge.bat
+
+# Null device (Windows)
+nul
+
+# API keys example
+config/api_keys.example.json
+
+# Claude Code Engine (managed as git submodule)
+# see .gitmodules
+
+# Vendor
+vendor/
+
+# Runtime state
+data/activity/
+data/diting_state.json
+data/tts_audio/
+data/conversation_context_state.json
+data/last_form.json
+
+# Local models (bundled at build time from PaddleX cache)
+models/
+modelspaddle_ocrofficial_models/
+data/miya_birth.json
+data/soul_snapshot.json
+# FAQ / Feedback / Knowledge (runtime generated)
+data/faq.json
+data/feedback.json
+data/admin_list.json
+data/knowledge/
+data/time_tracker.json
+
+# Miya frontend backend dist
+miya_frontend/backend-dist/
+
+# Runtime-generated port info
+config/runtime_ports.json
+
+data/music_workstation/project.json
+data/music_workstation/*.wav
+data/music_workstation/raw/
+
+# ── AI 文件发送产生的临时文件 ──
+data/temp/
+data/uploads/
+data/web_files/
+miya_word_test.docx
+miya_test*.txt
+*传送测试*.txt
+*传送测试*.docx
+
+# Test runtime data
+data/test_*
+# 鈹€鈹€ 杩愯鏃舵暟鎹?/ 澶囦唤瀵煎嚭 (涓嶅叆搴? 鈹€鈹€
+.dsh/
+data/browser/
+miya_backup_export/
+autostart_backup_*
+
+# Earthonline runtime user data (photos/db - private)
+data/earthonline/
+
+# ── 杂项运行时 / 本地目录 ──
+.zcode/
+Microsoft/
+config/backup/
+
+# Self-care runtime state
+data/self_care_last.json
+data/self_care_state.json
+data/chat_sessions_meta.json
+

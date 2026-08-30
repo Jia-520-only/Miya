@@ -1,0 +1,41 @@
+{
+  "name": "game_play",
+  "displayName": "游戏陪玩",
+  "description": "弥娅游戏陪玩感知器 — 画面自动注入弥娅主对话上下文",
+  "agentType": "mcp",
+  "entryPoint": {
+    "module": "mcpserver.game_play.service",
+    "class": "GamePlayService"
+  },
+  "capabilities": {
+    "tools": [
+      {
+        "name": "start_game",
+        "description": "启动游戏陪玩模式。激活后弥娅会自动看到你的屏幕，用她的人格、记忆来陪你打游戏。",
+        "parameters": {
+          "game_id": "string - 游戏标识（如 black_myth_wukong / visual_novel），不指定则通用适配",
+          "voice_enabled": "boolean - 是否启用语音（默认 true）",
+          "vision_enabled": "boolean - 是否启用屏幕视觉（默认 true）",
+          "control_enabled": "boolean - 是否启用键鼠操控（默认 false）"
+        }
+      },
+      {
+        "name": "stop_game",
+        "description": "停止游戏陪玩模式",
+        "parameters": {}
+      },
+      {
+        "name": "get_status",
+        "description": "获取游戏陪玩引擎的当前状态",
+        "parameters": {}
+      },
+      {
+        "name": "list_games",
+        "description": "列出所有支持的游戏 Profile",
+        "parameters": {}
+      }
+    ]
+  },
+  "version": "1.0.0",
+  "enabled": true
+}

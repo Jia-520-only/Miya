@@ -1,0 +1,25 @@
+{
+  "name": "code_executor",
+  "displayName": "代码执行器",
+  "description": "执行 Python/JavaScript/Shell 代码",
+  "agentType": "mcp",
+  "entryPoint": {
+    "module": "mcpserver.code_executor.service",
+    "class": "CodeExecutorService"
+  },
+  "capabilities": {
+    "tools": [
+      {
+        "name": "execute",
+        "description": "执行代码",
+        "parameters": {
+          "code": "string",
+          "language": "string",
+          "timeout": "number"
+        }
+      }
+    ]
+  },
+  "version": "1.0.0",
+  "enabled": true
+}

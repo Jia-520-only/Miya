@@ -1,0 +1,1 @@
+{"name":"miya-dsh-tui","private":true,"version":"1.0.0","description":"Miya 内嵌的 DeepSeek Harness 终端客户端 (dsh-tui)","dependencies":{"dsh-tui":"^0.2.19"}}

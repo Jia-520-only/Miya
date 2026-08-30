@@ -1,0 +1,10 @@
+{
+    "name": "stats",
+    "description": "查看Token使用统计和模型消耗",
+    "permission": "admin",
+    "allow_in_private": true,
+    "rate_limit": {"user": 60, "admin": 15, "superadmin": 0},
+    "show_in_help": true,
+    "order": 40,
+    "aliases": ["统计", "token"]
+}

@@ -1,0 +1,22 @@
+{
+    "type": "function",
+    "function": {
+        "name": "web_search",
+        "description": "网络搜索工具，使用 Bing/Google 搜索网页内容。当用户需要搜索信息、查找资料时使用。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "搜索关键词"
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "返回结果数量，默认为5",
+                    "default": 5
+                }
+            },
+            "required": ["query"]
+        }
+    }
+}

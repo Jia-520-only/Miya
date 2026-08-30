@@ -1,0 +1,273 @@
+[build-system]
+requires = ["hatchling>=1.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "miya"
+version = "4.1.11"
+description = "弥娅 (MIYA) - AI 虚拟化身"
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "Proprietary" }
+authors = [
+    { name = "Miya Team" },
+]
+
+dependencies = [
+    "fastapi>=0.100.0,<1.0.0",
+    "uvicorn[standard]>=0.22.0,<1.0.0",
+    "pydantic>=2.0.0,<3.0.0",
+    "python-multipart>=0.0.6",
+    "starlette>=0.30.0,<1.0.0",
+    "aiohttp>=3.8.0,<4.0.0",
+    "aiofiles>=23.0.0",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
+    "tomli>=2.0.0",
+    "PyJWT>=2.8.0,<2.9.0",
+    "cryptography>=41.0.0",
+    "email-validator>=2.0.0",
+    "psutil>=5.9.0",
+    "watchdog>=3.0.0",
+    "requests>=2.31.0",
+    "click>=8.1.0",
+    "packaging>=23.0",
+    "certifi>=2024.0.0",
+    "numpy>=1.26.4,<2.0.0",
+    "jinja2>=3.1.0",
+    "typing-extensions>=4.8.0",
+]
+
+[project.optional-dependencies]
+ai = [
+    "openai>=1.3.0,<2.0.0",
+    "tiktoken>=0.5.0",
+    "anthropic>=0.7.0,<1.0.0",
+    "zhipuai>=2.0.0",
+    "google-genai>=1.0.0,<2.0.0",
+    "dashscope>=1.20.0",
+    "sentence-transformers>=2.2.0,<3.0.0",
+    "faiss-cpu>=1.7.0",
+    "rank-bm25>=0.2.0",
+    "torch>=2.0.0,<3.0.0",
+    "transformers>=4.30.0,<5.0.0",
+]
+
+database = [
+    "chromadb>=0.4.0,<2.0.0",
+    "sqlalchemy>=2.0.0",
+    "aiosqlite>=0.19.0",
+    "sqlmodel>=0.0.16",
+    "asyncpg>=0.29.0",
+    "aiomysql>=0.2.0",
+    "pandas>=2.0.0,<3.0.0",
+    "scipy>=1.10.0,<2.0.0",
+    "scikit-learn>=1.3.0,<1.6.0",
+]
+
+office = [
+    "PyPDF2>=3.0.0",
+    "pypdf>=4.0.0",
+    "pymupdf>=1.24.0",
+    "python-docx>=1.1.0",
+    "openpyxl>=3.0.0",
+    "python-pptx>=0.6.0",
+    "py7zr>=0.20.0",
+    "rarfile>=4.0",
+    "beautifulsoup4>=4.12.0",
+    "markitdown>=0.0.1",
+]
+
+network = [
+    "httpx>=0.24.0",
+    "websockets>=12.0",
+    "quart>=0.19.0",
+    "flask>=3.0.0",
+    "hypercorn>=0.17.0",
+    "aiodocker>=0.21.0",
+    "aiomqtt>=0.2.0",
+    "yt-dlp>=2024.0.0",
+    "static-ffmpeg>=2.0",
+    "jmcomic>=2.7.0",
+    "playwright-stealth>=2.0.0",
+]
+
+tts = [
+    "edge-tts>=6.1.0,<8.0.0",
+    "funasr-onnx>=0.1.0",
+    "simpleaudio>=1.0.4; python_version < '3.12'",
+    "pyffmpeg>=2.4.0",
+    "soundfile>=0.12.0",
+    "pedalboard>=0.8.0",
+    "pydub>=0.25.1",
+    "pilk>=0.2.0; python_version < '3.12'",
+]
+
+viz = [
+    "matplotlib>=3.7.0,<4.0.0",
+]
+
+qq-extras = [
+    "pillow>=10.0.0",
+    "chardet>=5.1.0",
+    "python-magic>=0.4.27; sys_platform != 'win32'",
+    "python-magic-bin>=0.4.14; sys_platform == 'win32'",
+    "tenacity>=8.2.0",
+    "jieba>=0.42.1",
+    "loguru>=0.7.0",
+    "qrcode>=7.4.0",
+    "playwright>=1.40.0",
+    "pyserial>=3.5",
+    "python-ripgrep",
+]
+
+platform = [
+    "qq-botpy>=1.0.0",
+    "python-telegram-bot>=20.0",
+    "telegramify-markdown>=0.1.0",
+    "discord.py>=2.0.0",
+    "lark-oapi>=1.0.0",
+    "wechatpy>=1.8.0",
+    "pycryptodome>=3.20.0",
+    "weixin-ilink-client>=0.1.0",
+    "slack-bolt>=1.18.0",
+    "slack-sdk>=3.20.0",
+    "line-bot-sdk>=3.0.0",
+    "MattermostDriver>=7.0.0",
+]
+
+observability = [
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-instrumentation>=0.42b0",
+    "opentelemetry-exporter-otlp>=1.20.0",
+]
+
+scheduler = [
+    "apscheduler>=3.10.0",
+]
+
+win32 = [
+    "comtypes>=1.4.0; sys_platform == 'win32'",
+    "pywinauto>=0.6.8; sys_platform == 'win32'",
+]
+
+[dependency-groups]
+dev = [
+    "black>=23.12.0",
+    "flake8>=7.0.0",
+    "mypy>=1.8.0",
+    "isort>=5.13.0",
+    "ruff>=0.1.0",
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "pytest-timeout>=2.0.0",
+    "bandit>=1.7.0",
+    "ipython>=8.18.0",
+    "ipdb>=0.13.0",
+    "py-spy>=0.3.14",
+    "memory-profiler>=0.61.0",
+    "sphinx>=7.2.0",
+    "sphinx-rtd-theme>=2.0.0",
+    "selenium>=4.15.0",
+    # fastmcp is optional; conflicts with zhipuai's PyJWT pin. Install separately if needed.
+    "docstring-parser>=0.15.0",
+    "ormsgpack>=1.3.0",
+    "pydantic-settings>=2.0.0",
+    "watchfiles>=0.21.0",
+]
+
+[tool.uv]
+default-groups = []
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+addopts = ["-v", "--tb=short"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [
+    "webnet/EntertainmentNet/game_mode/*.py",
+    "webnet/EntertainmentNet/game_mode/",
+    # 旧代码兼容层 — 非本次构建产出的遗留文件
+    "hub/services/",
+    # 弥娅之眼 (screen_aware) — 从上游引入的感知模块，保留历史 lint 债务
+    "miya_senses/sensors/screen_aware/",
+    # DeepSeek Harness — 独立上游子模块，由其自身 CI 负责 lint
+    "deepseek-harness/",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM"]
+ignore = ["E501", "B008"]
+# 项目特有的命名风格（CamelCase 函数、mixedCase 变量等）
+# F403/F405: 代码库中广泛使用 star imports，是故意的设计模式
+# UP006/UP007/UP045/UP035: PEP 585/604 现代化注释，可在后续版本逐步迁移
+# W293: 空白行尾部空格，格式问题而非逻辑问题
+# UP015: 冗余 open 模式，无害
+# UP041: 应使用 TimeoutError 替代 asyncio.TimeoutError（已在后续版本中修复）
+# SIM102/SIM117: 代码风格偏好，不影响功能
+# E402: 常用于延迟导入/条件导入的合法模式
+extend-ignore = [
+    "N",       # 命名约定：GetLogger(CamelCase)、Comp(非小写别名)、fallbackUrl(mixedCase)等
+    "F403",    # from module import *
+    "F405",    # 星形导入名称可能未定义
+    "UP006",   # 非 PEP 585 注解：List[str] → list[str]
+    "UP007",   # 非 PEP 604 联合：Union[X, Y] → X | Y
+    "UP045",   # 非 PEP 604 可选：Optional[X] → X | None
+    "UP035",   # 废弃的导入：from collections import Iterable
+    "UP015",   # 冗余的 open 模式：open(f, "r") → open(f)
+    "W293",    # 空白行包含空格
+    "UP041",   # 替换 asyncio.TimeoutError 为内置 TimeoutError
+    "SIM102",  # 可合并的嵌套 if 语句
+    "SIM117",  # 合并嵌套 with 语句
+    "E402",    # 模块级导入不在文件顶部
+    "B027",    # 没有 @abstract 装饰器的空方法体
+    "E722",    # 裸 except（后续逐步修复）
+    "B904",    # raise 未包含 from exc（后续逐步修复）
+    "F401",    # 未使用的导入（可能有副作用，后续检查）
+    "F811",    # 重复定义未使用（后续检查）
+    "SIM115",  # 打开文件未使用上下文管理器（后续逐步修复）
+    "E741",    # 模糊的变量名（如 l）
+    "B024",    # 抽象基类无抽象方法
+    "B007",    # 未使用的循环控制变量
+    "B025",    # 重复的 try-except 异常类型
+    "B012",    # finally 中的跳转语句
+    "B018",    # 无用的表达式
+    "B023",    # 函数使用了循环变量
+    "SIM103",  # 不必要的 bool 判断
+    "SIM105",  # 可抑制的异常
+    "SIM113",  # 使用 enumerate 替代 range+len
+    "SIM118",  # key in dict.keys()
+    "F822",    # 未定义的导出名
+    "F823",    # 未定义的本地名
+    "F601",    # 字面量中重复的 key
+    "UP009",   # UTF-8 编码声明不必要
+    "F541",    # f-string 缺少占位符
+    "F821",    # 未定义名称（含 18 处需后续修复的遗留问题）
+    "I001",    # import 块排序（约 80 处需后续 fix）
+    "UP042",   # str+Enum 兼容行为；迁移 StrEnum 需评估序列化差异
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["core", "utils", "config"]
+
+
+[tool.bandit]
+# B104: 项目需要局域网/手机端访问，运行时地址由 config/.env 控制。
+# B324: MD5/SHA1 仅用于缓存键、音频/图片指纹和 WebSocket 协议要求，不用于口令散列。
+# B608: SQL 标识符来自内部白名单，参数值均使用占位符绑定。
+skips = ["B104", "B324", "B608"]
+[tool.black]
+line-length = 120
+target-version = ["py311"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true

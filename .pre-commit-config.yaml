@@ -1,0 +1,48 @@
+repos:
+  # ===== 基础检查（文件格式、安全） =====
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=1024']
+      - id: check-ast
+      - id: check-json
+      - id: check-toml
+      - id: detect-private-key
+      - id: check-merge-conflict
+      - id: debug-statements
+      - id: check-byte-order-marker
+
+  # ===== Python 代码检查（对齐 CI ruff 版本） =====
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.14
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  # ===== Python 安全检查 =====
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.8.3
+    hooks:
+      - id: bandit
+        args: ["-ll", "-x", "tests/,examples/,venv/"]
+
+  # ===== Markdown 检查 =====
+  - repo: https://github.com/igorshubovych/markdownlint-cli2
+    rev: v0.13.0
+    hooks:
+      - id: markdownlint-cli2
+        args: ["--config", ".markdownlint.yaml"]
+
+  # ===== 提交消息检查 =====
+  - repo: https://github.com/jorisroovers/gitlint
+    rev: v0.19.1
+    hooks:
+      - id: gitlint
+        stages: [commit-msg]
+
+fail_fast: false

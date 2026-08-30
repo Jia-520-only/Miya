@@ -1,0 +1,367 @@
+{
+  "version": "1.0",
+  "description": "弥娅记忆系统统一配置",
+
+  "storage": {
+    "data_dir": "data/memory",
+    "enable_backup": true,
+    "backup_dir": "data/memory/backups",
+    "auto_cleanup_expired": true
+  },
+
+  "levels": {
+    "short_term": {
+      "enabled": true,
+      "ttl_seconds": 345600,
+      "max_items": 1000
+    },
+    "dialogue": {
+      "enabled": true,
+      "max_per_session": 100
+    },
+    "long_term": {
+      "enabled": true,
+      "max_items": 10000
+    },
+    "semantic": {
+      "enabled": true,
+      "engine": "sqlite",
+      "dimension": 1024,
+      "similarity_threshold": 0.7
+    },
+    "knowledge": {
+      "enabled": true
+    }
+  },
+
+  "anchors": {
+    "description": "记忆锚点配置，identity预加载，user按需检索",
+    "identity_anchors": "data/memory_anchors_identity.json",
+    "user_anchors": "data/memory_anchors_user.json"
+  },
+
+  "classification": {
+    "auto_classify": true,
+    "strong_emotions": [
+      "愤怒", "恐惧", "惊讶", "悲伤", "极度兴奋", "创伤", "崩溃", "绝望"
+    ],
+    "long_term_events": [
+      "生日", "纪念日", "毕业", "结婚", "工作面试", "重要决定", "医疗诊断", "法律事务", "分手", "离婚"
+    ],
+    "important_keywords": {
+      "birthday": 0.9,
+      "生日": 0.9,
+      "电话": 0.85,
+      "手机": 0.85,
+      "邮箱": 0.85,
+      "email": 0.85,
+      "地址": 0.8,
+      "住址": 0.8,
+      "微信号": 0.9,
+      "QQ号": 0.85,
+      "名字": 0.8,
+      "我叫": 0.8,
+      "过敏": 0.9,
+      "病史": 0.9,
+      "病情": 0.9,
+      "疾病": 0.85
+    },
+    "priority_tags": [
+      "重要", "必须记住", "关键信息", "personal", "contact", "health"
+    ],
+    "auto_detect_regex_patterns": [
+      ["生日", "生日", 0.9],
+      ["我喜欢", "喜好", 0.7],
+      ["喜欢(.+)", "喜好", 0.7],
+      ["我叫", "名字", 0.7],
+      ["讨厌", "厌恶", 0.7],
+      ["星座", "星座", 0.7],
+      ["电话", "电话", 0.9],
+      ["邮箱", "邮箱", 0.9],
+      ["记住", "明确要求", 0.9],
+      ["你记着", "明确要求", 0.9],
+      ["帮我记住", "明确要求", 0.9]
+    ],
+    "recall_detection_patterns": [
+      "你记得",
+      "你还记得",
+      "记得.*吗",
+      "上次",
+      "上次我们",
+      "之前.*聊",
+      "昨天",
+      "前天",
+      "以前.*怎么样",
+      "我们.*聊过",
+      "过去.*事",
+      "曾经",
+      "回忆.*一下",
+      "想起.*什么"
+    ],
+    "dialogue_strong_emotions": ["极度愉快", "深度悲伤", "强烈焦虑", "崩溃"],
+    "significance_threshold_for_long_term": 0.8,
+    "dialogue_significance_threshold": 0.6,
+    "manual_significance_threshold": 0.4
+  },
+
+  "working_memory": {
+    "max_recent_messages": 5,
+    "max_background_topics": 5,
+    "topic_decay_rate": 0.3,
+    "topic_switch_threshold": 3,
+    "drift_threshold": 0.2,
+    "min_messages_before_fold": 5,
+    "stopwords": [
+      "的", "了", "是", "在", "我", "你", "他", "她", "它",
+      "有", "和", "与", "或", "但", "而", "就", "都", "也",
+      "不", "没", "很", "太", "最", "更", "还", "又",
+      "这", "那", "什么", "怎么", "为什么", "呢", "啊", "吧",
+      "（", "）", "(", ")", "【", "】", "[", "]",
+      "！", "!", "？", "?", "。", ".", "，", ",", "…",
+      "一个", "一些", "一下", "一直", "一起", "一样"
+    ],
+    "low_info_words": [
+      "不是", "是的", "对", "对的对的", "嗯", "嗯嗯", "哦",
+      "好", "行", "哈哈", "呵呵", "233", "草", "6", "9", "1", "0",
+      "（", "）", "(", ")", "？", "?", "！", "!"
+    ],
+    "recovery_prompts": {
+      "yesterday_context": "这是昨天的对话内容，已经过去一天了，请以今天的新对话为主",
+      "yesterday_bare": "这是昨天的对话，已经是新的一天了",
+      "warm_hint": "以上为上次对话摘要，请自然接续"
+    }
+  },
+
+  "extraction": {
+    "historian_enabled": true,
+    "auto_extract_enabled": true,
+    "min_content_length": 5,
+    "ignore_patterns": [
+      "^[嗯哦啊哈嘿诶]{1,3}[。\\.!]*$",
+      "^[好是知道行可以]{1,2}[。\\.!]*$",
+      "^[干嘛怎么了啥事?]*$",
+      "^[哈哈哈?]+[。!]*$",
+      "^\\[表情\\]$",
+      "^\\(?(图片|照片)\\(?$",
+      "^[/@].*",
+      "^!{3,}$",
+      "^[~～]{3,}$"
+    ]
+  },
+
+  "search": {
+    "default_limit": 20,
+    "max_limit": 100,
+    "group_boost": 1.5,
+    "user_boost": 1.3,
+    "tag_boost": 1.2,
+    "semantic_search_enabled": true,
+    "semantic_limit": 10
+  },
+
+  "performance": {
+    "lazy_load": true,
+    "cache_enabled": true,
+    "cache_max_size": 1000,
+    "cleanup_interval_seconds": 3600,
+    "async_write": true
+  },
+
+  "privacy": {
+    "auto_redact_pii": true,
+    "pii_fields": ["phone", "email", "address", "id_card"],
+    "sensitive_tags": ["隐私", "敏感", "密码", "bank"]
+  },
+
+  "statistics": {
+    "enabled": true,
+    "track_access": true,
+    "track_level_distribution": true,
+    "track_storage_size": true
+  },
+
+  "enhancer": {
+    "decay_rate": 0.05,
+    "emotion_boost_threshold": 0.7,
+    "similarity_threshold": 0.85,
+    "refine_interval": 86400,
+    "link_file": "data/memory/memory_links.json",
+    "weight_file": "data/memory/memory_weights.json"
+  },
+
+  "sqlite_backend": {
+    "_note": "SQLite 配置优先从本文件读取，回退到 text_config.json",
+    "enabled": true,
+    "db_path": "data/memory/miya_memory.db",
+    "pragma": {
+      "journal_mode": "WAL",
+      "foreign_keys": true,
+      "synchronous": "NORMAL",
+      "cache_size": -64000,
+      "temp_store": "MEMORY"
+    },
+    "table": {
+      "name": "memories",
+      "fts_enabled": true,
+      "fts_name": "memories_fts",
+      "fts_columns": ["content", "tags"]
+    },
+    "indexes": [
+      {"name": "idx_memories_user_id", "column": "user_id"},
+      {"name": "idx_memories_group_id", "column": "group_id"},
+      {"name": "idx_memories_level", "column": "level"},
+      {"name": "idx_memories_created_at", "column": "created_at"},
+      {"name": "idx_memories_priority", "column": "priority"},
+      {"name": "idx_memories_platform", "column": "platform"}
+    ],
+    "query": {
+      "default_order": "priority DESC, created_at DESC",
+      "like_pattern_prefix": "%",
+      "like_pattern_suffix": "%"
+    },
+    "defaults": {
+      "priority": 0.5,
+      "significance": 0.5,
+      "source": "auto_extract",
+      "role": "user",
+      "user_id": "",
+      "session_id": "",
+      "group_id": "",
+      "platform": "",
+      "event_type": "",
+      "location": "",
+      "conversation_partner": "",
+      "emotional_tone": "",
+      "subject": "",
+      "predicate": "",
+      "obj": ""
+    }
+  },
+
+  "cognitive_engine": {
+    "_note": "认知引擎配置。topic_keywords / memory_triggers / memory_anchor 优先从此读取，缺失时回退到 text_config.json 同名字段",
+    "topic_keywords": {},
+    "memory_triggers": {},
+    "ignore_patterns": [],
+    "memory_anchor": {},
+    "context_display": {}
+  },
+
+  "historian": {
+    "_note": "历史记录员配置。patterns / assistant_self 优先从此读取，缺失时回退到 text_config.json",
+    "ignore_patterns": [],
+    "important_patterns": {},
+    "group_discussion_patterns": {},
+    "assistant_self": {}
+  },
+
+  "rrf_fusion": {
+    "_note": "RRF 混合搜索融合配置 (参考 TencentDB Agent Memory)",
+    "enabled": true,
+    "k": 60,
+    "keyword_weight": 1.0,
+    "vector_weight": 1.0,
+    "context_weight": 0.3,
+    "time_weight": 0.15,
+    "min_results_for_fusion": 3
+  },
+
+  "llm_extractor": {
+    "_note": "LLM 驱动的记忆提取管线配置",
+    "enabled": true,
+    "min_content_length": 10,
+    "max_extractions_per_call": 5,
+    "throttle_seconds": 2,
+    "importance_threshold": 0.7,
+    "complement_regex": true
+  },
+
+  "quality_scorer": {
+    "_note": "记忆质量评分与去重配置",
+    "enabled": true,
+    "min_quality_for_store": 0.2,
+    "auto_merge_threshold": 0.85,
+    "redundancy_text_threshold": 0.75,
+    "redundancy_tag_threshold": 0.6,
+    "redundancy_vec_threshold": 0.85,
+    "stopwords": [
+      "的", "了", "是", "在", "我", "你", "他", "她", "它",
+      "有", "和", "就", "都", "也", "不", "没", "很",
+      "这", "那", "什么", "怎么", "呢", "啊", "吧"
+    ]
+  },
+
+  "skill_manager": {
+    "_note": "技能管理系统配置 (参考 TencentDB Agent Memory)",
+    "enabled": true,
+    "data_dir": "data/skills",
+    "max_skills": 1000,
+    "auto_extract_enabled": true,
+    "min_conversation_length_for_extraction": 20,
+    "search_default_limit": 5,
+    "deprecate_threshold": 0.3,
+    "deprecate_min_executions": 3
+  },
+
+  "injection_pipeline": {
+    "_note": "Prompt 注入管线配置 (参考 TDB-AM MemoryProxy)",
+    "enabled": true,
+    "hooks": {
+      "identity": { "enabled": true, "point": "system.prefix", "cache": "session_init" },
+      "user_profile": { "enabled": true, "point": "system.prefix", "cache": "session_init" },
+      "memory_context": { "enabled": true, "point": "user.before", "cache": "none", "limit": 5 },
+      "working_memory": { "enabled": true, "point": "user.before", "cache": "none" },
+      "skill_injection": { "enabled": true, "point": "system.before_tools", "cache": "session_init" }
+    }
+  },
+
+  "cognitive": {
+    "_note": "认知记忆系统配置 — ChromaDB 向量库 + 后台史官 + 时间衰减 + MMR 去重 + 侧写自动合并",
+    "enabled": true,
+    "bot_name": "弥娅",
+    "vector_store": {
+      "path": "data/cognitive/chromadb"
+    },
+    "historian": {
+      "enabled": true,
+      "poll_interval_seconds": 1.0,
+      "rewrite_max_retry": 2,
+      "job_max_retries": 3,
+      "stale_job_timeout_seconds": 300.0,
+      "recent_messages_inject_k": 12,
+      "recent_message_line_max_len": 240,
+      "source_message_max_len": 800,
+      "max_concurrency": 4,
+      "profile_check_enabled": true
+    },
+    "query": {
+      "auto_top_k": 3,
+      "tool_default_top_k": 12,
+      "profile_top_k": 8,
+      "enable_rerank": true,
+      "rerank_candidate_multiplier": 3,
+      "time_decay_enabled": true,
+      "time_decay_half_life_days_auto": 14.0,
+      "time_decay_half_life_days_tool": 60.0,
+      "time_decay_boost": 0.2,
+      "time_decay_min_similarity": 0.35,
+      "mmr_enabled": true,
+      "mmr_lambda": 0.7,
+      "auto_scope_candidate_multiplier": 2,
+      "auto_current_group_boost": 1.15,
+      "auto_current_private_boost": 1.25
+    },
+    "profile": {
+      "path": "data/cognitive/profiles",
+      "revision_keep": 5,
+      "auto_merge_enabled": true
+    },
+    "queue": {
+      "path": "data/cognitive/queues",
+      "failed_max_age_days": 30,
+      "failed_max_files": 500,
+      "failed_cleanup_interval": 100,
+      "job_max_retries": 3
+    }
+  }
+}

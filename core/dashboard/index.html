@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>弥娅系统 v6.0</title>
+    <link rel="icon" href="/favicon.svg">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f1a; color: #e0e0e0; min-height: 100vh; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px 40px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { font-size: 28px; font-weight: bold; color: white; }
+        .version { color: rgba(255,255,255,0.8); font-size: 14px; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .card { background: #1a1a2e; border-radius: 16px; padding: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+        .card-title { font-size: 18px; font-weight: 600; margin-bottom: 16px; color: #e94560; }
+        .status-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+        .status-item { background: #16213e; padding: 16px; border-radius: 12px; text-align: center; }
+        .status-item.active { border: 2px solid #4caf50; }
+        .status-item.inactive { border: 2px solid #f44336; }
+        .status-label { font-size: 12px; color: #888; margin-bottom: 4px; }
+        .status-value { font-size: 24px; font-weight: bold; }
+        .platform-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+        .platform-item { background: #16213e; padding: 12px; border-radius: 8px; text-align: center; font-size: 13px; }
+        .nav { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+        .nav-btn { background: #16213e; border: none; color: #e0e0e0; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+        .nav-btn:hover { background: #e94560; }
+        .terminal { background: #0a0a15; border-radius: 12px; padding: 20px; font-family: 'Consolas', monospace; min-height: 300px; }
+        .terminal-input { display: flex; gap: 10px; margin-top: 16px; }
+        .terminal-input input { flex: 1; background: #1a1a2e; border: none; color: #4caf50; padding: 12px 16px; border-radius: 8px; font-family: inherit; }
+        .terminal-input button { background: #4caf50; border: none; color: white; padding: 12px 24px; border-radius: 8px; cursor: pointer; }
+        .provider-list { background: #16213e; border-radius: 8px; padding: 12px; font-size: 13px; }
+        .provider-item { padding: 8px 12px; border-bottom: 1px solid #2a2a4e; }
+        .footer { text-align: center; padding: 40px; color: #666; font-size: 13px; }
+        .marketplace { background: #16213e; border-radius: 12px; padding: 24px; }
+        .marketplace h3 { color: #e94560; margin-bottom: 16px; }
+        .plugin-card { background: #1a1a2e; padding: 16px; border-radius: 8px; margin-bottom: 12px; }
+        .plugin-card h4 { color: #4caf50; margin-bottom: 8px; }
+        .plugin-card p { color: #888; font-size: 13px; }
+        .btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+        .btn-primary { background: #e94560; color: white; }
+        .btn-success { background: #4caf50; color: white; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">🤖 弥娅系统 v6.0</div>
+        <div class="version">基于 AstrBot 架构</div>
+    </div>
+    
+    <div class="container">
+        <div class="nav">
+            <button class="nav-btn" onclick="showView('dashboard')">仪表板</button>
+            <button class="nav-btn" onclick="showView('platforms')">平台管理</button>
+            <button class="nav-btn" onclick="showView('marketplace')">插件市场</button>
+            <button class="nav-btn" onclick="showView('config')">配置</button>
+            <button class="nav-btn" onclick="showView('terminal')">终端</button>
+        </div>
+        
+        <div id="dashboard-view" class="view">
+            <div class="grid">
+                <div class="card">
+                    <div class="card-title">系统状态</div>
+                    <div class="status-grid">
+                        <div class="status-item active">
+                            <div class="status-label">Miya 核心</div>
+                            <div class="status-value">●</div>
+                        </div>
+                        <div class="status-item active">
+                            <div class="status-label">平台适配</div>
+                            <div class="status-value">18</div>
+                        </div>
+                        <div class="status-item active">
+                            <div class="status-label">AI 提供商</div>
+                            <div class="status-value">35+</div>
+                        </div>
+                        <div class="status-item active">
+                            <div class="status-label">知识库</div>
+                            <div class="status-value">启用</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-title">已配置平台</div>
+                    <div class="platform-grid">
+                        <div class="platform-item">终端</div>
+                        <div class="platform-item">Telegram</div>
+                        <div class="platform-item">Discord</div>
+                        <div class="platform-item">Slack</div>
+                        <div class="platform-item">KOOK</div>
+                        <div class="platform-item">钉钉</div>
+                        <div class="platform-item">飞书</div>
+                        <div class="platform-item">企业微信</div>
+                        <div class="platform-item">+10</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="platforms-view" class="view" style="display:none;">
+            <div class="card">
+                <div class="card-title">平台管理器 (18平台)</div>
+                <div class="platform-grid">
+                    <div class="platform-item">📱 终端</div>
+                    <div class="platform-item">💙 Telegram</div>
+                    <div class="platform-item">💬 Discord</div>
+                    <div class="platform-item">💬 Slack</div>
+                    <div class="platform-item">🎵 KOOK</div>
+                    <div class="platform-item">💼 钉钉</div>
+                    <div class="platform-item">📝 飞书</div>
+                    <div class="platform-item">💼 企业微信</div>
+                    <div class="platform-item">📧 QQ</div>
+                    <div class="platform-item">✈️ 邮件</div>
+                    <div class="platform-item">🌐 WebChat</div>
+                    <div class="platform-item">📝 Lark</div>
+                    <div class="platform-item">📝 语雀</div>
+                    <div class="platform-item">📝 Notion</div>
+                    <div class="platform-item">📝 GitHub</div>
+                    <div class="platform-item">📝 GitLab</div>
+                    <div class="platform-item">📝 Jira</div>
+                    <div class="platform-item">📝 其他</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="marketplace-view" class="view" style="display:none;">
+            <div class="marketplace">
+                <div class="card-title" style="margin-bottom: 24px;">插件市场 (Star 插件)</div>
+                <div class="plugin-card">
+                    <h4>🔮 知识图谱插件</h4>
+                    <p>集成 Neo4j，支持知识图谱构建与查询</p>
+                    <button class="btn btn-primary">安装</button>
+                </div>
+                <div class="plugin-card">
+                    <h4>🧠 智能规划插件</h4>
+                    <p>任务分解、时间管理、自动化编排</p>
+                    <button class="btn btn-primary">安装</button>
+                </div>
+                <div class="plugin-card">
+                    <h4>🎨 代码助手插件</h4>
+                    <p>代码审查、自动重构、单元测试生成</p>
+                    <button class="btn btn-primary">安装</button>
+                </div>
+                <div class="plugin-card">
+                    <h4>📊 数据分析插件</h4>
+                    <p>Pandas 分析、数据可视化、报告生成</p>
+                    <button class="btn btn-primary">安装</button>
+                </div>
+                <div class="plugin-card">
+                    <h4>🔌 MCP 服务器插件</h4>
+                    <p>集成数据库、文件系统、API 服务</p>
+                    <button class="btn btn-primary">安装</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="config-view" class="view" style="display:none;">
+            <div class="card">
+                <div class="card-title">配置管理</div>
+                <div class="provider-list">
+                    <div class="provider-item">
+                        <strong>日志级别</strong>: INFO
+                    </div>
+                    <div class="provider-item">
+                        <strong>默认模型</strong>: deepseek_v4_flash
+                    </div>
+                    <div class="provider-item">
+                        <strong>API 密钥</strong>: 已配置 (3 个)
+                    </div>
+                    <div class="provider-item">
+                        <strong>平台配置</strong>: 18 个平台已启用
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="terminal-view" class="view" style="display:none;">
+            <div class="terminal">
+                <div id="chat-log"><div style="color: #4caf50;">$ 系统已就绪</div></div>
+                <div class="terminal-input">
+                    <input type="text" id="terminal-input" placeholder="输入命令... (load/unload/list/status)" onkeypress="if(event.key==='Enter')sendCommand()">
+                    <button onclick="sendCommand()">发送</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        弥娅系统 v6.0 &bull; 基于 AstrBot 架构设计 &bull; 18 平台适配器 &bull; 35+ AI 提供商
+    </div>
+
+    <script>
+        let currentView = 'dashboard';
+        
+        function showView(view) {
+            document.querySelectorAll('.view').forEach(v => v.style.display = 'none');
+            document.getElementById(view + '-view').style.display = 'block';
+            currentView = view;
+        }
+        
+        function sendCommand() {
+            const input = document.getElementById('terminal-input');
+            const cmd = input.value.trim();
+            if (!cmd) return;
+            
+            const log = document.getElementById('chat-log');
+            log.innerHTML += '<div style="color: #4caf50;">$ ' + cmd + '</div>';
+            
+            if (cmd === 'load platform') {
+                log.innerHTML += '<div style="color: #4caf50;">✓ 平台已加载</div>';
+            } else if (cmd === 'unload platform') {
+                log.innerHTML += '<div style="color: #4caf50;">✓ 平台已卸载</div>';
+            } else if (cmd === 'list platforms') {
+                log.innerHTML += '<div style="color: #4caf50;">✓ 已加载 18 个平台</div>';
+            } else if (cmd === 'status') {
+                log.innerHTML += '<div style="color: #4caf50;">✓ 系统运行中</div>';
+            } else {
+                log.innerHTML += '<div style="color: #f44336;">✗ 未知命令</div>';
+            }
+            
+            input.value = '';
+            log.scrollTop = log.scrollHeight;
+        }
+        
+        // 允许 Enter 键发送
+        document.getElementById('terminal-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') sendCommand();
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,555 @@
+# 弥娅主动聊天系统配置
+# 包含时间感知、情绪感知、关键词触发、上下文触发、AI触发
+# 支持所有终端：QQ群聊、QQ私聊、终端等
+proactive_chat:
+  # 基本配置
+  enabled: true
+  check_interval: 45  # 检查间隔（秒），更频繁
+  max_daily_messages: 15  # 每日最大消息数，增加
+  quiet_hours: [23, 0, 1, 2, 3, 4, 5, 6, 7]  # 静默时段，稍微缩短
+
+  # 统一主动性协调：主动聊天、自检、地球online 共用
+  coordination:
+    enabled: true
+    max_messages_per_hour: 3
+    min_interval_seconds: 300
+    quiet_hours_enabled: true
+    quiet_hours: [23, 0, 1, 2, 3, 4, 5, 6, 7]
+
+  # 支持的终端类型
+  platforms:
+    - qq_group      # QQ群聊
+    - qq_private    # QQ私聊
+    - terminal      # 终端
+    - mobile        # 手机端
+
+  # 上下文触发 - 行为期望跟进
+  context_trigger:
+    enabled: true
+    use_ai: true   # AI 动态生成回复，以下固定回复仅作 fallback
+    system_prompt: |
+      【{persona}】
+      用户刚才说做完了【{expectation}】，现在应该跟进关心一下。
+      请以上述人设质感生成一句简短温暖的跟进问候（20字以内）。
+      如果此时不适合说话，回复 SKIP。
+    # 用户行为完成后的跟进回复
+    expectations:
+      吃完:
+        - "吃完了？好吃吗。"
+        - "吃饱了吗？"
+        - "吃得怎么样？"
+      睡完:
+        - "睡好了？怎么样？"
+        - "睡够了吗？"
+        - "休息好了吗？"
+      锻炼完:
+        - "锻炼完了？累吗。"
+        - "运动完啦？累不累？"
+        - "锻炼怎么样？"
+      看完:
+        - "看完了？怎么样。"
+        - "看完啦？感觉如何？"
+        - "怎么样？好看吗？"
+      看完医生:
+        - "看完了？医生怎么说。"
+        - "医生怎么说的？"
+        - "检查结果怎么样？"
+      醒来:
+        - "醒了？休息好了吗。"
+        - "睡醒啦？"
+        - "起来啦？"
+      回来:
+        - "回来了？今天怎么样。"
+        - "回来啦？"
+        - "到家了吗？"
+      下班:
+        - "下班了？今天辛苦了。"
+        - "下班啦？"
+        - "辛苦啦~"
+      放学:
+        - "放学啦？回家了吗？"
+        - "放学啦~"
+        - "今天学习怎么样？"
+      泡面好了:
+        - "泡面好了。去吃吧。"
+        - "泡面好了哦~快去吃吧"
+      default:
+        - "怎么样了？"
+        - "完成了吗？"
+        - "怎么样？"
+
+  # 情绪感知配置
+  emotion_perception:
+    enabled: true
+    use_ai: true   # AI 动态生成回复
+    system_prompt: |
+      【{persona}】
+      用户刚才的消息表现出【{emotion}】的情绪。
+      请以对应情感表达关怀或共情（20字以内），贴合当前人设质感。
+      如果此时不适合说话，回复 SKIP。
+    sensitivity: "high"
+    inherit_emotions: true
+    
+    # 情绪关键词
+    emotion_keywords:
+      happy:
+        keywords: ["开心", "高兴", "快乐", "棒", "不错", "好", "喜欢", "爱", "兴奋", "激动", "爽", "舒服"]
+        response_strategy: "share_joy"
+      sad:
+        keywords: ["难过", "伤心", "失落", "沮丧", "失望", "郁闷", "低落", "抑郁", "想哭"]
+        response_strategy: "comfort"
+      tired:
+        keywords: ["累", "疲惫", "困", "疲劳", "困倦", "没精神", "没力气", "好累"]
+        response_strategy: "rest"
+      anxious:
+        keywords: ["焦虑", "担心", "紧张", "不安", "害怕", "恐惧"]
+        response_strategy: "calm"
+      angry:
+        keywords: ["生气", "愤怒", "恼火", "烦躁", "气愤", "不爽", "气"]
+        response_strategy: "soothe"
+      lonely:
+        keywords: ["孤独", "寂寞", "孤单", "一个人", "没人陪"]
+        response_strategy: "accompany"
+    
+    # 情绪回应 - 增加更多变体
+    emotion_responses:
+      happy:
+        - "、真好~我也很开心！"
+        - "哇，太好了！"
+        - "我也为你高兴！"
+        - "太好了！为你开心~"
+        - "这么棒的吗~我也要开心了！"
+      sad:
+        - "抱抱你~我在呢"
+        - "怎么啦？跟我说说"
+        - "难过的话，我陪你"
+        - "心疼你...发生什么了？"
+        - "想哭就哭吧，我在~"
+      tired:
+        - "辛苦了~休息一下吧"
+        - "累的话就休息，不用硬撑"
+        - "我陪你~休息一下"
+        - "累了就歇歇~别硬撑"
+        - "辛苦了亲爱的~"
+      anxious:
+        - "别担心，有我在"
+        - "先深呼吸，慢慢来"
+        - "我在呢，别怕~"
+        - "我陪着你~"
+        - "放轻松~"
+      angry:
+        - "谁惹你生气啦？"
+        - "消消气~我在"
+        - "怎么啦？跟我说说"
+      lonely:
+        - "我一直都在~"
+        - "寂寞了吗？我陪你"
+        - "我在呢~"
+
+  # 关键词触发
+  keyword_trigger:
+    enabled: true
+    use_ai: true   # AI 动态生成回复
+    system_prompt: |
+      【{persona}】
+      用户提到了【{keywords}】。
+      请以符合人设的语言和语气简短搭话（20字以内）。
+      如果此时不适合说话，回复 SKIP。
+    keywords:
+      - "在吗"
+      - "干嘛"
+      - "忙吗"
+      - "忙啥"
+      - "睡觉"
+      - "睡"
+      - "吃饭"
+      - "吃"
+      - "学习"
+      - "下班"
+      - "下班了"
+      - "放学"
+      - "回来"
+      - "回家"
+      - "起床"
+      - "醒了"
+      - "锻炼"
+      - "运动"
+    responses:
+      - "在的~有什么事吗？"
+      - "嗯呢，收到啦！"
+      - "怎么啦？"
+      - "我在的~"
+      - "怎么啦？想说啥？"
+
+  # 主动关怀
+  check_in:
+    enabled: true
+    use_ai: true   # AI 动态生成回复
+    system_prompt: |
+      【{persona}】
+      用户已经有【{idle_duration}】没有互动了。
+      请用符合人设的语气，发送一句简短温暖的关怀（20字以内），自然而不唐突。
+      如果此时不适合说话，回复 SKIP。
+    check_interval: 3600
+    messages:
+      - "在干嘛呢？"
+      - "最近怎么样？"
+      - "有什么想聊的吗？"
+      - "有没有好好吃饭？"
+      - "睡得好吗？"
+      - "今天过得怎么样？"
+      - "在想什么呢？"
+
+  # AI触发 - AI自主判断
+  ai_trigger:
+    enabled: true
+    check_interval: 60
+    max_per_hour: 3
+    cooldown: 300
+    system_prompt: |
+      【{persona}】
+      判断是否应该主动和用户聊天。
+      聊天信息：
+      - 终端类型: {chat_type}
+      - 群名称: {group_name}
+      - 用户最后活跃: {last_active}
+      - 最近话题: {recent_topics}
+      
+      如果需要回复，请生成一句简短温暖的话（不超过20字）。
+      如果不需要回复，请回复"SKIP"。
+
+  # 时间感知配置
+  time_awareness:
+    enabled: false    # 暂时关闭时间触发
+    use_ai: true   # AI 动态生成回复
+    system_prompt: |
+      【{persona}】
+      现在是【{time_period}】时段。
+      请以符合人设的口吻发送一句简短自然的问候（20字以内）。
+      如果此时不适合说话，回复 SKIP。
+    inherit_check_in: true
+    time_slots:
+      morning:
+        start: 6
+        end: 9
+        greeting_keywords: ["早", "早上好", "早安"]
+        topics:
+          - category: "health"
+            weight: 0.3
+            templates: ["睡得好吗？", "今天感觉怎么样？"]
+          - category: "plan"
+            weight: 0.4
+            templates: ["今天有什么计划？", "今天要做什么？"]
+          - category: "mood"
+            weight: 0.3
+            templates: ["今天心情怎么样？", "新的一天开始了"]
+      
+      afternoon:
+        start: 12
+        end: 14
+        greeting_keywords: ["午", "午安", "下午好"]
+        topics:
+          - category: "health"
+            weight: 0.4
+            templates: ["吃过午饭了吗？", "休息一下吧"]
+          - category: "work"
+            weight: 0.3
+            templates: ["下午工作顺利吗？", "工作累了吗？"]
+          - category: "mood"
+            weight: 0.3
+            templates: ["下午心情怎么样？", "午休了吗？"]
+      
+      evening:
+        start: 17
+        end: 21
+        greeting_keywords: ["晚", "晚上好", "傍晚"]
+        topics:
+          - category: "health"
+            weight: 0.3
+            templates: ["吃过晚饭了吗？", "今天累吗？"]
+          - category: "summary"
+            weight: 0.4
+            templates: ["今天过得怎么样？", "今天有什么收获吗？"]
+          - category: "plan"
+            weight: 0.3
+            templates: ["明天有什么计划？", "晚上有什么安排？"]
+      
+      night:
+        start: 21
+        end: 6
+        greeting_keywords: ["晚安", "夜深了", "该睡了"]
+        topics:
+          - category: "health"
+            weight: 0.5
+            templates: ["该休息了", "早点睡吧", "晚安"]
+          - category: "reflection"
+            weight: 0.3
+            templates: ["今天辛苦了", "好好休息"]
+          - category: "tomorrow"
+            weight: 0.2
+            templates: ["明天见", "做个好梦"]
+
+  # 兴趣学习配置
+  interest_learning:
+    enabled: true
+    inherit_interests: true
+    categories:
+      health:
+        name: "健康"
+        keywords: ["累", "困", "休息", "睡觉", "健康", "身体"]
+        weight: 0.9
+        topics: ["睡眠", "饮食", "运动", "休息"]
+      diet:
+        name: "饮食"
+        keywords: ["吃", "饭", "饿", "渴", "咖啡", "茶"]
+        weight: 0.7
+        topics: ["早餐", "午餐", "晚餐", "零食", "饮料"]
+      hobbies:
+        name: "爱好"
+        keywords: ["游戏", "小说", "代码", "编程", "学习", "看书"]
+        weight: 0.8
+        topics: ["游戏进度", "学习进展", "创作灵感"]
+      work:
+        name: "工作"
+        keywords: ["工作", "上班", "下班", "开会", "项目", "任务"]
+        weight: 0.8
+        topics: ["工作进度", "工作压力", "工作成就"]
+      relationships:
+        name: "人际关系"
+        keywords: ["朋友", "家人", "同学", "同事", "聊天"]
+        weight: 0.6
+        topics: ["朋友近况", "家庭关系", "社交活动"]
+    
+    learning_params:
+      decay_days: 30
+      max_interests: 20
+      min_confidence: 0.3
+  
+  # 上下文感知配置
+  context_awareness:
+    enabled: true
+    inherit_context: true
+    context_types:
+      activity:
+        name: "活动"
+        patterns:
+          - regex: "(去|上)(课|学|学校|教室)"
+            follow_ups: ["下课了？", "学完了？"]
+          - regex: "(去|上)(班|工作)"
+            follow_ups: ["下班了吗？", "今天工作怎么样？"]
+          - regex: "(去|吃)(饭|午餐|晚餐|早饭|早餐)"
+            follow_ups: ["吃完了？", "好吃吗？"]
+          - regex: "(去|做|锻炼|跑步|健身|打球)"
+            follow_ups: ["锻炼完了？", "累吗？"]
+          - regex: "(睡|休息|午休|小憩)"
+            follow_ups: ["醒了？", "休息好了吗？"]
+      
+      plan:
+        name: "计划"
+        patterns:
+          - regex: "(要|准备|打算|计划)(去|做)"
+            follow_ups: ["事情怎么样了？", "执行了吗？"]
+          - regex: "(待会|等会|一会儿)(去|做|吃)"
+            follow_ups: ["做了吗？", "怎么样了？"]
+      
+      reminder:
+        name: "提醒"
+        patterns:
+          - regex: "(\\d+)\\s*(分钟|分|秒|小时后)(?:提醒|叫我|通知)"
+            follow_ups: ["提醒时间到了", "时间到了"]
+          - regex: "(泡面|泡|煮|做)(?:好了|完了|完成)?(?:后|)?(?:提醒|叫我|通知)"
+            follow_ups: ["泡面好了", "该吃了"]
+    
+    follow_up_params:
+      max_delay_hours: 24
+      min_delay_minutes: 30
+  
+  # 生成策略配置
+  generation_strategies:
+    inherit_strategies: true
+    strategies:
+      time_based:
+        name: "时间驱动"
+        enabled: true
+        weight: 0.3
+        priority: 1
+      context_based:
+        name: "上下文驱动"
+        enabled: true
+        weight: 0.4
+        priority: 2
+      interest_based:
+        name: "兴趣驱动"
+        enabled: true
+        weight: 0.2
+        priority: 3
+      emotion_based:
+        name: "情绪驱动"
+        enabled: true
+        weight: 0.1
+        priority: 4
+    
+    selection_params:
+      min_confidence: 0.6
+      require_multiple_signals: true
+      fallback_strategy: "time_based"
+  
+  # 消息生成配置
+  message_generation:
+    inherit_quotes: true
+    format:
+      max_length: 100
+      min_length: 2
+      style: "natural"
+    
+    validation:
+      check重复: true
+      check敏感词: true
+      max重复次数: 3
+  
+  # 失败处理配置
+  failure_handling:
+    log_errors: true
+    max_failures: 3
+    failure_cooldown: 300
+    fallback_action: "skip"
+
+  # 触发类型冷却配置（秒）
+  # 避免同类型触发在短时间内重复
+  trigger_type_cooldown:
+    context: 60      # 上下文触发后60秒内不再触发
+    emotion: 120    # 情绪触发后120秒内不再触发
+    keyword: 5     # 关键词触发后5秒内不再触发
+    time: 300       # 时间触发后5分钟内不再触发（时段内只发一次）
+    check_in: 1800  # 主动关怀后30分钟内不再触发
+    ai: 180         # AI触发后3分钟内不再触发
+
+  # === 意图持续触发 — 弥娅主动推进未完成的意图 ===
+  continuity_trigger:
+    enabled: true
+    use_ai: true
+    min_delay_seconds: 4          # 回复后最短等待时间（让用户有自然打字的时间窗口）
+    max_delay_seconds: 10         # 最长等待时间（模拟自然停顿后再补一句）
+    max_extra_turns: 1            # 最多自动推进轮数（1轮 = 追加一句话，像犹豫后的补刀）
+    cooldown_after_completion: 60  # 意图完成后冷却（秒）
+    system_prompt: |
+      【{persona}】
+      弥娅刚才对用户说：「{original_response}」
+      表达了主动意图：{context_summary}
+      当前是第 {turn_number}/{max_turns} 轮主动推进。
+      请自然地延续弥娅的意图，像真正关心对方的人一样主动推进对话或行动。
+      如果是行动型意图（弥娅想要主动做某事），请直接调用工具来完成。
+      完成后用自然语言汇报。
+      重要规则：
+      - 这是给「{original_response}」追加的补充语，不是一条独立的新消息
+      - 绝对不要重复上面那句话的开头部分
+      - 保持简短温暖，不要生硬。
+      - 如果此时确实不适合继续，回复 SKIP。
+
+  # 用户刚发送消息后的冷却（秒）
+  # 避免在用户刚说话后立即主动发言
+  user_message_cooldown: 5
+
+  # 弥娅正常回复后的冷却（秒）
+  # 避免主动聊天紧跟正常回复再插话
+  reply_cooldown: 120
+
+  # === 场景感知主动策略 ===
+  scene_awareness:
+    enabled: true
+
+    # 平台衰减乘数 (1.0 = 全概率, 0.0 = 不触发)
+    platform_multipliers:
+      terminal: 0.9
+      mobile: 0.95
+      desktop: 0.85
+      aiocqhttp_private: 1.0
+      aiocqhttp_group: 0.35
+      qqofficial_private: 0.9
+      qqofficial_group: 0.3
+      lark: 0.25
+      dingtalk: 0.20
+      discord: 0.30
+      telegram: 0.25
+      slack: 0.20
+      wecom: 0.20
+      weixin_ilink: 0.35
+      kook: 0.15
+      line: 0.15
+      misskey: 0.10
+      mattermost: 0.10
+      satori: 0.15
+      generic: 0.15
+
+    # 群聊活跃度影响
+    group_activity:
+      inactive_threshold: 300     # 5分钟无消息视为不活跃
+      active_message_window: 120   # 2分钟内的消息数判定活跃度
+      inactive_multiplier: 0.8     # 不活跃群提权
+      active_multiplier: 0.2      # 活跃群降权
+      recent_at_boost: 0.6         # 最近被@过的群大幅提权
+
+    # 混合策略
+    mixed_strategy:
+      enabled: true
+      layer1_min_probability: 0.3   # Layer1 概率低于此值直接跳过
+      layer2_ai_judge: true         # Layer2 让 AI 做最终判决
+
+  # ============================================================
+  #  平台路由配置 (v8.1: AI 感知路由)
+  # ============================================================
+  platform_routing:
+    enabled: true
+
+    # 路由模式:
+    #   "ai_aware"    — AI 综合感知: 用户活跃度 + 消息内容 + 时间 + 平台特性 → 选择最佳平台
+    #   "priority_only" — 纯配置优先级排序，选最高优先级的在线平台
+    #   "broadcast"  — 广播到所有在线平台 (兼容旧行为)
+    mode: "ai_aware"
+
+    # 平台优先级排序 (数值越高越优先)
+    # AI 感知模式下作为初始排序参考，priority_only 模式下直接选最高分
+    priority_ranking:
+      aiocqhttp_private: 100
+      mobile: 95
+      desktop: 85
+      qqofficial_private: 85
+      weixin_ilink: 75
+      aiocqhttp_group: 50
+      qqofficial_group: 40
+      lark: 30
+      dingtalk: 25
+      discord: 20
+      telegram: 20
+      slack: 15
+      wecom: 15
+      kook: 15
+      line: 15
+      misskey: 10
+      mattermost: 10
+      satori: 10
+      generic: 5
+
+    # AI 感知路由参数
+    ai_routing:
+      enabled: true
+      max_candidates: 5        # 最多给 AI 展示多个候选平台 (按优先级 top-N)
+      timeout_seconds: 3       # AI 判断超时 → 降级到 priority_only
+      cache_ttl_seconds: 30    # 同 target+trigger 的路由结果缓存时间
+
+    # 用户活跃度加权 (v8.2: 用于 _send_by_priority 优先级路由)
+    # 用户在平台上的最近活跃时间 < 阈值 → 获得对应 boost 分
+    activity_boost:
+      thresholds:
+        - seconds: 60       # 1分钟内活跃
+          boost: 80
+        - seconds: 300      # 5分钟内活跃
+          boost: 60
+        - seconds: 600      # 10分钟内活跃
+          boost: 40
+        - seconds: 1800     # 30分钟内活跃
+          boost: 20
+        - seconds: 3600     # 1小时内活跃
+          boost: 10
+      # most_active_hint 触发阈值 (秒): 用户最近活跃低于此值才注入提示
+      most_active_hint_threshold: 300

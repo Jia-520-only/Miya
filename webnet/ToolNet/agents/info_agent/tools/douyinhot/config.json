@@ -1,0 +1,18 @@
+{
+    "type": "function",
+    "function": {
+        "name": "douyinhot",
+        "description": "获取抖音热搜榜单。当用户问'抖音热搜'、'douyin热榜'、'抖音热门'时使用此工具。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "返回条数，默认为10",
+                    "default": 10
+                }
+            },
+            "required": []
+        }
+    }
+}

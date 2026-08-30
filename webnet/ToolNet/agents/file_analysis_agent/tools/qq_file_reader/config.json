@@ -1,0 +1,22 @@
+{
+    "type": "function",
+    "function": {
+        "name": "qq_file_reader",
+        "description": "读取QQ文件内容。当用户说'读文件'、'查看文件'、'分析文件'、'读取PDF'、'读取文档'时使用此工具。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_url": {
+                    "type": "string",
+                    "description": "文件URL或本地路径"
+                },
+                "max_length": {
+                    "type": "integer",
+                    "description": "最大读取字符数，默认10000",
+                    "default": 10000
+                }
+            },
+            "required": ["file_url"]
+        }
+    }
+}

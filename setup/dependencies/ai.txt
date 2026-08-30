@@ -1,0 +1,28 @@
+# Miya - AI Model Dependencies
+# Install: pip install -r setup/dependencies/ai.txt
+
+# OpenAI Compatible API
+openai>=1.3.0,<2.0.0
+tiktoken>=0.5.0
+
+# Other AI Providers
+anthropic>=0.7.0,<1.0.0
+zhipuai>=2.0.0
+google-genai>=1.0.0,<2.0.0
+dashscope>=1.20.0
+
+# Local Embedding Models
+sentence-transformers>=2.2.0,<3.0.0
+# The base build runs without AVX2; check setup/scripts/check_faiss_avx2.py after installation.
+faiss-cpu>=1.7.0
+rank-bm25>=0.2.0
+
+# Deep Learning Framework
+torch>=2.0.0,<3.0.0
+transformers>=4.30.0,<5.0.0
+
+# GPU Support (optional)
+# Install PyTorch with CUDA manually based on your CUDA version:
+# CUDA 11.8: pip install torch --index-url https://download.pytorch.org/whl/cu118
+# CUDA 12.1: pip install torch --index-url https://download.pytorch.org/whl/cu121
+# CUDA 12.4: pip install torch --index-url https://download.pytorch.org/whl/cu124

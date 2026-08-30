@@ -1,0 +1,31 @@
+{
+  "name": "code_reviewer",
+  "description": "代码审查Agent - 代码质量审查、bug检测、错误处理检查",
+  "version": "1.0.0",
+  "capabilities": [
+    "code_review",
+    "bug_detection",
+    "error_checking",
+    "quality_analysis",
+    "security_scan"
+  ],
+  "function": {
+    "name": "code_reviewer",
+    "description": "审查代码质量，检测bug和潜在问题",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": ["review", "find_bugs", "check_errors", "analyze_quality", "security_scan"],
+          "description": "执行的操作类型"
+        },
+        "target": {
+          "type": "string",
+          "description": "目标文件或目录"
+        }
+      },
+      "required": ["action", "target"]
+    }
+  }
+}

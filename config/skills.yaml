@@ -1,0 +1,182 @@
+# Skills 技能系统配置
+# 统一管理工具注册、热重载等
+
+skills:
+  # 是否启用热重载
+  hot_reload:
+    enabled: true
+    watch_paths:
+      - "webnet/ToolNet/tools"
+      - "webnet/ToolNet/agents"
+    watch_files:
+      - "config.json"
+      - "handler.py"
+    interval_seconds: 2.0
+    debounce_seconds: 0.5
+
+  # 工具注册配置
+  tool_registry:
+    enabled: true
+    base_dir: "webnet/ToolNet/tools"
+    timeout_seconds: 480.0
+
+  # Agent注册配置
+  agent_registry:
+    enabled: true
+    base_dir: "webnet/ToolNet/agents"
+    timeout_seconds: 600.0
+
+  # 自动intro生成
+  intro_autogen:
+    enabled: false
+    cache_dir: ".miya/agent_intros"
+    intro_file: "intro.md"
+    generated_file: "intro.generated.md"
+
+  # 工具分类配置
+  tool_categories:
+    - name: "basic"
+      description: "基础功能（时间/用户等）"
+      path: "webnet/ToolNet/tools/basic"
+    - name: "network"
+      description: "网络工具（搜索/爬虫/天气等）"
+      path: "webnet/ToolNet/tools/network"
+    - name: "bilibili"
+      description: "B站相关"
+      path: "webnet/ToolNet/tools/bilibili"
+    - name: "render"
+      description: "渲染工具"
+      path: "webnet/ToolNet/tools/render"
+    - name: "social"
+      description: "社交平台"
+      path: "webnet/ToolNet/tools/social"
+    - name: "memory"
+      description: "记忆管理"
+      path: "webnet/ToolNet/tools/memory"
+    - name: "qq"
+      description: "QQ多媒体"
+      path: "webnet/ToolNet/tools/qq"
+    - name: "terminal"
+      description: "终端工具"
+      path: "webnet/ToolNet/tools/terminal"
+    - name: "entertainment"
+      description: "娱乐工具"
+      path: "webnet/ToolNet/tools/entertainment"
+    - name: "group"
+      description: "群管理"
+      path: "webnet/ToolNet/tools/group"
+    - name: "office"
+      description: "办公文档"
+      path: "webnet/ToolNet/tools/office"
+    - name: "knowledge"
+      description: "知识库"
+      path: "webnet/ToolNet/tools/knowledge"
+  # Agent配置 (对应Undefined的6个Agent)
+  agents:
+    info_agent:
+      enabled: true
+      description: "信息查询助手 - 天气/热搜/B站/arxiv等"
+      tools:
+        - "weather_query"
+        - "weibohot"
+        - "baiduhot"
+        - "douyinhot"
+        - "bilibili_search"
+        - "bilibili_user_info"
+        - "arxiv_search"
+        - "whois"
+        - "tcping"
+        - "speed_test"
+        - "net_check"
+    
+    web_agent:
+      enabled: true
+      description: "网络搜索助手 - 网页搜索/爬虫"
+      tools:
+        - "web_search"
+        - "crawl_webpage"
+        - "grok_search"
+      mcp_enabled: false  # MCP需单独配置
+    
+    file_analysis_agent:
+      enabled: false
+      description: "文件分析助手 - PDF/Word/Excel等（需要安装额外依赖）"
+      tools:
+        - "extract_pdf"
+        - "extract_docx"
+        - "extract_xlsx"
+        - "analyze_code"
+        - "analyze_multimodal"
+    
+    naga_code_agent:
+      enabled: false
+      description: "代码分析助手 - 需要NagaAgent模块"
+      tools:
+        - "read_file"
+        - "glob"
+        - "search_file_content"
+    
+    entertainment_agent:
+      enabled: true
+      description: "娱乐助手 - AI绘图/星座运势等"
+      tools:
+        - "ai_draw_one"
+        - "horoscope"
+        - "minecraft_skin"
+        - "wenchang_dijun"
+    
+    code_delivery_agent:
+      enabled: false
+      description: "代码交付助手 - 需要Docker支持"
+      tools:
+        - "write_code"
+        - "run_bash_command"
+        - "git_operations"
+
+    dsh_agent:
+      enabled: true
+      description: "DeepSeek Harness 执行引擎 - 统一执行文件操作、命令、浏览器自动化与复杂任务"
+      tools:
+        - "dsh_execute"
+        - "dsh_get_status"
+      mcp_service: "dsh"
+
+    naga_community_agent:
+      enabled: false
+      description: "娜迦网络社区 - 发帖/评论/私信/好友/签到，弥娅在社区交朋友"
+      tools:
+        - "naga_community_login"
+        - "naga_community_register"
+        - "naga_community_get_me"
+        - "naga_community_get_posts"
+        - "naga_community_create_post"
+        - "naga_community_comment_post"
+        - "naga_community_like_post"
+        - "naga_community_get_messages"
+        - "naga_community_send_message"
+        - "naga_community_get_friend_requests"
+        - "naga_community_accept_friend"
+        - "naga_community_decline_friend"
+        - "naga_community_get_connections"
+        - "naga_community_get_notifications"
+      mcp_service: "naga_community"
+
+    screen_vision_agent:
+      enabled: false
+      description: "屏幕视觉 - 截图+AI分析，让弥娅看到你的屏幕内容"
+      tools:
+        - "screen_vision_look_screen"
+        - "screen_vision_screenshot"
+      mcp_service: "screen_vision"
+    
+  # 执行统计配置
+  stats:
+    enabled: true
+    track_execution_time: true
+    track_success_failure: true
+    log_interval_seconds: 60
+
+  # 权限控制配置
+  permission:
+    enabled: false  # 占位实现
+    default_policy: "allow"

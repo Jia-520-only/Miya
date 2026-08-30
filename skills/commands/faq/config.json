@@ -1,0 +1,24 @@
+{
+    "name": "faq",
+    "description": "查看/搜索本地FAQ，节省Token",
+    "permission": "public",
+    "allow_in_private": true,
+    "rate_limit": {"user": 5, "admin": 2, "superadmin": 0},
+    "show_in_help": true,
+    "order": 30,
+    "aliases": ["f", "常见问题"],
+    "subcommands": {
+        "ls": {"description": "列出FAQ条目"},
+        "view": {"description": "查看FAQ详情", "args": "<ID>"},
+        "search": {"description": "搜索FAQ", "args": "<关键词>"},
+        "add": {"description": "添加FAQ（管理员）", "permission": "admin", "args": "<问题> | <回答>"},
+        "del": {"description": "删除FAQ（管理员）", "permission": "admin", "args": "<ID>"}
+    },
+    "inference": {
+        "default": "ls",
+        "rules": [
+            {"pattern": "^\\d{8}-\\d{3}$", "subcommand": "view"}
+        ],
+        "fallback": "search"
+    }
+}

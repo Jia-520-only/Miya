@@ -1,0 +1,42 @@
+{
+    "name": "miya_mineradio",
+    "displayName": "Miya Mineradio Control",
+    "description": "Full control of Mineradio music player via MCP/WebSocket",
+    "agentType": "mcp",
+    "entryPoint": {
+        "module": "mcpserver.miya_mineradio.service",
+        "class": "MiyaMineradioService"
+    },
+    "capabilities": {
+        "tools": [
+            {"name": "mineradio_get_status", "description": "Get current playback status"},
+            {"name": "mineradio_play", "description": "Play/resume"},
+            {"name": "mineradio_pause", "description": "Pause"},
+            {"name": "mineradio_toggle_play", "description": "Toggle play/pause"},
+            {"name": "mineradio_next", "description": "Next track"},
+            {"name": "mineradio_prev", "description": "Previous track"},
+            {"name": "mineradio_seek", "description": "Seek to position", "parameters": {"position": "number"}},
+            {"name": "mineradio_set_volume", "description": "Set volume 0-100", "parameters": {"value": "integer"}},
+            {"name": "mineradio_toggle_mute", "description": "Toggle mute"},
+            {"name": "mineradio_search", "description": "Search songs via Mineradio", "parameters": {"query": "string", "limit": "integer", "source": "string"}},
+            {"name": "mineradio_play_song", "description": "Play a song by ID or title", "parameters": {"song_id": "string", "title": "string", "source": "string"}},
+            {"name": "mineradio_add_to_queue", "description": "Add song to queue", "parameters": {"title": "string", "source": "string"}},
+            {"name": "mineradio_clear_queue", "description": "Clear queue"},
+            {"name": "mineradio_get_queue", "description": "Get queue status"},
+            {"name": "mineradio_get_playlists", "description": "Get user playlists"},
+            {"name": "mineradio_get_playlist_tracks", "description": "Get tracks in a playlist", "parameters": {"playlist_id": "string", "source": "string"}},
+            {"name": "mineradio_play_list", "description": "Play entire playlist", "parameters": {"playlist_id": "string", "source": "string"}},
+            {"name": "mineradio_get_lyrics", "description": "Get lyrics"},
+            {"name": "mineradio_set_mode", "description": "Set play mode", "parameters": {"mode": "string"}},
+            {"name": "mineradio_like_song", "description": "Like current song"},
+            {"name": "mineradio_unlike_song", "description": "Unlike current song"},
+            {"name": "mineradio_create_playlist", "description": "Create new playlist", "parameters": {"name": "string"}},
+            {"name": "mineradio_shuffle_queue", "description": "Shuffle queue"},
+            {"name": "mineradio_remove_from_queue", "description": "Remove song from queue", "parameters": {"index": "integer"}},
+            {"name": "mineradio_launch", "description": "Launch Mineradio remotely"},
+            {"name": "mineradio_health", "description": "Connection health check"}
+        ]
+    },
+    "version": "1.0.0",
+    "enabled": true
+}

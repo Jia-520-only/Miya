@@ -1,0 +1,10 @@
+{
+    "name": "summary",
+    "description": "总结最近的聊天记录",
+    "permission": "public",
+    "allow_in_private": false,
+    "rate_limit": {"user": 120, "admin": 30, "superadmin": 0},
+    "show_in_help": true,
+    "order": 21,
+    "aliases": ["sum", "总结"]
+}

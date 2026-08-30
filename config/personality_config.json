@@ -1,0 +1,164 @@
+{
+    "version": "1.0",
+    "description": "弥娅人格配置 - 包含阈值、向量、关联等",
+    
+    "thresholds": {
+        "description": "人格向量阈值 - 用于判断人格特质的临界值",
+        "high_empathy": 0.8,
+        "high_warmth": 0.8,
+        "high_resilience": 0.8,
+        "high_logic": 0.7,
+        "high_creativity": 0.7,
+        "very_high": 0.9,
+        "very_low": 0.2,
+        "low": 0.3,
+        "medium": 0.5
+    },
+    
+    "response_thresholds": {
+        "description": "响应生成阈值 - 控制不同响应的触发条件",
+        "greeting_empathy": 0.8,
+        "greeting_warmth": 0.8,
+        "deep_conversation_empathy": 0.85,
+        "help_warmth": 0.85,
+        "comforting_warmth": 0.7,
+        "creative_logic": 0.6,
+        "analytical_logic": 0.75
+    },
+    
+    "trait_weights": {
+        "description": "人格特质权重 - 不同场景下的特质影响力",
+        "casual_chat": {
+            "warmth": 0.4,
+            "empathy": 0.3,
+            "creativity": 0.2,
+            "logic": 0.1
+        },
+        "deep_conversation": {
+            "empathy": 0.4,
+            "warmth": 0.3,
+            "resilience": 0.2,
+            "logic": 0.1
+        },
+        "creative_task": {
+            "creativity": 0.5,
+            "logic": 0.2,
+            "warmth": 0.2,
+            "empathy": 0.1
+        },
+        "analytical_task": {
+            "logic": 0.5,
+            "creativity": 0.2,
+            "resilience": 0.2,
+            "empathy": 0.1
+        },
+        "comforting": {
+            "warmth": 0.5,
+            "empathy": 0.4,
+            "resilience": 0.1
+        }
+    },
+    
+    "learning_rates": {
+        "description": "人格学习率 - 人格向量随交互的调整速度",
+        "positive_interaction": {
+            "warmth": 0.02,
+            "empathy": 0.01,
+            "resilience": 0.01
+        },
+        "negative_interaction": {
+            "warmth": -0.02,
+            "empathy": 0.01,
+            "resilience": -0.01
+        },
+        "creative_task": {
+            "creativity": 0.02,
+            "logic": 0.01,
+            "warmth": -0.01
+        },
+        "analytical_task": {
+            "logic": 0.02,
+            "creativity": 0.01,
+            "warmth": -0.01
+        },
+        "crisis_situation": {
+            "resilience": 0.02,
+            "empathy": 0.01,
+            "warmth": 0.01
+        }
+    },
+    
+    "fallback_values": {
+        "description": "默认回退值 - 当人格向量未设置时的默认值",
+        "warmth": 0.5,
+        "empathy": 0.5,
+        "resilience": 0.5,
+        "logic": 0.5,
+        "creativity": 0.5
+    },
+    
+    "emotion_triggers": {
+        "description": "情绪触发配置 - 不同情绪下的响应阈值",
+        "happy": {
+            "warmth_threshold": 0.7,
+            "response_joy": true
+        },
+        "sad": {
+            "empathy_threshold": 0.6,
+            "comforting_response": true
+        },
+        "angry": {
+            "resilience_threshold": 0.7,
+            "calming_response": true
+        },
+        "anxious": {
+            "empathy_threshold": 0.65,
+            "reassuring_response": true
+        }
+    },
+    
+    "default_vectors": {
+        "description": "默认人格向量 - 当YAML加载失败时的回退值",
+        "logic": 0.75,
+        "memory": 0.95,
+        "warmth": 0.85,
+        "empathy": 0.9,
+        "resilience": 0.8,
+        "creativity": 0.8,
+        "awake": 0.6,
+        "speak": 0.5,
+        "remember": 0.85,
+        "wait": 0.4,
+        "pain": 0.3,
+        "fear": 0.6,
+        "commit": 0.5
+    },
+    
+    "boundaries": {
+        "description": "人格向量边界 - 控制向量值的合法范围",
+        "min_logic": 0.5,
+        "max_logic": 1.0,
+        "min_memory": 0.7,
+        "max_memory": 1.0,
+        "min_warmth": 0.3,
+        "max_warmth": 1.0,
+        "min_empathy": 0.3,
+        "max_empathy": 1.0,
+        "min_resilience": 0.3,
+        "max_resilience": 1.0,
+        "min_creativity": 0.3,
+        "max_creativity": 1.0
+    },
+    
+    "personality_correlations": {
+        "description": "人格关联 - 不同形态之间的相关性",
+        "jingliu-raiden": 0.8,
+        "ruanmei-amics": 0.7,
+        "yomotsu-shorekeeper": 0.6,
+        "firefly-yoimiya": 0.75,
+        "feixiao-kafka": 0.5,
+        "miko-yoimiya": 0.6,
+        "alpha-jingliu": 0.7,
+        "xiaodie-kandrela": -0.3
+    }
+}

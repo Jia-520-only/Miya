@@ -1,0 +1,39 @@
+# Miya - All Production Dependencies
+# Complete production dependency list (no dev tools)
+# Install: pip install -r setup/requirements/full.txt
+
+# Core
+-r ../dependencies/base.txt
+
+# AI Models
+-r ../dependencies/ai.txt
+
+# Database
+-r ../dependencies/database.txt
+
+# Document Processing
+-r ../dependencies/office.txt
+
+# Network & Communication
+-r ../dependencies/network.txt
+
+# TTS (Text-to-Speech)
+-r ../dependencies/tts.txt
+
+# Data Visualization
+-r ../dependencies/viz.txt
+
+# QQ Platform Extras
+-r ../dependencies/qq_extras.txt
+
+# Multi-Platform Adapters
+-r ../dependencies/platform_adapters.txt
+
+# Observability
+-r ../dependencies/observability.txt
+
+# Windows Platform Extras
+-r ../dependencies/win32.txt
+
+# Task Scheduling
+apscheduler>=3.10.0

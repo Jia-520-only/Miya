@@ -1,0 +1,16 @@
+# Miya - Desktop Application Dependencies
+# Suitable for desktop UI application users
+# Install: pip install -r setup/requirements/desktop.txt
+
+# Core + AI
+-r lightweight.txt
+
+# Local persistence and document features
+-r ../dependencies/database.txt
+-r ../dependencies/office.txt
+
+# Desktop media and visualization
+-r ../dependencies/tts.txt
+-r ../dependencies/viz.txt
+-r ../dependencies/qq_extras.txt
+-r ../dependencies/win32.txt

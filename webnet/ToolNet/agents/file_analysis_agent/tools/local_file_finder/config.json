@@ -1,0 +1,26 @@
+{
+    "type": "function",
+    "function": {
+        "name": "local_file_finder",
+        "description": "在本地电脑搜索文件。当用户说'找不到文件'、'帮我找文件'、'文件在哪'时使用此工具。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_name": {
+                    "type": "string",
+                    "description": "要搜索的文件名（部分名称即可）"
+                },
+                "search_path": {
+                    "type": "string",
+                    "description": "搜索路径（可选，默认搜索用户目录）"
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "最大返回结果数，默认10",
+                    "default": 10
+                }
+            },
+            "required": ["file_name"]
+        }
+    }
+}

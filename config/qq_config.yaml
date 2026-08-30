@@ -1,0 +1,525 @@
+# ============================================================
+# 弥娅 MIYA - QQ 机器人统一配置
+# 版本: 3.0.0
+# 说明: 整合所有 QQ 相关配置到一个文件
+# ============================================================
+
+qq:
+  # ===== 基础连接配置 =====
+  # 注意: ws_url / token / bot_qq / superadmin_qq 从 config/.env 读取
+  # 此处仅保留连接行为参数
+  connection:
+    reconnect_interval: 5.0               # 重连间隔（秒）
+    ping_interval: 20                     # 心跳间隔（秒）
+    ping_timeout: 30                      # 心跳超时（秒）
+    max_message_size: 0                     # 0=无限制
+
+  # ===== 访问控制 =====
+  access_control:
+    enabled: false                        # 是否启用访问控制
+    group_whitelist: []                   # 群白名单（空表示允许所有群）
+    group_blacklist: []                   # 群黑名单
+    user_whitelist: []                    # 用户白名单（空表示允许所有用户）
+    user_blacklist: []                    # 用户黑名单
+
+  # ===== 多媒体处理 =====
+  multimedia:
+    # 图片处理
+    image:
+      max_size: 0                           # 0=无限制
+      allowed_formats: [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]
+      auto_resize: true
+      max_width: 1920
+      max_height: 1080
+      quality: 85                         # JPEG 质量（0-100）
+
+    # 文件处理
+    file:
+      max_size: 0                           # 0=无限制
+      allowed_types:
+        - txt
+        - pdf
+        - doc
+        - docx
+        - xls
+        - xlsx
+        - ppt
+        - pptx
+        - md
+        - json
+        - xml
+        - html
+        - csv
+        - yml
+        - yaml
+        - py
+        - js
+        - ts
+        - java
+        - cpp
+        - c
+        - go
+        - rs
+        - php
+        - rb
+        - sh
+        - log
+
+    # 语音处理
+    voice:
+      enabled: false                      # 是否启用语音消息处理
+      stt_enabled: false                  # 语音转文字（需要额外 API）
+
+    # 上传设置
+    upload:
+      temp_dir: "./temp/uploads"          # 临时上传目录
+      cleanup_hours: 24                   # 清理时间（小时）
+      keep_original: false                # 是否保留原始文件
+
+  # ===== 图片识别配置 =====
+  image_recognition:
+    # OCR 设置（已禁用，仅使用视觉模型）
+    ocr:
+      enabled: false
+      engine: "none"
+      languages: []
+      confidence_threshold: 0.0
+
+    # AI 图片分析（使用 Kimi K2.6 原生多模态模型）
+    ai_analysis:
+      enabled: true
+      model: "zhipu_glm_46v_flash"
+      timeout: 30                         # 最大分析时间（秒）
+      cost_threshold: 0.0                 # 成本阈值（免费模型）
+      provider: ""                        # baidu, tencent, openai
+      api_key: ""
+      api_secret: ""
+
+    # 跨平台统一图片识别（Telegram/Discord/QQ官方/微信/飞书等非 OneBot 平台共用）
+    cross_platform:
+      enabled: true                       # 全局开关（关闭后所有非 OneBot 平台不做 AI 视觉分析）
+      timeout: 30                         # 视觉分析超时（秒）
+      max_images: 2                       # 单条消息最多分析的图片数
+      platforms:                          # 按平台开关（未列出的平台取 default）
+        default: true
+        telegram: true
+        discord: true
+        qqofficial: true
+        wechat: true
+        weixin_ilink: true
+        lark: true
+        dingtalk: true
+        kook: true
+        line: true
+        slack: true
+        webhook: true
+
+    # 安全检测
+    safety:
+      enabled: true
+      nsfw_detection: true
+      max_skin_ratio: 0.3                 # 最大肤色比例
+
+    # 缓存设置
+    cache:
+      enabled: true
+      dir: "./temp/image_cache"
+      max_size: 1073741824                # 1GB
+      expire_hours: 24
+
+  # ===== 消息解析配置 =====
+  message_parsing:
+    enable_reply_parsing: true            # 是否启用引用消息解析
+    enable_file_parsing: true             # 是否启用文件消息解析
+    enable_media_detection: true          # 是否启用多媒体检测
+    show_placeholder_in_text: true        # 是否在文本中显示引用/文件占位符
+
+  # ===== 合并转发配置 =====
+  forward:
+    enable_parsing: true                  # 是否启用合并转发解析
+    max_expand_depth: 3                   # 最大展开层数
+
+  # ===== 功能开关 =====
+  features:
+    poke_reply: true                      # 戳一戳回复
+    emoji_request: true                   # 表情包请求
+    welcome_new_member: false             # 欢迎新成员
+    scheduled_tasks: true                 # 定时任务
+    passive_chat: true                    # 被动聊天（关键词触发）
+    passive_chat_keyword_only: true      # 仅关键词触发回复（关闭激活后的活跃窗口持续回复）
+    active_chat: true                     # 主动聊天
+
+  # ===== 命令配置 =====
+  commands:
+    prefix: "/"                           # 命令前缀
+    # 注意：命令关键词已移至 text_config.json 的 command_keywords
+    # 注意：错误消息已移至 text_config.json 的 error_messages
+
+  # ===== 任务调度 =====
+  task_scheduler:
+    enabled: true
+    database:
+      path: "./data/tasks.db"             # SQLite 数据库路径
+      backup_dir: "./data/backups"
+      backup_interval: 86400              # 备份间隔（秒）
+    execution:
+      max_concurrent: 5                   # 最大并发任务数
+      timeout: 300                        # 任务超时时间（秒）
+      retry_delay_base: 60                # 重试基础延迟（秒）
+      max_retry_delay: 3600               # 最大重试延迟（秒）
+    monitoring:
+      log_level: "INFO"
+      keep_history_days: 30               # 保留历史天数
+      alert_on_failure: true              # 失败时告警
+    statistics:
+      collect_stats: true
+      stats_interval: 3600                # 统计收集间隔（秒）
+
+  # ===== 消息汇总窗口期配置 =====
+  # 用于群聊中消息密集时，收集一段时间内的消息再统一回复
+  message_batching:
+    enabled: true                         # 是否启用消息汇总窗口
+    window_seconds: 5                     # 窗口期时长（秒），收到新消息会重置计时
+    max_window_seconds: 10                # 最大窗口期（防止无限等待）
+    max_messages: 15                      # 窗口期内最大消息数量，超过则立即处理
+    only_group: false                     # 是否仅对群聊生效（false时私聊也参与消息汇总）
+    cooldown_seconds: 3                   # 两条消息间隔小于此时长才触发窗口期
+    status_message: ""                    # 窗口期内的状态提示（留空则不发送）
+
+  # ===== 消息队列配置 =====
+  # 6车道优先级队列：superadmin/群超级管理员/私聊/群@/群普通/后台
+  message_queue:
+    enabled: true                         # 是否启用消息队列
+    default_interval: 1.0                # 默认发车间隔（秒），越小越快响应
+    # 各模型独立发车间隔（可选）
+    model_intervals:
+      default: 1.0
+      # deepseek_v3: 0.5                  # deepseek模型可以设置更快
+      # glm_4: 1.0                        # glm模型按默认
+
+  # ===== 性能优化 =====
+  performance:
+    cache:
+      message_history: 100                # 消息历史缓存条数
+      user_info: 1000                     # 用户信息缓存数
+      group_info: 100                     # 群信息缓存数
+    thread_pool:
+      max_workers: 10                     # 最大工作线程数
+      thread_timeout: 30                  # 线程超时时间（秒）
+    max_event_tasks: 100                  # OneBot 事件后台任务数上限（超过则丢弃新群消息）
+    memory:
+      max_image_cache: 1073741824         # 图片缓存最大内存（1GB）
+      cleanup_interval: 3600              # 内存清理间隔（秒）
+
+  # ===== 日志配置 =====
+  logging:
+    level: "INFO"
+    file: "./logs/qq.log"
+    max_size: 10485760                    # 10MB
+    backup_count: 5
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    log_message_detail: false             # 是否记录消息详情
+    debug: false                          # 是否记录调试信息
+    retention_days: 7                     # 日志保留天数
+
+    # 组件日志级别
+    components:
+      client: "INFO"
+      message_handler: "INFO"
+      image_handler: "INFO"
+      file_handler: "INFO"
+      active_chat: "INFO"
+      task_scheduler: "INFO"
+
+  # ===== 调试设置 =====
+  debug:
+    enabled: false
+    log_raw_messages: false               # 记录原始消息
+    log_api_calls: false                  # 记录 API 调用
+    log_file_operations: false            # 记录文件操作
+    test_mode: false
+    mock_apis: false                      # 模拟 API 调用
+    simulate_errors: false                # 模拟错误
+
+# ===== 工具配置 =====
+tools:
+  qq_emoji:
+    enabled: true
+    standard_emojis: true                 # 启用标准表情
+    custom_emojis: true                   # 启用自定义表情
+    emoji_dir: "./data/emoji"             # 表情包目录
+
+  qq_file_reader:
+    enabled: true
+    max_preview_length: 2000              # 最大预览长度
+    auto_detect_encoding: true
+    supported_formats:
+      - ".txt"
+      - ".log"
+      - ".md"
+      - ".pdf"
+      - ".doc"
+      - ".docx"
+      - ".json"
+      - ".xml"
+      - ".html"
+      - ".py"
+      - ".js"
+      - ".ts"
+      - ".java"
+    ocr:
+      enabled: false                      # 禁用 OCR
+      timeout: 0                          # OCR 超时时间（秒）
+      languages: []                       # 不支持任何语言
+
+  qq_image_analyzer:
+    enabled: true
+    ocr_engine: "none"                    # 不使用 OCR 引擎
+    vision_engine: "zhipu_glm_46v_flash"  # 使用智谱视觉模型
+    detail_level: "detailed"              # detailed, basic
+    nsfw_check: false
+    ai_description:
+      enabled: false
+      provider: ""
+      api_key: ""
+
+  qq_active_chat:
+    enabled: true
+    allow_setup: true
+    allow_trigger_now: true
+    max_scheduled_tasks: 100              # 最大预定任务数
+    schedule_formats:
+      - "HH:MM"                           # 每天固定时间
+      - "YYYY-MM-DD HH:MM"               # 具体日期时间
+      - "daily HH:MM"                     # 每天
+      - "weekly DAY HH:MM"               # 每周
+      - "in N minutes/hours/days"        # 相对时间
+
+  task_scheduler_enhanced:
+    enabled: true
+    db_path: "./data/tasks.db"
+    auto_start: true                      # 自动启动
+    auto_recover: true                    # 自动恢复任务
+    max_retries: 3                        # 最大重试次数
+    retry_backoff: "exponential"          # 重试退避策略
+    alerts:
+      enabled: true
+      failure_threshold: 5                # 失败阈值
+      alert_interval: 3600                # 告警间隔（秒）
+
+# ===== 插件配置 =====
+plugins:
+  ocr:
+    paddleocr:
+      enabled: false                      # 禁用 PaddleOCR
+      use_gpu: false
+      lang: "none"                        # 不使用任何语言
+    tesseract:
+      enabled: false                      # 禁用 Tesseract
+      data_path: ""
+      languages: []
+
+  image_processing:
+    pillow:
+      enabled: true
+      max_image_pixels: 89478485          # 最大像素数
+    opencv:
+      enabled: false                      # 需要额外安装
+
+  file_processing:
+    chardet:
+      enabled: true                       # 编码检测
+    pypdf2:
+      enabled: true                       # PDF 处理
+    python_docx:
+      enabled: true                       # Word 文档处理
+
+# ===== 兼容性配置 =====
+compatibility:
+  onebot:
+    implementations:                      # 支持的 OneBot 实现
+      - "go-cqhttp"
+      - "mirai"
+      - "nonebot"
+      - "custom"
+    check_apis: true                      # API 兼容性检查
+    fallback_methods: true                # 启用备选方法
+    message_formats:
+      support_array: true                 # 支持数组格式
+      support_string: true                # 支持字符串格式
+      auto_detect: true                   # 自动检测
+  legacy:
+    old_qq_py: false                      # 兼容旧的 qq.py
+    import_aliases: true                  # 导入别名
+
+# ===== 知识库配置 =====
+knowledge_base:
+  enabled: true
+  default_category: "通用"
+  collection_name: "knowledge_base"
+  embedding:
+    model_default: "text-embedding-3-small"
+    max_text_length: 8000
+  chroma:
+    max_doc_length: 4000
+    hnsw_space: "cosine"
+  storage:
+    data_dir: "./data/knowledge"
+    index_file: "index.json"
+
+# ===== 内容自动检测管线配置 =====
+pipelines:
+  enabled: true
+  detectors:
+    bilibili:
+      enabled: true
+      priority: 10
+      description: "B站视频链接检测"
+    arxiv:
+      enabled: true
+      priority: 8
+      description: "arXiv 论文链接检测"
+    github:
+      enabled: true
+      priority: 5
+      description: "GitHub 仓库链接检测"
+
+# ===== GitHub API 配置 =====
+github:
+  api_url: "https://api.github.com"
+  user_agent: "Miya-Bot/1.0"
+  timeout: 15
+
+# ===== 认知侧写配置 =====
+cognitive:
+  enabled: true
+  storage:
+    data_dir: "./data/cognitive"
+    revision_keep: 5
+    max_observations: 100
+
+# ===== 文件分析配置 =====
+file_analysis:
+  enabled: true
+  limits:
+    max_pdf_pages: 30
+    max_text_lines: 200
+    max_content_length: 8000
+    max_archive_files: 50
+    max_ppt_slides: 20
+    max_xlsx_rows: 30
+    max_xlsx_sheets: 5
+
+# ===== 网络搜索配置 =====
+web_search:
+  timeout: 10
+  crawl_timeout: 30
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  # HTTP 代理（可选）。部分站点（nhentai/konachan/yande.re 等）需走代理，填本地代理地址即可
+  # 例: proxy: "http://127.0.0.1:7890"
+  proxy: ""
+  # 智能查询扩展（resource_find / 主动搜索共用）
+  query_expansion:
+    enabled: true
+    max_queries: 4          # 每次搜索最多生成几组增强查询
+    bilingual: true         # 是否生成中英混合查询
+  # 搜索结果缓存（TTL 内存缓存，节省引擎配额）
+  result_cache:
+    enabled: true
+    ttl_seconds: 1800
+    max_entries: 256
+  # 结果排序权重
+  ranking:
+    title_match_weight: 3
+    snippet_match_weight: 1
+    url_match_weight: 1.5
+    authority_bonus: 2       # .gov/.edu 等权威域名加分
+    official_domain_bonus: 1 # github/docs/download/store 等官方域名加分
+  # 特殊站点（资源猎手）
+  special_sites:
+    nhentai: true            # 本子库搜索
+    konachan: true           # moe-booru 图板（含 NSFW）
+    safebooru: true          # SFW 图板
+    pornhub: true            # Pornhub 视频搜索（需代理）
+  # Sci-Hub 镜像解析（默认关闭；开启后论文搜索可附带 Sci-Hub 链接）
+  scihub:
+    enabled: false
+    mirrors:
+      - "https://sci-hub.se"
+      - "https://sci-hub.st"
+      - "https://sci-hub.ru"
+
+# ===== 下载管理配置（限制参数） =====
+download_manager:
+  timeout_seconds: 600
+  max_retries: 2
+
+# ===== 地球online 配置（弥娅与现实生活的游戏化系统） =====
+earth_online:
+  enabled: true                    # 功能总开关
+  database_path: "data/earthonline.db"
+  image_dir: "data/earthonline/images"
+  initial_currency: 100            # 初始地球币
+  level_exp_base: 100              # 每级所需基础经验: level * base
+  attrs:
+    energy_regen_per_hour: 4       # 体力(energy)每小时自然恢复点数, 0=关闭 (v17)
+  affinity_max: 100                # 好感度上限
+  affinity_min: 0                  # 好感度下限
+  affinity_step_limit: 20          # 单次好感度变动上限
+  quests:
+    default_reward_currency: 10    # 弥娅默认任务奖励（地球币）
+    default_reward_exp: 15         # 弥娅默认任务奖励（经验）
+    daily_penalty_currency: 20     # 默认鸽日常任务惩罚
+    must_penalty_currency: 50      # 必须任务失败惩罚（较高，体现重要性）
+    overdue_check_enabled: true    # 是否启用逾期自动失败检查
+  daily:
+    auto_generate: true            # 弥娅是否每日自动生成日常任务
+    daily_quest_count: 3           # 每日生成的日常任务数量
+  care:                            # v17.2 关怀委托引擎 (弥娅后台巡检时主动用委托介入生活: 喝水/吃饭/睡觉/休息)
+    enabled: true
+    max_per_day: 6                 # 每天最多自动关怀委托数
+    cooldown_hours: 2              # 同类关怀委托冷却 (小时)
+    fallback_to_templates: true    # v17.3 弥娅沉默时用固定模板兜底 (false = 只用她现场创作的)
+  items:
+    max_items: 500                 # 背包物品数量上限
+    max_image_size_mb: 10          # 物品图片大小上限 (MB)
+  achievements:
+    enabled: true                  # 成就系统开关
+  checkin:
+    enabled: true                  # 每日签到开关
+    base_currency: 10              # 签到基础地球币
+    base_exp: 20                   # 签到基础经验
+    streak_bonus: 2                # 每连签一天额外地球币
+    streak_cap: 20                 # 连签地球币加成上限
+  miya_notes:
+    enabled: true                  # 弥娅寄语开关
+    max_pinned: 3                  # 置顶寄语数量上限
+  level_up:
+    enabled: true                  # 升级礼包开关
+    base_currency: 100             # 每次升级基础地球币
+    currency_growth: 20            # 每升一级礼包递增地球币
+  story_link:
+    enabled: true                  # 剧情串联开关 (任务完成/失败自动记录剧情)
+  collect:
+    badge_target: 3                # 图鉴分类徽章门槛 (每类物品件数)
+  miya_reactions:
+    enabled: true                  # 弥娅自动反应开关 (关键事件自动留言)
+  currency_exchange:
+    enabled: true                  # 现实资产币种显示开关
+    usd_per_cny: 0.14              # 1 元人民币 = 0.14 美元 (地球币/现实资产单位: 人民币元)
+  real_world:
+    enabled: true                  # 现实数据连接总开关
+    city: ""                       # 手动设置城市；不填写时不会请求天气
+    latitude: null                  # 仅在 allow_precise_location=true 时使用
+    longitude: null
+    allow_precise_location: false  # 默认不保存精确位置
+    weather_provider: "seniverse"  # 使用项目已有心知天气接口
+    refresh_minutes: 30             # 天气快照有效期
+    fallback_mode: "unavailable"   # API 失败时明确显示未同步，不生成模拟天气
+  autonomous:                      # 弥娅自主运营 (策划+系统小精灵, 无需玩家命令)
+    enabled: true                  # 总开关: 注册到脊柱的自主运营器官
+    interval_minutes: 45           # 常规巡检间隔 (分钟)
+    morning_hour: 8                # 每日晨间大巡检触发小时 (0-23, 每日仪式)
+    max_actions_per_cycle: 6       # 每周期最多写操作数 (防刷屏)
+    notify_player: true            # 允许弥娅把运营结果主动发给玩家
+    quiet_hours: [0, 1, 2, 3, 4, 5, 6]  # 静默小时, 这些时段不巡检

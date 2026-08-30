@@ -1,0 +1,31 @@
+{
+  "conversation_history": {
+    "enabled": true,
+    "max_messages_per_session": 200,
+    "max_memory_sessions": 100
+  },
+  "undefined_memory": {
+    "enabled": true,
+    "max_memories": 500
+  },
+  "redis": {
+    "enabled": false,
+    "config": {
+      "host": "localhost",
+      "port": 6379,
+      "db": 0,
+      "password": null
+    }
+  },
+  "chromadb": {
+    "enabled": false,
+    "config": {
+      "persist_directory": "data/chromadb",
+      "collection_name": "miya_memories"
+    }
+  },
+  "cleanup": {
+    "enabled": true,
+    "old_conversation_days": 30
+  }
+}

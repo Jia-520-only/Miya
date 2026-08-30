@@ -1,0 +1,18 @@
+{
+    "name": "admin",
+    "description": "管理员管理（列表/添加/删除）",
+    "permission": "admin",
+    "allow_in_private": true,
+    "rate_limit": {"user": 0, "admin": 3, "superadmin": 0},
+    "show_in_help": true,
+    "order": 50,
+    "aliases": ["管理"],
+    "subcommands": {
+        "ls": {"description": "列出管理员"},
+        "add": {"description": "添加管理员（超管）", "permission": "superadmin", "args": "<QQ号>"},
+        "del": {"description": "删除管理员（超管）", "permission": "superadmin", "args": "<QQ号>"}
+    },
+    "inference": {
+        "default": "ls"
+    }
+}
