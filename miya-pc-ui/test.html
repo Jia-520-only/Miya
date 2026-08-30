@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>弥娅 PC UI 测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            margin: 0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+        h1 { color: #667eea; }
+        .success { color: #10b981; }
+        .info { color: #3b82f6; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌸 弥娅 PC UI - 测试页面</h1>
+        <p class="success">✅ 静态 HTML 页面加载成功！</p>
+        <p class="info">如果能看到这个页面，说明 Vite 服务器运行正常。</p>
+        <hr>
+        <h3>测试说明：</h3>
+        <ul>
+            <li>如果 React 应用白屏，可能是编译错误</li>
+            <li>请按 F12 打开开发者工具查看错误</li>
+            <li>查看 Console 标签页中的错误信息</li>
+        </ul>
+        <hr>
+        <p>时间：<span id="time"></span></p>
+        <script>
+            document.getElementById('time').textContent = new Date().toLocaleString();
+        </script>
+    </div>
+</body>
+</html>

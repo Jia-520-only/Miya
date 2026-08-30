@@ -1,0 +1,25 @@
+{
+  "models": [
+    {
+      "id": "ht",
+      "name": "HT Model - 御姐猫猫",
+      "path": "/live2d/ht/ht.model3.json",
+      "expressions": [
+        { "name": "开心", "file": "expression1.exp3.json" },
+        { "name": "害羞", "file": "expression2.exp3.json" },
+        { "name": "生气", "file": "expression3.exp3.json" },
+        { "name": "悲伤", "file": "expression4.exp3.json" },
+        { "name": "平静", "file": "expression5.exp3.json" },
+        { "name": "兴奋", "file": "expression6.exp3.json" },
+        { "name": "调皮", "file": "expression7.exp3.json" },
+        { "name": "嘘声", "file": "expression8.exp3.json" }
+      ]
+    }
+  ],
+  "defaultModel": "ht",
+  "settings": {
+    "motionSmooth": 0.5,
+    "expressionSmooth": 0.3,
+    "followMouse": true
+  }
+}

@@ -1,0 +1,302 @@
+# ============================================================
+# 弥娅系统 - 统一权限配置文件
+# ============================================================
+#
+# 说明：
+# 1. 本文件定义所有平台的权限规则，统一管理
+# 2. 权限只能通过修改此文件来改变，不支持通过命令修改
+# 3. 修改后需重启系统生效
+#
+# 权限格式：category.action.object
+#   - category: 类别（tool, memory, knowledge, agent, system等）
+#   - action: 操作（execute, read, write, delete, search等）
+#   - object: 对象（web_search, terminal等）
+#
+# 通配符：
+#   - *.* : 所有权限
+#   - tool.* : 所有工具权限
+#   - *.execute : 所有执行权限
+#
+# ============================================================
+
+# ------------------------------------------------------------
+# 权限组定义
+# ------------------------------------------------------------
+# 权限组是权限的集合，用户可以属于多个权限组
+# 权限组中定义的权限可以被分配给不同平台的用户
+# ------------------------------------------------------------
+permission_groups:
+
+  # 默认权限组 - 所有用户默认拥有的基本权限
+  Default:
+    name: "默认权限组"
+    description: "所有用户默认拥有的基本权限"
+    permissions:
+      - "tool.get_current_time"
+      - "memory.read"
+      - "knowledge.search"
+      - "agent.chat"
+
+  # 管理员权限组 - 拥有所有权限
+  Admin:
+    name: "管理员"
+    description: "拥有系统的所有权限"
+    permissions:
+      - "*.*"
+
+  # 终端用户组 - 终端平台用户的权限
+  Terminal:
+    name: "终端用户"
+    description: "终端平台用户的基础权限"
+    permissions:
+      - "tool.terminal.execute"
+      - "tool.web_search"
+      - "tool.get_current_time"
+      - "memory.read"
+      - "memory.write"
+      - "knowledge.search"
+      - "agent.chat"
+
+  # Web用户组 - Web平台用户的权限
+  Web:
+    name: "Web用户"
+    description: "Web平台用户的基础权限"
+    permissions:
+      - "tool.web_search"
+      - "tool.get_current_time"
+      - "memory.read"
+      - "memory.write"
+      - "knowledge.search"
+      - "agent.chat"
+
+  # Desktop用户组 - Desktop平台用户的权限
+  Desktop:
+    name: "Desktop用户"
+    description: "Desktop平台用户的基础权限"
+    permissions:
+      - "tool.web_search"
+      - "tool.get_current_time"
+      - "memory.read"
+      - "memory.write"
+      - "knowledge.search"
+      - "agent.chat"
+      - "system.config.read"
+
+  # QQ机器人用户组 - QQ平台用户的权限
+  QQ:
+    name: "QQ用户"
+    description: "QQ平台用户的基础权限"
+    permissions:
+      - "tool.web_search"
+      - "tool.get_current_time"
+      - "memory.read"
+      - "knowledge.search"
+      - "agent.chat"
+
+  # 开发者权限组 - 用于开发和调试
+  Developer:
+    name: "开发者"
+    description: "开发者权限，可访问调试和系统信息"
+    permissions:
+      - "tool.*"
+      - "memory.*"
+      - "knowledge.*"
+      - "agent.*"
+      - "system.*"
+      - "config.*"
+
+# ------------------------------------------------------------
+# 平台默认权限
+# ------------------------------------------------------------
+# 定义每个平台的默认权限组
+# 当用户首次使用平台时，自动分配对应的默认权限组
+# ------------------------------------------------------------
+platform_defaults:
+  terminal: ["Terminal"]
+  web: ["Web"]
+  desktop: ["Desktop"]
+  qq: ["QQ"]
+  discord: ["Default"]
+  telegram: ["Default"]
+
+# ------------------------------------------------------------
+# 用户定义
+# ------------------------------------------------------------
+# 定义系统中的用户
+# 用户ID格式：platform_id
+# ------------------------------------------------------------
+users:
+
+  # 终端默认用户
+  - user_id: "terminal_default"
+    username: "默认终端用户"
+    platform: "terminal"
+    permission_groups: ["Admin"]
+    description: "终端平台的默认管理员用户"
+    created_at: "2026-03-11T00:00:00"
+
+  # Web默认用户
+  - user_id: "web_default"
+    username: "默认Web用户"
+    platform: "web"
+    permission_groups: ["Web"]
+    description: "Web平台的默认用户"
+    created_at: "2026-03-11T00:00:00"
+
+  # Desktop默认用户
+  - user_id: "desktop_default"
+    username: "默认Desktop用户"
+    platform: "desktop"
+    permission_groups: ["Desktop"]
+    description: "Desktop平台的默认用户"
+    created_at: "2026-03-11T00:00:00"
+
+  # 开发者用户示例（需要时取消注释并修改ID）
+  # - user_id: "developer_001"
+  #   username: "开发者"
+  #   platform: "terminal"
+  #   permission_groups: ["Developer"]
+  #   description: "开发者账户，用于系统开发和调试"
+  #   created_at: "2026-03-11T00:00:00"
+
+# ------------------------------------------------------------
+# 特殊权限规则
+# ------------------------------------------------------------
+# 定义特殊的权限检查规则
+# ------------------------------------------------------------
+special_rules:
+
+  # 管理员白名单 - 这些用户ID拥有管理员权限
+  # 无论其在users配置中定义的权限组是什么
+  admin_whitelist:
+    - "terminal_default"
+    # - "qq_your_admin_id"
+
+  # 超级管理员白名单 - 这些用户拥有超级管理员权限
+  # 可以绕过某些安全检查
+  super_admin_whitelist:
+    - "terminal_default"
+
+# ------------------------------------------------------------
+# 权限禁用列表
+# ------------------------------------------------------------
+# 明确禁用的权限，即使用户在权限组中有这些权限也不生效
+# 用于安全控制
+# ------------------------------------------------------------
+disabled_permissions:
+  # 示例：禁用某些危险的权限
+  # - "system.config.write"
+  # - "system.shutdown"
+  # - "system.format"
+
+# ------------------------------------------------------------
+# 平台限制
+# ------------------------------------------------------------
+# 定义每个平台可以使用的权限
+# 用于限制某些平台只能使用特定功能
+# ------------------------------------------------------------
+platform_restrictions:
+
+  terminal:
+    # 允许的权限组（空列表表示无限制）
+    allowed_groups: []
+    # 禁止的权限组
+    forbidden_groups: []
+
+  web:
+    allowed_groups: []
+    forbidden_groups: ["Terminal"]
+
+  desktop:
+    allowed_groups: []
+    forbidden_groups: []
+
+  qq:
+    allowed_groups: ["Default", "QQ", "Web", "Admin"]
+    forbidden_groups: ["Terminal", "Developer"]
+
+# ------------------------------------------------------------
+# 安全设置
+# ------------------------------------------------------------
+security:
+  # 是否启用权限审计日志
+  enable_audit: true
+
+  # 是否启用权限缓存
+  enable_cache: true
+
+  # 缓存过期时间（秒）
+  cache_ttl: 300
+
+  # 权限检查失败时是否记录日志
+  log_denied: true
+
+  # 权限检查成功时是否记录日志
+  log_allowed: false
+
+  # 是否启用白名单模式
+  # 启用后，只有白名单中的用户才能使用系统
+  whitelist_mode: false
+
+  # 用户白名单（whitelist_mode=true时生效）
+  user_whitelist:
+    - "terminal_default"
+
+# ------------------------------------------------------------
+# 配置说明
+# ------------------------------------------------------------
+configuration:
+  version: "1.0.0"
+  last_updated: "2026-03-11"
+  description: "弥娅系统统一权限配置文件"
+
+  # 重要提示
+  important_notes:
+    - "修改此文件后需要重启系统才能生效"
+    - "权限只能通过修改此文件来改变，不支持通过命令修改"
+    - "用户ID格式为：platform_id（如：qq_123, web_user456）"
+    - "权限格式为：category.action.object（如：tool.web_search）"
+    - "*.* 表示所有权限，请谨慎分配"
+
+  # 可用权限节点列表
+  available_permissions:
+    tool:
+      - "tool.web_search"           # 网络搜索
+      - "tool.get_current_time"     # 获取时间
+      - "tool.terminal.execute"     # 终端命令执行
+      - "tool.ai_chat"              # AI对话
+      - "tool.file_read"            # 文件读取
+      - "tool.file_write"           # 文件写入
+      - "tool.data_analyzer"        # 数据分析
+      - "tool.chart_generator"      # 图表生成
+      - "tool.*"                    # 所有工具
+
+    memory:
+      - "memory.read"               # 读取记忆
+      - "memory.write"              # 写入记忆
+      - "memory.delete"             # 删除记忆
+      - "memory.*"                  # 所有记忆权限
+
+    knowledge:
+      - "knowledge.search"          # 知识搜索
+      - "knowledge.add"             # 添加知识
+      - "knowledge.update"          # 更新知识
+      - "knowledge.delete"          # 删除知识
+      - "knowledge.*"               # 所有知识权限
+
+    agent:
+      - "agent.chat"                # 对话
+      - "agent.task.execute"        # 任务执行
+      - "agent.*"                   # 所有agent权限
+
+    system:
+      - "system.config.read"        # 读取配置
+      - "system.config.write"       # 写入配置
+      - "system.shutdown"           # 关闭系统
+      - "system.restart"            # 重启系统
+      - "system.*"                  # 所有系统权限
+
+    config:
+      - "config.read"               # 读取配置
+      - "config.write"              # 写入配置
+      - "config.*"                  # 所有配置权限

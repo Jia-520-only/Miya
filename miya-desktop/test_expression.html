@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live2D 表情测试</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: white;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            color: #2dd4bf;
+        }
+        .test-section {
+            background: rgba(45, 212, 191, 0.1);
+            border: 1px solid rgba(45, 212, 191, 0.3);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .test-section h2 {
+            margin-top: 0;
+            color: #2dd4bf;
+        }
+        .button-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .test-btn {
+            background: rgba(45, 212, 191, 0.2);
+            border: 1px solid rgba(45, 212, 191, 0.4);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .test-btn:hover {
+            background: rgba(45, 212, 191, 0.4);
+        }
+        .test-btn:active {
+            transform: scale(0.95);
+        }
+        .log-container {
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 8px;
+            padding: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+            border-left: 3px solid #2dd4bf;
+            padding-left: 10px;
+        }
+        .log-error {
+            border-left-color: #f87171;
+        }
+        .log-success {
+            border-left-color: #22c55e;
+        }
+        .info-box {
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .model-info {
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 6px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎭 Live2D 表情控制测试工具</h1>
+
+        <div class="info-box">
+            <h3>使用说明</h3>
+            <p>这个工具用于测试Live2D表情控制功能。请在主程序打开桌宠窗口后使用。</p>
+            <p><strong>注意：</strong>此工具仅用于测试，需要在桌宠窗口运行的环境中测试。</p>
+        </div>
+
+        <div class="test-section">
+            <h2>表情测试</h2>
+            <div class="model-info" id="modelInfo">
+                <p>等待加载模型信息...</p>
+            </div>
+            <div class="button-grid" id="expressionButtons">
+                <!-- 表情按钮将通过JS动态生成 -->
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>动作测试</h2>
+            <div class="button-grid" id="motionButtons">
+                <!-- 动作按钮将通过JS动态生成 -->
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>测试日志</h2>
+            <button class="test-btn" onclick="clearLogs()" style="margin-bottom: 10px;">清空日志</button>
+            <div class="log-container" id="logContainer">
+                <!-- 日志将在这里显示 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 表情列表
+        const expressions = [
+            { name: '开心', id: 'expression1' },
+            { name: '害羞', id: 'expression2' },
+            { name: '生气', id: 'expression3' },
+            { name: '悲伤', id: 'expression4' },
+            { name: '平静', id: 'expression5' },
+            { name: '兴奋', id: 'expression6' },
+            { name: '调皮', id: 'expression7' },
+            { name: '嘘声', id: 'expression8' }
+        ];
+
+        // 动作列表
+        const motions = [
+            { name: '动作1', id: 0 },
+            { name: '动作2', id: 1 },
+            { name: '动作3', id: 2 },
+            { name: '动作4', id: 3 },
+            { name: '动作5', id: 4 }
+        ];
+
+        // 初始化
+        function init() {
+            createExpressionButtons();
+            createMotionButtons();
+            updateModelInfo();
+            addLog('info', '测试工具已加载');
+        }
+
+        // 创建表情按钮
+        function createExpressionButtons() {
+            const container = document.getElementById('expressionButtons');
+            expressions.forEach((expr, index) => {
+                const btn = document.createElement('button');
+                btn.className = 'test-btn';
+                btn.textContent = expr.name;
+                btn.onclick = () => testExpression(index, expr.id);
+                container.appendChild(btn);
+            });
+        }
+
+        // 创建动作按钮
+        function createMotionButtons() {
+            const container = document.getElementById('motionButtons');
+            motions.forEach((motion, index) => {
+                const btn = document.createElement('button');
+                btn.className = 'test-btn';
+                btn.textContent = motion.name;
+                btn.onclick = () => testMotion(index);
+                container.appendChild(btn);
+            });
+        }
+
+        // 测试表情
+        function testExpression(index, expressionId) {
+            addLog('info', `尝试设置表情: ${expressions[index].name} (ID: ${expressionId})`);
+
+            try {
+                // 方法1: 通过 electronAPI 发送到桌宠窗口
+                if (window.electronAPI?.live2d) {
+                    window.electronAPI.live2d.sendExpression(index);
+                    addLog('success', `通过 electronAPI 发送表情: ${index}`);
+                } else {
+                    addLog('error', 'electronAPI 不可用');
+                }
+
+                // 方法2: 直接在当前窗口设置（如果在桌宠窗口中）
+                const canvas = document.querySelector('canvas');
+                if (canvas) {
+                    const app = canvas.__pixi_app;
+                    if (app && app.stage && app.stage.children[0]) {
+                        const model = app.stage.children[0];
+                        if (model.internalModel) {
+                            // 尝试多种方法
+                            const methods = [
+                                () => model.internalModel.expression(expressionId),
+                                () => model.internalModel.motionManager.expressionManager.setExpression(expressionId)
+                            ];
+
+                            let success = false;
+                            for (let i = 0; i < methods.length; i++) {
+                                try {
+                                    methods[i]();
+                                    addLog('success', `方法 ${i + 1}: 成功设置表情 ${expressionId}`);
+                                    success = true;
+                                    break;
+                                } catch (e) {
+                                    addLog('error', `方法 ${i + 1} 失败: ${e.message}`);
+                                }
+                            }
+
+                            if (!success) {
+                                addLog('error', '所有方法都失败了');
+                            }
+                        } else {
+                            addLog('error', '模型未加载 internalModel');
+                        }
+                    } else {
+                        addLog('error', '未找到 PIXI 应用');
+                    }
+                } else {
+                    addLog('info', '当前页面没有 canvas（正常，此测试需要在桌宠窗口中进行）');
+                }
+
+            } catch (error) {
+                addLog('error', `设置表情失败: ${error.message}`);
+            }
+        }
+
+        // 测试动作
+        function testMotion(index) {
+            addLog('info', `尝试播放动作: ${motions[index].name} (ID: ${index})`);
+
+            try {
+                // 通过 electronAPI 发送到桌宠窗口
+                if (window.electronAPI?.live2d) {
+                    window.electronAPI.live2d.sendMotion(index);
+                    addLog('success', `通过 electronAPI 发送动作: ${index}`);
+                } else {
+                    addLog('error', 'electronAPI 不可用');
+                }
+            } catch (error) {
+                addLog('error', `播放动作失败: ${error.message}`);
+            }
+        }
+
+        // 更新模型信息
+        function updateModelInfo() {
+            const info = document.getElementById('modelInfo');
+            try {
+                const canvas = document.querySelector('canvas');
+                if (canvas) {
+                    const app = canvas.__pixi_app;
+                    if (app && app.stage && app.stage.children[0]) {
+                        const model = app.stage.children[0];
+                        const internal = model.internalModel;
+                        if (internal) {
+                            const infoText = `
+                                <p><strong>模型状态:</strong> 已加载</p>
+                                <p><strong>内部模型:</strong> ${!!internal}</p>
+                                <p><strong>MotionManager:</strong> ${!!internal.motionManager}</p>
+                                <p><strong>ExpressionManager:</strong> ${!!internal.motionManager?.expressionManager}</p>
+                                <p><strong>可用表情数量:</strong> ${internal.motionManager?.expressionManager?.expressions?.length || 0}</p>
+                            `;
+                            info.innerHTML = infoText;
+                        } else {
+                            info.innerHTML = '<p><strong>模型状态:</strong> 正在加载...</p>';
+                        }
+                    } else {
+                        info.innerHTML = '<p><strong>模型状态:</strong> 未找到</p>';
+                    }
+                } else {
+                    info.innerHTML = '<p><strong>模型状态:</strong> 当前页面没有 Live2D 模型</p>';
+                }
+            } catch (error) {
+                info.innerHTML = `<p><strong>错误:</strong> ${error.message}</p>`;
+            }
+        }
+
+        // 添加日志
+        function addLog(type, message) {
+            const container = document.getElementById('logContainer');
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            const time = new Date().toLocaleTimeString();
+            entry.innerHTML = `<small>[${time}]</small> ${message}`;
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // 清空日志
+        function clearLogs() {
+            document.getElementById('logContainer').innerHTML = '';
+        }
+
+        // 页面加载时初始化
+        window.onload = init;
+
+        // 定期更新模型信息
+        setInterval(updateModelInfo, 2000);
+    </script>
+</body>
+</html>

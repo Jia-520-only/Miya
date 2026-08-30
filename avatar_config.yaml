@@ -1,0 +1,190 @@
+# 弥娅形象配置文件
+
+avatar:
+  # 形象类型: live2d | 3d | static
+  type: live2d
+
+  # Live2D 配置
+  live2d:
+    model_path: "models/live2d/miya"
+    model_files:
+      moc3: "miya.moc3"
+      physics3: "miya.physics3.json"
+      userdata3: "miya.userdata3.json"
+
+    # 动画配置
+    motions:
+      idle:
+        - file: "motions/idle_01.mtn"
+          speed: 1.0
+      talk:
+        - file: "motions/talk_01.mtn"
+          speed: 1.2
+      happy:
+        - file: "motions/happy.mtn"
+          speed: 1.5
+      sad:
+        - file: "motions/sad.mtn"
+          speed: 0.8
+      think:
+        - file: "motions/think.mtn"
+          speed: 1.0
+
+  # 表情系统
+  expressions:
+    neutral:
+      file: "expressions/neutral.exp3.json"
+    happy:
+      file: "expressions/happy.exp3.json"
+    sad:
+      file: "expressions/sad.exp3.json"
+    angry:
+      file: "expressions/angry.exp3.json"
+    surprised:
+      file: "expressions/surprised.exp3.json"
+    think:
+      file: "expressions/think.exp3.json"
+
+  # 情绪映射 (情绪 -> 表情 + 动画)
+  emotion_mapping:
+    joy:
+      expression: happy
+      motion: happy
+    sadness:
+      expression: sad
+      motion: sad
+    anger:
+      expression: angry
+      motion: idle
+    surprise:
+      expression: surprised
+      motion: idle
+    thinking:
+      expression: think
+      motion: think
+    neutral:
+      expression: neutral
+      motion: idle
+
+# 语音配置
+voice:
+  # TTS 引擎: edge | azure | baidu | google
+  engine: edge
+  speaker: "xiaoxiao"  # 云晓晓
+  speed: 1.0
+  pitch: 1.0
+  volume: 1.0
+
+  # 说话人克隆配置
+  clone:
+    enabled: false
+    model_path: "models/voice/clone"
+
+# 动态背景配置
+background:
+  type: dynamic  # dynamic | static | video
+
+  # 时间感知背景
+  time_based:
+    enabled: true
+    themes:
+      morning:
+        start: 6
+        end: 11
+        gradient: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
+        particles: true
+      day:
+        start: 11
+        end: 17
+        gradient: "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)"
+        particles: true
+      evening:
+        start: 17
+        end: 20
+        gradient: "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)"
+        particles: true
+      night:
+        start: 20
+        end: 6
+        gradient: "linear-gradient(135deg, #0c3483 0%, #a2b6df 100%)"
+        particles: true
+
+  # 天气效果
+  weather:
+    enabled: true
+    effects:
+      sunny:
+        type: "sun"
+        intensity: 0.8
+      cloudy:
+        type: "clouds"
+        count: 5
+      rainy:
+        type: "rain"
+        intensity: 0.6
+      snowy:
+        type: "snow"
+        intensity: 0.5
+
+# 主题系统
+themes:
+  default:
+    name: "温柔紫"
+    colors:
+      primary: "#9B59B6"
+      secondary: "#8E44AD"
+      accent: "#E91E63"
+      background: "#F3E5F5"
+      text: "#333333"
+      text_secondary: "#666666"
+
+  pink:
+    name: "青春粉"
+    colors:
+      primary: "#FF6B9D"
+      secondary: "#FF8E72"
+      accent: "#FF4081"
+      background: "#FFF0F5"
+      text: "#333333"
+      text_secondary: "#666666"
+
+  blue:
+    name: "科技蓝"
+    colors:
+      primary: "#2196F3"
+      secondary: "#1976D2"
+      accent: "#00BCD4"
+      background: "#E3F2FD"
+      text: "#333333"
+      text_secondary: "#666666"
+
+  dark:
+    name: "暗夜黑"
+    colors:
+      primary: "#BB86FC"
+      secondary: "#3700B3"
+      accent: "#03DAC6"
+      background: "#121212"
+      text: "#FFFFFF"
+      text_secondary: "#B0BEC5"
+
+# 交互配置
+interaction:
+  # 鼠标交互
+  mouse:
+    enabled: true
+    tracking: true  # 追踪鼠标位置
+    click_effects: true  # 点击反馈
+    hover_effects: true  # 悬停效果
+
+  # 触摸交互 (移动端)
+  touch:
+    enabled: true
+    tap_effects: true
+
+  # 动画配置
+  animation:
+    breathing: true  # 呼吸动画
+    blinking: true  # 眨眼动画
+    idle_animation: true  # 待机动画
+    talk_animation: true  # 说话动画

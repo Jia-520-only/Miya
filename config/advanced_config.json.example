@@ -1,0 +1,58 @@
+{
+  "advanced_capabilities": {
+    "enabled": true,
+    "enable_task_planning": true,
+    "enable_autonomous_exploration": true,
+    "enable_intelligent_execution": true,
+    "enable_chain_of_thought": true,
+    
+    "task_planning": {
+      "max_tasks": 50,
+      "enable_dependency_tracking": true,
+      "enable_priority_scheduling": true
+    },
+    
+    "autonomous_exploration": {
+      "max_steps": 50,
+      "enable_dynamic_adjustment": true,
+      "enable_persistence": true
+    },
+    
+    "intelligent_executor": {
+      "max_concurrent_tasks": 3,
+      "enable_rollback": true,
+      "enable_result_validation": true,
+      "default_max_retries": 3
+    },
+    
+    "chain_of_thought": {
+      "enable_ai_enhancement": true,
+      "enable_reflection": true,
+      "enable_backtrack": true
+    },
+    
+    "complex_task_detection": {
+      "keywords": [
+        "帮我分析",
+        "帮我探索",
+        "帮我查找",
+        "帮我理解",
+        "帮我阅读",
+        "帮我解释",
+        "帮我检查",
+        "请分析",
+        "请探索",
+        "请查找",
+        "请理解",
+        "多步骤",
+        "复杂",
+        "深入",
+        "详细",
+        "项目结构",
+        "代码逻辑",
+        "文件系统"
+      ],
+      "min_length": 10
+    }
+  }
+}

@@ -1,0 +1,121 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# Data
+data/
+volumes/
+*.db
+*.sqlite
+
+# Config
+.env
+config/.env
+.env.local
+.env.*.local
+config/.env.local
+
+# Sensitive config files (use .example versions instead)
+config/multi_model_config.json
+config/terminal_config.json
+config/advanced_config.json
+config/tts_config.json
+config/web_search_config.json
+config/terminal_whitelist.json
+
+# Cache
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+
+# Temporary
+*.tmp
+*.temp
+tmp/
+temp/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# User Data
+userData/
+
+# Cache
+Cache/
+
+# Live2D cached files
+*.cache
+*.cdi3.json
+*.physics3.json
+*.vtube.json
+*.exp3.json
+
+# Desktop build
+miya-desktop/dist/
+miya-desktop/node_modules/
+miya-desktop/.vite/
+
+# PC UI build
+miya-pc-ui/node_modules/
+miya-pc-ui/dist/
+miya-pc-ui/.vite/
+
+# npm
+package-lock.json
+
+# Temporary files
+$null
+0.25.0
+0.27.0
+2.0.0
+2.8.0
+3.0.0
+3.1.0
+3.1.5
+3.7.0
+4.0.0
+41.0.0

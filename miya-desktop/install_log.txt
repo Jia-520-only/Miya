@@ -1,0 +1,6 @@
+ 
+开始时间: 周日 2026/03/08  9:04:43.42 
+======================================== 
+当前目录: D:\AI_MIYA_Facyory\MIYA\Miya\miya-desktop 
+   ✓ package.json 存在 
+   ✓ Node.js: v24.12.0 
