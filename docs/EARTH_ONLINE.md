@@ -202,7 +202,7 @@
 - **前台主题自定义**: `data/earthonline/theme.json` 存储主题（accent 主色/accent_light 亮色/
   background 壁纸/background_opacity 透明度/glass 磨砂玻璃开关），全部鎏金色 CSS 变量化
   （`var(--pv-gold)` + `color-mix` 相对色，212 处），顶栏「◐ 外观设置」弹窗：
-  6 套预置色板（鎏金/月白/青碧/绯樱/星紫/琥珀）+ 自定义取色器 + 壁纸选择（public/backgrounds）
+  6 套预置色板（鎏金/月白/青碧/绯樱/星紫/琥珀）+ 自定义取色器 + 壁纸选择（premium-assets/backgrounds）
   + 透明度滑块 + 磨砂玻璃开关，默认跟随 Miya OS 青碧配色；API `GET/PUT /api/earth/theme`
 - **壁纸与玻璃**: 全局壁纸背景层（可调透明度），各板块背景半透明化透出壁纸，
   主要面板卡片启用 backdrop-filter 磨砂玻璃（开关控制）

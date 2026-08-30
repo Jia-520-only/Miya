@@ -118,6 +118,7 @@ dmypy.json
 *.temp
 tmp/
 temp/
+.backup/
 
 # OS
 Thumbs.db

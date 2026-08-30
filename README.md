@@ -439,7 +439,6 @@ Miya/
 ├── deepseek-harness/          # DeepSeek Harness (官方 agent harness, 弥娅的"手")
 ├── miya_frontend/             # Electron 桌面应用 v1.0.0 (Vue 3 + Live2D + xterm)
 ├── miya_mobile/               # KMP 移动客户端 (Android / iOS)
-├── subsystems/
 ├── config/                    # 配置文件 (模型 / 平台 / 人格 / 功能开关 / 用户文本)
 │   ├── .env / .env.example    # 环境变量
 │   ├── text_config.json       # 用户可见文本模板
