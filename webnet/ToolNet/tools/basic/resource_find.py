@@ -1712,7 +1712,15 @@ class ResourceFindTool(BaseTool):
                         idx += 1
                     top_url = direct_part[0]["url"]
                     top_src = str(direct_part[0].get("source", ""))
-                    if top_src == "nhentai" or top_src == "禁漫":
+                    if top_src == "禁漫":
+                        # Keep the album id visible to the next tool-call turn.
+                        # The work page itself is not an image direct-link and
+                        # should be handed to jmcomic_download for whole-book
+                        # downloads rather than download_file/browser scraping.
+                        match = re.search(r"/photo/(\d+)", top_url)
+                        album_hint = f"album_id={match.group(1)}" if match else "album_id=<从链接提取的 ID>"
+                        reason = f"整本下载请调用 jmcomic_download({album_hint})；需要发送时再调用 send_platform_file"
+                    elif top_src == "nhentai":
                         reason = "本子作品页，打开即可在线看，逐页直链可用 download_file 下载"
                     elif top_src in ("B站视频", "iwara", "pornhub"):
                         reason = "视频页，用 video_download 工具下载"

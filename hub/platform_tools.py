@@ -35,6 +35,8 @@ class PlatformToolsManager:
         # 视频下载
         "video_download",
         "download_file",
+        # 禁漫天堂整本下载（搜索结果可继续交给该工具下载）
+        "jmcomic_download",
         # 跨平台文件发送（统一入口，图片与文件均走此工具）
         "send_platform_file",
         "list_data_files",
@@ -1194,6 +1196,7 @@ class PlatformToolsManager:
         "browse_web",
         "video_download",
         "download_file",
+        "jmcomic_download",
         # 信息查询
         "qq_level_query",
         "weather_query",
@@ -1275,6 +1278,14 @@ class PlatformToolsManager:
         """
         # 获取当前平台的工具
         selected_tools = self.PLATFORM_TOOL_MAP.get(platform, self.CORE_TOOLS)
+
+        # JMComic whole-book download is platform-agnostic: the download is
+        # performed locally, while the resulting path can be handed to the
+        # platform's file-send tool.  Platform-specific allowlists historically
+        # omitted it, so inject it for every platform (including aliases that
+        # fall back to CORE_TOOLS).
+        if "jmcomic_download" not in selected_tools:
+            selected_tools = [*selected_tools, "jmcomic_download"]
 
         # 如果是 QQ 平台（含 aiocqhttp OneBot），添加更多常用工具
         if MiyaPlatform.is_qq(platform) or platform == MiyaPlatform.AIOCQHTTP.value:

@@ -82,6 +82,25 @@ def test_resource_download_tools_remain_composable():
     assert "send_platform_file" in direct
 
 
+@pytest.mark.parametrize("platform", ["qq", "aiocqhttp", "lark", "mobile", "terminal", "desktop", "web"])
+def test_jmcomic_download_is_exposed_to_all_platform_tools(platform):
+    """Every platform request must expose the whole-book JMComic downloader."""
+    from hub.platform_tools import PlatformToolsManager
+
+    class _Subnet:
+        def get_tools_schema(self):
+            return [
+                {"type": "function", "function": {"name": "jmcomic_download"}},
+                {"type": "function", "function": {"name": "resource_find"}},
+            ]
+
+    names = {
+        schema["function"]["name"]
+        for schema in PlatformToolsManager(_Subnet()).get_platform_specific_tools(platform)
+    }
+    assert "jmcomic_download" in names
+
+
 @pytest.mark.anyio
 async def test_download_rejects_non_http_without_network():
     result = await DownloadFileTool().execute({"url": "file:///tmp/a.txt"}, ToolContext())
