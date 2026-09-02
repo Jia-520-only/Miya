@@ -76,7 +76,7 @@ def _platform_file_send_lock(platform) -> asyncio.Lock:
         lock = asyncio.Lock()
         # Platform adapters are regular mutable instances. Keeping the lock on
         # the adapter makes concurrent tool calls for the same account share it.
-        setattr(platform, "_miya_file_send_lock", lock)
+        platform._miya_file_send_lock = lock
     return lock
 
 
