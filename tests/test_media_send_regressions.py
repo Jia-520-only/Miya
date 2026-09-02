@@ -1,5 +1,6 @@
 """媒体下载/发送链路回归测试。"""
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -43,3 +44,36 @@ async def test_send_platform_file_normalizes_null_arguments():
         {"file_path": None, "file_name": None, "caption": None}, ToolContext()
     )
     assert "请提供文件路径" in result
+
+
+@pytest.mark.anyio
+async def test_send_platform_file_serializes_same_adapter(tmp_path):
+    class FakePlatform:
+        supports_file_send = True
+        last_file_url = ""
+
+        def __init__(self):
+            self.active = 0
+            self.max_active = 0
+
+        async def send_file(self, **kwargs):
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            await asyncio.sleep(0.01)
+            self.active -= 1
+            return True
+
+    platform = FakePlatform()
+    files = []
+    for i in range(3):
+        path = Path(tmp_path) / f"image_{i}.png"
+        path.write_bytes(b"image")
+        files.append(path)
+
+    context = ToolContext(user_id=1, platform_user_id="user", platform_adapter=platform)
+    results = await asyncio.gather(
+        *(send_platform_file.SendPlatformFileTool().execute({"file_path": str(path)}, context) for path in files)
+    )
+
+    assert all("已发送" in result for result in results)
+    assert platform.max_active == 1

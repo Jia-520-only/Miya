@@ -10,7 +10,8 @@ from typing import Dict, Set
 
 EXT_CATEGORIES: Dict[str, Set[str]] = {
     "image": {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".avif", ".heic"},
-    "video": {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".3gp", ".ts", ".mts"},
+    # .ts is TypeScript in this project; MPEG-TS uses .mts/.m2ts.
+    "video": {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".3gp", ".mts", ".m2ts"},
     "program": {
         ".exe",
         ".msi",

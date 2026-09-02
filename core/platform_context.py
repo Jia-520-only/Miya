@@ -52,37 +52,9 @@ class AppPlatformBridge:
 
     @staticmethod
     def _guess_mime(filename: str) -> str:
-        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-        mime_map = {
-            "txt": "text/plain",
-            "md": "text/markdown",
-            "json": "application/json",
-            "xml": "application/xml",
-            "html": "text/html",
-            "csv": "text/csv",
-            "pdf": "application/pdf",
-            "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            "jpg": "image/jpeg",
-            "jpeg": "image/jpeg",
-            "png": "image/png",
-            "gif": "image/gif",
-            "webp": "image/webp",
-            "bmp": "image/bmp",
-            "svg": "image/svg+xml",
-            "mp3": "audio/mpeg",
-            "wav": "audio/wav",
-            "ogg": "audio/ogg",
-            "mp4": "video/mp4",
-            "webm": "video/webm",
-            "zip": "application/zip",
-            "rar": "application/x-rar-compressed",
-            "py": "text/x-python",
-            "js": "text/javascript",
-            "ts": "text/typescript",
-        }
-        return mime_map.get(ext, "application/octet-stream")
+        from core.file_context import guess_mime_type
+
+        return guess_mime_type(filename)
 
     async def send_file(
         self,
@@ -103,7 +75,10 @@ class AppPlatformBridge:
             logger.warning(f"[{self.platform_id}] 无法读取文件内容")
             return False
 
-        name = file_name or (os.path.basename(file_path) if file_path else "file.bin")
+        raw_name = file_name or (os.path.basename(file_path) if file_path else "file.bin")
+        # File names are user/model supplied; keep the web staging path inside
+        # data/web_files on both POSIX and Windows.
+        name = Path(str(raw_name).replace("\\", "/")).name or "file.bin"
         dest = self._web_files_dir / name
         dest.write_bytes(data)
 

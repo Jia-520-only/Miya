@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
 import os
 from dataclasses import dataclass, field
 from enum import Enum
@@ -19,6 +20,48 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("Miya.FileContext")
+
+
+# Explicit mappings keep MIME detection stable across Windows installations;
+# registry-backed mimetypes are used only as a fallback for uncommon extensions.
+_MIME_TYPES = {
+    "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif", "webp": "image/webp",
+    "bmp": "image/bmp", "svg": "image/svg+xml", "ico": "image/x-icon", "tif": "image/tiff", "tiff": "image/tiff",
+    "avif": "image/avif", "heic": "image/heic", "heif": "image/heif",
+    "mp3": "audio/mpeg", "wav": "audio/wav", "ogg": "audio/ogg", "oga": "audio/ogg", "aac": "audio/aac",
+    "flac": "audio/flac", "opus": "audio/opus", "m4a": "audio/mp4", "wma": "audio/x-ms-wma", "amr": "audio/amr",
+    "mid": "audio/midi", "midi": "audio/midi",
+    "mp4": "video/mp4", "avi": "video/x-msvideo", "mkv": "video/x-matroska", "mov": "video/quicktime",
+    "wmv": "video/x-ms-wmv", "flv": "video/x-flv", "webm": "video/webm", "3gp": "video/3gpp", "m4v": "video/x-m4v",
+    # .ts is ambiguous, but the project treats it as TypeScript code. MPEG-TS
+    # files use the unambiguous .mts/.m2ts extensions here.
+    "mts": "video/mp2t", "m2ts": "video/mp2t",
+    "pdf": "application/pdf", "doc": "application/msword", "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xls": "application/vnd.ms-excel", "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "ppt": "application/vnd.ms-powerpoint", "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "odt": "application/vnd.oasis.opendocument.text", "ods": "application/vnd.oasis.opendocument.spreadsheet",
+    "odp": "application/vnd.oasis.opendocument.presentation", "rtf": "application/rtf", "epub": "application/epub+zip",
+    "zip": "application/zip", "rar": "application/vnd.rar", "7z": "application/x-7z-compressed", "tar": "application/x-tar",
+    "gz": "application/gzip", "bz2": "application/x-bzip2", "xz": "application/x-xz", "zst": "application/zstd",
+    "lz4": "application/x-lz4", "iso": "application/x-iso9660-image", "apk": "application/vnd.android.package-archive",
+    "exe": "application/vnd.microsoft.portable-executable", "msi": "application/x-msi", "cab": "application/vnd.ms-cab-compressed",
+    "txt": "text/plain", "md": "text/markdown", "json": "application/json", "xml": "application/xml", "html": "text/html",
+    "htm": "text/html", "css": "text/css", "csv": "text/csv", "yaml": "application/yaml", "yml": "application/yaml",
+    "toml": "application/toml", "ini": "text/plain", "cfg": "text/plain", "conf": "text/plain", "log": "text/plain",
+    "py": "text/x-python", "js": "text/javascript", "ts": "text/typescript", "jsx": "text/jsx", "tsx": "text/tsx",
+    "java": "text/x-java-source", "c": "text/x-c", "h": "text/x-c", "cpp": "text/x-c++src", "go": "text/x-go",
+    "rs": "text/x-rust", "php": "application/x-php", "rb": "text/x-ruby", "lua": "text/x-lua", "r": "text/x-r",
+    "sql": "application/sql", "sh": "application/x-sh", "bat": "application/x-bat", "cmd": "application/x-bat", "ps1": "text/plain",
+}
+
+
+def guess_mime_type(filename: str) -> str:
+    """Return a stable MIME type for common files, with stdlib fallback."""
+    ext = Path(str(filename)).suffix.lower().lstrip(".")
+    if ext in _MIME_TYPES:
+        return _MIME_TYPES[ext]
+    guessed, _ = mimetypes.guess_type(str(filename), strict=False)
+    return guessed or "application/octet-stream"
 
 
 def get_downloads_dir() -> str:
@@ -178,12 +221,12 @@ class FileContext:
                 return FileType.VIDEO
 
         ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
-        image_exts = {"jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico", "tiff"}
-        audio_exts = {"mp3", "wav", "ogg", "aac", "flac", "m4a", "wma", "opus", "amr"}
-        video_exts = {"mp4", "avi", "mkv", "mov", "wmv", "flv", "webm", "3gp"}
-        archive_exts = {"zip", "rar", "7z", "tar", "gz", "bz2", "xz"}
-        code_exts = {"py", "js", "ts", "java", "cpp", "c", "go", "rs", "php", "rb", "sh", "bat", "ps1", "sql"}
-        text_exts = {"txt", "log", "md", "json", "xml", "html", "csv", "yml", "yaml", "ini", "cfg", "conf", "pdf"}
+        image_exts = {"jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico", "tif", "tiff", "avif", "heic", "heif"}
+        audio_exts = {"mp3", "wav", "ogg", "oga", "aac", "flac", "m4a", "wma", "opus", "amr", "mid", "midi"}
+        video_exts = {"mp4", "avi", "mkv", "mov", "wmv", "flv", "webm", "3gp", "m4v", "mts", "m2ts"}
+        archive_exts = {"zip", "rar", "7z", "tar", "gz", "bz2", "xz", "zst", "lz4", "iso"}
+        code_exts = {"py", "js", "ts", "jsx", "tsx", "java", "cpp", "c", "h", "go", "rs", "php", "rb", "lua", "r", "sh", "bat", "cmd", "ps1", "sql"}
+        text_exts = {"txt", "log", "md", "json", "xml", "html", "htm", "css", "csv", "yml", "yaml", "toml", "ini", "cfg", "conf"}
 
         if ext in image_exts:
             return FileType.IMAGE
@@ -485,7 +528,7 @@ class OutboundFile:
         if not path:
             raise ValueError("file_path is required for local source")
         fpath = Path(path)
-        if not fpath.exists():
+        if not fpath.is_file():
             raise FileNotFoundError(f"文件不存在: {path}")
         name = file_name or fpath.name
         size = fpath.stat().st_size
@@ -560,46 +603,7 @@ class OutboundFile:
 
     @staticmethod
     def _guess_mime(filename: str) -> str:
-        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-        mime_map = {
-            "jpg": "image/jpeg",
-            "jpeg": "image/jpeg",
-            "png": "image/png",
-            "gif": "image/gif",
-            "webp": "image/webp",
-            "bmp": "image/bmp",
-            "svg": "image/svg+xml",
-            "mp3": "audio/mpeg",
-            "wav": "audio/wav",
-            "ogg": "audio/ogg",
-            "aac": "audio/aac",
-            "flac": "audio/flac",
-            "opus": "audio/opus",
-            "mp4": "video/mp4",
-            "avi": "video/avi",
-            "mkv": "video/x-matroska",
-            "mov": "video/quicktime",
-            "webm": "video/webm",
-            "pdf": "application/pdf",
-            "doc": "application/msword",
-            "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "xls": "application/vnd.ms-excel",
-            "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "ppt": "application/vnd.ms-powerpoint",
-            "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            "zip": "application/zip",
-            "rar": "application/x-rar-compressed",
-            "7z": "application/x-7z-compressed",
-            "tar": "application/x-tar",
-            "gz": "application/gzip",
-            "txt": "text/plain",
-            "md": "text/markdown",
-            "json": "application/json",
-            "xml": "application/xml",
-            "html": "text/html",
-            "csv": "text/csv",
-        }
-        return mime_map.get(ext, "application/octet-stream")
+        return guess_mime_type(filename)
 
     @staticmethod
     def _detect_type(file_name: str, mime_type: str = "") -> str:
@@ -614,7 +618,7 @@ class OutboundFile:
 
     def validate(self) -> bool:
         if self.source == "local_path":
-            return bool(self.file_path) and Path(self.file_path).exists()
+            return bool(self.file_path) and Path(self.file_path).is_file()
         if self.source == "bytes":
             return bool(self.file_data)
         if self.source == "url":

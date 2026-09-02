@@ -10,6 +10,7 @@
   3. 除非用户明确要求从网络下载，否则不主动下载
 """
 
+import asyncio
 import logging
 import os
 from pathlib import Path
@@ -66,6 +67,17 @@ def _platform_supports_file(platform) -> bool:
         except Exception:
             pass
     return hasattr(platform, "send_file")
+
+
+def _platform_file_send_lock(platform) -> asyncio.Lock:
+    """Return the per-adapter lock shared by all file-send tool calls."""
+    lock = getattr(platform, "_miya_file_send_lock", None)
+    if lock is None:
+        lock = asyncio.Lock()
+        # Platform adapters are regular mutable instances. Keeping the lock on
+        # the adapter makes concurrent tool calls for the same account share it.
+        setattr(platform, "_miya_file_send_lock", lock)
+    return lock
 
 
 def _find_in_data(name_or_pattern: str) -> List[str]:
@@ -211,49 +223,52 @@ class SendPlatformFileTool(BaseTool):
                             f"请检查路径是否正确，或提供完整的远程 URL 让弥娅下载后发送。"
                         )
 
-            # ── URL 下载 ──
-            if source == "url":
-                if hasattr(platform, "send_file_from_url"):
-                    success = await platform.send_file_from_url(
-                        target=target_id,
-                        url=file_path,
-                        file_name=file_name,
-                        caption=caption,
-                        message_type=target_type,
-                    )
-                elif hasattr(platform, "download_attachment"):
-                    local_path = await platform.download_attachment(file_path, file_name)
-                    if not local_path:
-                        return "❌ 文件下载失败"
+            # Serialize media sends per adapter. Several platforms rate-limit
+            # upload/send requests even when each individual request succeeds.
+            async with _platform_file_send_lock(platform):
+                # ── URL 下载 ──
+                if source == "url":
+                    if hasattr(platform, "send_file_from_url"):
+                        success = await platform.send_file_from_url(
+                            target=target_id,
+                            url=file_path,
+                            file_name=file_name,
+                            caption=caption,
+                            message_type=target_type,
+                        )
+                    elif hasattr(platform, "download_attachment"):
+                        local_path = await platform.download_attachment(file_path, file_name)
+                        if not local_path:
+                            return "❌ 文件下载失败"
+                        success = await platform.send_file(
+                            target=target_id,
+                            file_path=local_path,
+                            file_name=file_name,
+                            caption=caption,
+                            message_type=target_type,
+                        )
+                    else:
+                        return "❌ 当前平台不支持 URL 文件下载"
+
+                # ── 本地发送 ──
+                elif source == "local":
+                    if not os.path.isfile(file_path):
+                        resolved = _resolve_local_path(file_path)
+                        if resolved:
+                            file_path = resolved
+                        else:
+                            return f"❌ 文件不存在: {file_path}"
+
+                    fname = file_name or os.path.basename(file_path)
                     success = await platform.send_file(
                         target=target_id,
-                        file_path=local_path,
-                        file_name=file_name,
+                        file_path=file_path,
+                        file_name=fname,
                         caption=caption,
                         message_type=target_type,
                     )
                 else:
-                    return "❌ 当前平台不支持 URL 文件下载"
-
-            # ── 本地发送 ──
-            elif source == "local":
-                if not os.path.isfile(file_path):
-                    resolved = _resolve_local_path(file_path)
-                    if resolved:
-                        file_path = resolved
-                    else:
-                        return f"❌ 文件不存在: {file_path}"
-
-                fname = file_name or os.path.basename(file_path)
-                success = await platform.send_file(
-                    target=target_id,
-                    file_path=file_path,
-                    file_name=fname,
-                    caption=caption,
-                    message_type=target_type,
-                )
-            else:
-                return f"❌ 未知的 source 参数: {source}"
+                    return f"❌ 未知的 source 参数: {source}"
 
             if success:
                 name = file_name or os.path.basename(file_path)

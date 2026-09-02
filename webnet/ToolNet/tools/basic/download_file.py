@@ -10,8 +10,10 @@
 
 import asyncio
 import contextlib
+import html as html_lib
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -95,6 +97,19 @@ def _validate_url(url: str) -> Optional[str]:
     return None
 
 
+def _normalize_url(raw: Any) -> str:
+    """Accept URLs copied from escaped search-page JSON."""
+    value = html_lib.unescape(str(raw or "")).strip()
+    for _ in range(2):
+        value = value.replace("\\\\/", "/").replace("\\/", "/")
+        value = re.sub(
+            r"\\\\u([0-9a-fA-F]{4})|\\u([0-9a-fA-F]{4})",
+            lambda m: chr(int(m.group(1) or m.group(2), 16)),
+            value,
+        )
+    return value.strip().rstrip("\\`);'\" ,")
+
+
 def _extract_filename(url: str, content_type: str = "") -> str:
     path = unquote(urlparse(url).path)
     name = Path(path).name
@@ -112,11 +127,23 @@ def _extract_filename(url: str, content_type: str = "") -> str:
         "video/webm": ".webm",
         "application/pdf": ".pdf",
         "application/zip": ".zip",
+        "application/vnd.android.package-archive": ".apk",
         "audio/mpeg": ".mp3",
         "audio/wav": ".wav",
     }
     ext = ct_map.get(content_type, ".bin")
     return f"downloaded{ext}"
+
+
+def _filename_from_content_disposition(value: str) -> str:
+    """Extract a server-provided filename, including RFC 5987 encoding."""
+    if not value:
+        return ""
+    match = re.search(r"filename\*\s*=\s*[^']*'[^']*'([^;]+)", value, re.I)
+    if match:
+        return unquote(match.group(1).strip().strip('"'))
+    match = re.search(r"filename\s*=\s*(\"[^\"]+\"|[^;]+)", value, re.I)
+    return match.group(1).strip().strip('"') if match else ""
 
 
 def _resolve_dir(user_dir: Optional[str], base_dir: Path, categorize: bool, filename: str) -> Path:
@@ -168,7 +195,7 @@ class DownloadFileTool(BaseTool):
         }
 
     async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
-        url = str(args.get("url") or "").strip()
+        url = _normalize_url(args.get("url"))
         save_dir = str(args.get("save_dir") or "")
         filename = str(args.get("filename") or "")
         categorize = _as_bool(args.get("categorize", True), True)
@@ -221,7 +248,10 @@ class DownloadFileTool(BaseTool):
                             return f"❌ 文件超过大小限制 ({max_size_mb:g} MB)"
 
                         if not filename:
-                            filename = _safe_filename(_extract_filename(url, content_type))
+                            filename = _safe_filename(
+                                _filename_from_content_disposition(resp.headers.get("Content-Disposition", ""))
+                                or _extract_filename(url, content_type)
+                            )
 
                         dest_dir = _resolve_dir(save_dir, default_base, categorize, filename)
                         dest_path = dest_dir / filename

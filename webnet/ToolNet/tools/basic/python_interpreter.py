@@ -21,7 +21,12 @@ class PythonInterpreter(BaseTool):
     def config(self) -> Dict[str, Any]:
         return {
             "name": "python_interpreter",
-            "description": "在隔离环境中执行Python代码，用于计算、数据处理等任务。当用户明确要求执行Python代码、计算、数据分析等时必须调用此工具。重要：此工具执行实际代码执行操作，不要用文字回复，必须调用工具执行。",
+            "description": (
+                "在隔离环境中执行Python代码，用于计算、数据处理和生成文件等任务。"
+                "当用户明确要求执行Python代码、计算、数据分析或生成文件时必须调用此工具。"
+                "重要：此工具执行实际代码执行操作，不要用文字回复，必须调用工具执行。"
+                "如果使用 fpdf 生成 PDF，必须先调用 pdf.add_page()，再执行 rect/cell/multi_cell 等绘图操作。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -61,6 +66,15 @@ class PythonInterpreter(BaseTool):
 
             stdout = result.get("stdout", "")
             stderr = result.get("stderr", "")
+            failed = result.get("success") is False or result.get("exit_code", 0) not in (0, None)
+            if failed:
+                details = stderr or stdout or "进程异常退出"
+                if "No page open, you need to call add_page() first" in details:
+                    details += (
+                        "\n提示：使用 fpdf 绘图前请先调用 pdf.add_page()，"
+                        "修正脚本后重试。"
+                    )
+                return f"执行错误 (退出码 {result.get('exit_code', '未知')}):\n{details}"
             if stderr:
                 return f"执行结果:\n{stdout}\n\n[stderr]\n{stderr}"
             if stdout:

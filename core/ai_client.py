@@ -675,15 +675,14 @@ class OpenAIClient(BaseAIClient):
         "grok_search",
         "web_search",
         "crawl_webpage",
-        "resource_find",
-        "download_file",
-        "video_download",
-        "jmcomic_download",
+        # 搜索和下载结果仍需回传模型，才能继续执行后续动作（例如
+        # resource_find -> download_file -> send_platform_file）。
+        # 将这些工具列为 direct-return 会在第一步后提前结束整条链路。
+        # python_interpreter 同样保持可组合，便于“生成文件后发送”等多步任务。
         "send_platform_file",
         "group_file_downloader",
         "local_file_finder",
         "qq_file_reader",
-        "python_interpreter",
     ]
 
     def __init__(
@@ -944,8 +943,9 @@ class OpenAIClient(BaseAIClient):
                         tool_call, result = tr
                         tool_call_id_to_result[tool_call.id] = (tool_call, result)
 
-                    # 批量资源搜索/发送已经是完整动作，聚合结果后直接返回，
-                    # 避免模型在发送失败或成功后继续跑浏览器/Python 检查。
+                    # 终止型工具（例如发送文件）已经是完整动作，聚合结果后直接返回，
+                    # 避免模型在发送完成后继续跑浏览器/Python 检查。可组合的搜索/下载
+                    # 工具不在 direct-return 列表中，必须把结果交回模型继续编排。
                     if tool_calls and all(
                         tc.function.name in self._direct_return_tools for tc in tool_calls
                     ):

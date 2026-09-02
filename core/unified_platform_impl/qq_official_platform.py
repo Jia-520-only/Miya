@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from core.unified_platform.base import BasePlatform
@@ -397,13 +398,15 @@ class QQOfficialPlatform(MessageMixin, BasePlatform):
         import os as _os
 
         file_uri = f"file:///{file_path.replace(_os.sep, '/')}"
-        is_image = _os.path.splitext(file_path)[1].lower() in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
-        file_type = 1 if is_image else 4
+        file_type = self._qq_official_file_type(file_path)
 
         peer_id = self._resolve_qqofficial_openid(target)
 
-        if not is_image:
-            logger.warning(f"[{self.platform_id}] QQ 官方 bot API 不支持通用文件发送（仅支持 image/video/voice）")
+        if file_type is None:
+            logger.warning(
+                f"[{self.platform_id}] QQ 官方 bot API 不支持该文件类型: {_os.path.splitext(file_path)[1].lower()}"
+                "（仅支持图片、视频、语音）"
+            )
             return False
 
         try:
@@ -430,6 +433,20 @@ class QQOfficialPlatform(MessageMixin, BasePlatform):
         except Exception as e:
             logger.error(f"[{self.platform_id}] 文件发送 API 调用失败: {e}")
             return False
+
+    @staticmethod
+    def _qq_official_file_type(file_path: str) -> Optional[int]:
+        """Map a local file to QQ Official's supported file_type values."""
+        ext = os.path.splitext(file_path)[1].lower()
+        # QQ Official documents only JPG/PNG image uploads.
+        if ext in {".jpg", ".jpeg", ".png"}:
+            return 1  # image
+        # The video endpoint accepts MP4, and voice uploads must be Silk.
+        if ext == ".mp4":
+            return 2  # video
+        if ext == ".silk":
+            return 3  # voice
+        return None
 
     @staticmethod
     def _resolve_qqofficial_openid(target: str) -> str:

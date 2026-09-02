@@ -104,6 +104,15 @@ class WeixinIlinkPlatform(MessageMixin, BasePlatform):
         self._client_ready = False
         self._shutdown_event = asyncio.Event()
         self._message_task: asyncio.Task | None = None
+        # iLink accepts individual uploads but can throttle several concurrent
+        # sendmessage calls. Keep media sends ordered per account.
+        self._media_send_lock = asyncio.Lock()
+        self._last_media_send_at = 0.0
+        try:
+            configured_interval = float(self.config.get("media_send_interval", 0.6))
+        except (TypeError, ValueError):
+            configured_interval = 0.6
+        self._media_send_interval = max(configured_interval, 0.0)
 
     async def _do_connect(self) -> bool:
         try:
@@ -419,18 +428,31 @@ class WeixinIlinkPlatform(MessageMixin, BasePlatform):
 
                 caption = (getattr(outbound_file, "caption", "") or "").strip() or None
                 kind = MediaKind.IMAGE if outbound_file.is_image else MediaKind.FILE
-                await self._client.send_media(
-                    peer_id=peer_id,
-                    content=data,
-                    kind=kind,
-                    file_name=outbound_file.file_name,
-                    caption=caption,
-                )
+                async with self._media_send_lock:
+                    elapsed = time.monotonic() - self._last_media_send_at
+                    if elapsed < self._media_send_interval:
+                        await asyncio.sleep(self._media_send_interval - elapsed)
+                    await self._client.send_media(
+                        peer_id=peer_id,
+                        content=data,
+                        kind=kind,
+                        file_name=outbound_file.file_name,
+                        caption=caption,
+                    )
+                    self._last_media_send_at = time.monotonic()
                 self._record_message_out()
                 logger.info(f"[{self.platform_id}] 文件已发送: {outbound_file.file_name} -> {peer_id}")
                 return True
             except Exception as e:
-                logger.warning(f"[{self.platform_id}] send_media 失败: {e}")
+                error_code = getattr(e, "code", None)
+                logger.warning(
+                    "[%s] send_media 失败: file=%s peer=%s code=%s error=%s",
+                    self.platform_id,
+                    outbound_file.file_name,
+                    peer_id,
+                    error_code if error_code is not None else "-",
+                    e,
+                )
                 return False
 
         return False

@@ -8,13 +8,14 @@
 
 import asyncio
 import contextlib
+import html as html_lib
 import logging
 import os
 import re
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import aiohttp
 
@@ -39,6 +40,33 @@ def _get_proxy() -> Optional[str]:
         return str(p).strip() or None
     except Exception:
         return None
+
+
+def _normalize_url(raw: Any, base_url: str = "") -> str:
+    """Normalize URLs copied from HTML/JSON/JS search pages."""
+    if raw is None:
+        return ""
+    value = html_lib.unescape(str(raw)).strip()
+    # Search pages commonly escape slashes as \\/ or \\u002F.
+    for _ in range(2):
+        value = value.replace("\\\\/", "/").replace("\\/", "/")
+        value = re.sub(
+            r"\\\\u([0-9a-fA-F]{4})|\\u([0-9a-fA-F]{4})",
+            lambda m: chr(int(m.group(1) or m.group(2), 16)),
+            value,
+        )
+    value = value.strip().rstrip("\\`);'\" ,")
+    if value.startswith("//"):
+        value = f"https:{value}"
+    elif value and not re.match(r"^[a-z][a-z0-9+.-]*://", value, re.I) and base_url:
+        value = urljoin(base_url, value)
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return ""
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        return ""
+    return value
 
 
 def _find_chrome() -> Optional[str]:
@@ -314,7 +342,7 @@ async def _smart_web_search(query: str, resource_type: str) -> List[Dict[str, st
         for r in group:
             if not isinstance(r, dict):
                 continue
-            u = (r.get("url") or "").strip()
+            u = _normalize_url(r.get("url"))
             if not u:
                 continue
             clean = re.sub(r"\?.*", "", u).rstrip("/").lower()
@@ -415,6 +443,35 @@ def _is_direct_source(src: str) -> bool:
             "浏览器-",
         )
     )
+
+
+_DIRECT_DOWNLOAD_DOMAINS = (
+    "gdown.baidu.com",
+    "down.gameloop.com",
+    "imtt.dd.qq.com",
+)
+
+
+def _looks_like_direct_url(url: str, resource_type: str) -> bool:
+    """Recognize extracted file URLs even when the server omits an extension."""
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return False
+    path = parsed.path.lower()
+    extensions = {
+        "image": (".jpg", ".jpeg", ".png", ".webp", ".gif"),
+        "video": (".mp4", ".mkv", ".webm", ".avi", ".mov", ".flv"),
+        "apk": (".apk",),
+        "program": (".exe", ".msi", ".dmg", ".pkg", ".deb", ".rpm", ".appimage"),
+        "document": (".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".epub"),
+        "archive": (".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".iso"),
+        "audio": (".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".opus"),
+    }
+    wanted = extensions.get(resource_type, tuple(ext for values in extensions.values() for ext in values))
+    if any(path.endswith(ext) for ext in wanted):
+        return True
+    return parsed.netloc.lower().split(":", 1)[0] in _DIRECT_DOWNLOAD_DOMAINS
 
 
 async def _moe_booru_search(query: str, count: int, site: str = "yande.re") -> List[Dict[str, str]]:
@@ -1192,18 +1249,15 @@ def _extract_urls(html: str, extractors: List[str]) -> List[str]:
     seen = set()
     for pattern in extractors:
         for match in re.finditer(pattern, html, re.I):
-            url = match.group(1) if match.lastindex else match.group(0)
-            url = url.replace("&amp;", "&").replace("\\/", "/")
-            # 清理 JS 语句残留（如从 window.open('...'); 中提取的 URL 带 ); 尾巴）
-            url = url.rstrip("`);'\" ,")
-            if url.startswith("//"):
-                url = f"https:{url}"
-            if any(d in url.lower() for d in _EXCLUDE_DOMAINS):
+            raw_url = match.group(1) if match.lastindex else match.group(0)
+            url = _normalize_url(raw_url)
+            if not url or any(d in url.lower() for d in _EXCLUDE_DOMAINS):
                 continue
             if len(url) < 15:
                 continue
-            if url not in seen:
-                seen.add(url)
+            key = url.rstrip("/").lower()
+            if key not in seen:
+                seen.add(key)
                 results.append(url)
     return results
 
@@ -1219,17 +1273,15 @@ def _extract_subpage_links(html: str, base_url: str = "") -> List[str]:
     ]
     for pattern in patterns:
         for match in re.finditer(pattern, html, re.I):
-            url = match.group(1).replace("&amp;", "&").replace("\\/", "/")
-            if url.startswith("//"):
-                url = f"https:{url}"
-            elif url and not url.startswith("http") and base_url:
-                url = urljoin(base_url, url)
-            if any(d in url.lower() for d in _EXCLUDE_DOMAINS):
+            raw_url = match.group(1).strip()
+            if raw_url.startswith("#") or raw_url.lower().startswith("javascript:"):
                 continue
-            if url.startswith("#") or url.startswith("javascript:"):
+            url = _normalize_url(raw_url, base_url)
+            if not url or any(d in url.lower() for d in _EXCLUDE_DOMAINS):
                 continue
-            if url not in seen:
-                seen.add(url)
+            key = url.rstrip("/").lower()
+            if key not in seen:
+                seen.add(key)
                 results.append(url)
     return results[:5]
 
@@ -1527,7 +1579,8 @@ class ResourceFindTool(BaseTool):
                 for u in extracted:
                     if u not in seen:
                         seen.add(u)
-                        crawled_urls.append({"title": "", "url": u, "source": "页面提取"})
+                        source = "直链" if _looks_like_direct_url(u, resource_type) else "页面提取"
+                        crawled_urls.append({"title": "", "url": u, "source": source})
                         if len(crawled_urls) >= count:
                             break
                 if len(crawled_urls) >= count:
@@ -1564,7 +1617,8 @@ class ResourceFindTool(BaseTool):
                         for u in extracted:
                             if u not in seen:
                                 seen.add(u)
-                                crawled_urls.append({"title": "", "url": u, "source": "深层提取"})
+                                source = "直链" if _looks_like_direct_url(u, resource_type) else "深层提取"
+                                crawled_urls.append({"title": "", "url": u, "source": source})
                                 if len(crawled_urls) >= count:
                                     break
                         if len(crawled_urls) >= count:
