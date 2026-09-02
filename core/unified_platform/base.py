@@ -333,6 +333,8 @@ class BasePlatform(ABC):
         默认使用 aiohttp 直接下载。
         """
         import os
+        import tempfile
+        from urllib.parse import unquote, urlsplit
 
         try:
             import aiohttp
@@ -342,21 +344,42 @@ class BasePlatform(ABC):
             download_dir = get_downloads_dir()
             os.makedirs(download_dir, exist_ok=True)
 
-            local_name = file_name or os.path.basename(url.split("?", 1)[0] or f"download_{id(url)}")
-            local_path = os.path.join(download_dir, local_name)
+            parsed = urlsplit(str(url).strip())
+            if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+                logger.warning(f"[{self.platform_id}] 拒绝非 HTTP(S) 附件 URL: {url}")
+                return None
 
+            # 仅保留文件名，避免 file_name/URL 路径穿越到 downloads 目录之外。
+            local_name = os.path.basename(unquote(file_name or os.path.basename(parsed.path)))
+            local_name = local_name.strip() or f"download_{id(url)}.bin"
+            local_path = os.path.join(download_dir, local_name)
             if os.path.exists(local_path):
-                os.remove(local_path)
+                stem, ext = os.path.splitext(local_name)
+                counter = 1
+                while os.path.exists(local_path):
+                    local_name = f"{stem}_{counter}{ext}"
+                    local_path = os.path.join(download_dir, local_name)
+                    counter += 1
+
+            temp_path = None
 
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-                    if resp.status != 200:
+                async with session.get(
+                    str(url).strip(),
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+                    timeout=aiohttp.ClientTimeout(total=60),
+                ) as resp:
+                    if resp.status < 200 or resp.status >= 300:
                         logger.warning(f"[{self.platform_id}] 下载失败 HTTP {resp.status}: {url}")
                         return None
                     data = await resp.read()
 
-            with open(local_path, "wb") as f:
+            with tempfile.NamedTemporaryFile(
+                mode="wb", delete=False, dir=download_dir, prefix=".miya_download_", suffix=".part"
+            ) as f:
                 f.write(data)
+                temp_path = f.name
+            os.replace(temp_path, local_path)
 
             logger.debug(f"[{self.platform_id}] 文件已下载: {local_path} ({len(data)} bytes)")
             return local_path
@@ -366,6 +389,11 @@ class BasePlatform(ABC):
         except Exception as e:
             logger.warning(f"[{self.platform_id}] 下载附件异常: {e}")
             return None
+        finally:
+            if "temp_path" in locals() and temp_path:
+                with contextlib.suppress(OSError):
+                    if os.path.exists(temp_path):
+                        os.unlink(temp_path)
 
     async def send_file(
         self,

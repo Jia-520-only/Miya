@@ -675,6 +675,11 @@ class OpenAIClient(BaseAIClient):
         "grok_search",
         "web_search",
         "crawl_webpage",
+        "resource_find",
+        "download_file",
+        "video_download",
+        "jmcomic_download",
+        "send_platform_file",
         "group_file_downloader",
         "local_file_finder",
         "qq_file_reader",
@@ -939,6 +944,17 @@ class OpenAIClient(BaseAIClient):
                         tool_call, result = tr
                         tool_call_id_to_result[tool_call.id] = (tool_call, result)
 
+                    # 批量资源搜索/发送已经是完整动作，聚合结果后直接返回，
+                    # 避免模型在发送失败或成功后继续跑浏览器/Python 检查。
+                    if tool_calls and all(
+                        tc.function.name in self._direct_return_tools for tc in tool_calls
+                    ):
+                        return "\n".join(
+                            str(tool_call_id_to_result[tc.id][1])
+                            for tc in tool_calls
+                            if tc.id in tool_call_id_to_result
+                        )
+
                     for tc in tool_calls:
                         if tc.id not in tool_call_id_to_result:
                             logger.warning(f"[AIClient] 工具 {tc.function.name} 未返回结果，添加占位响应")
@@ -951,6 +967,12 @@ class OpenAIClient(BaseAIClient):
                             )
                             continue
                         tool_call, result = tool_call_id_to_result[tc.id]
+
+                        if len(tool_calls) == 1 and tc.function.name in self._direct_return_tools:
+                            logger.info(
+                                f"[AIClient] 检测到直接返回工具: {tc.function.name}，直接返回结果"
+                            )
+                            return result
 
                         # 检查工具结果是否包含 FINAL 标记
                         if result and result.startswith("[FINAL]"):
@@ -985,6 +1007,7 @@ class OpenAIClient(BaseAIClient):
                 else:
                     # 串行执行（使用公共方法）
                     final_detected = False
+                    executed_results = []
                     for tool_call in tool_calls:
                         _, result = await self._execute_tool_call(tool_call, self.tool_context)
 
@@ -1007,16 +1030,20 @@ class OpenAIClient(BaseAIClient):
                         elif final_marker:
                             return final_marker
 
-                        # 检查是否是直接返回工具
-                        direct_return_tools = self._direct_return_tools
-                    if tool_call.function.name in direct_return_tools:
-                        logger.info(f"[AIClient] 检测到直接返回工具: {tool_call.function.name}，直接返回结果")
-                        return result
+                        if len(tool_calls) == 1 and tool_call.function.name in self._direct_return_tools:
+                            logger.info(
+                                f"[AIClient] 检测到直接返回工具: {tool_call.function.name}，直接返回结果"
+                            )
+                            return result
 
-                    # 添加工具结果消息
-                    tool_result_msg = AIMessage(role="tool", content=result, tool_call_id=tool_call.id)
-                    current_messages.append(tool_result_msg)
-                    logger.info(f"[AIClient] 工具结果已添加到对话历史: {result[:100] if result else '(无结果)'}")
+                        executed_results.append((tool_call, result))
+
+                    # 添加所有工具结果消息，不能只保留最后一个调用的结果。
+                    for tool_call, result in executed_results:
+                        current_messages.append(AIMessage(role="tool", content=result, tool_call_id=tool_call.id))
+                        logger.info(
+                            f"[AIClient] 工具结果已添加到对话历史: {result[:100] if result else '(无结果)'}"
+                        )
 
                 iteration += 1
 

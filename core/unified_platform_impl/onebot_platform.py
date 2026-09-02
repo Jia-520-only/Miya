@@ -291,7 +291,10 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                     except Exception as e:
                         if self._shutting_down:
                             break
-                        logger.warning(f"[{self.platform_id}] 连接断开: {e}, {retry_delay}s 后重连")
+                        if retry_delay <= 4:
+                            logger.warning(f"[{self.platform_id}] 连接断开: {e}, {retry_delay}s 后重连")
+                        else:
+                            logger.debug(f"[{self.platform_id}] 连接断开: {e}, {retry_delay}s 后重连")
                         self._connected = False
                         self._ws = None
                         await asyncio.sleep(retry_delay)

@@ -71,6 +71,7 @@ async def _open_page(url: str):
     from playwright.async_api import async_playwright
 
     p = await async_playwright().start()
+    browser = None
     try:
         browser = await p.chromium.launch(
             headless=True,
@@ -93,6 +94,9 @@ async def _open_page(url: str):
         await page.goto(url, timeout=45000, wait_until="domcontentloaded")
         return page, browser, p
     except Exception:
+        if browser is not None:
+            with contextlib.suppress(Exception):
+                await browser.close()
         with contextlib.suppress(Exception):
             await p.stop()
         return None
@@ -1123,13 +1127,15 @@ async def _browser_bing_images(query: str, count: int) -> List[Dict[str, str]]:
         ("Bing", f"https://www.bing.com/images/search?q={query}&first=1"),
     ]
     for name, search_url in urls_to_try:
+        opened = None
+        browser = None
+        playwright = None
         try:
             opened = await _open_page(search_url)
             if not opened:
                 continue
-            page, browser, p = opened
+            page, browser, playwright = opened
             await asyncio.sleep(3)
-
             imgs = await page.evaluate("""() => {
                 const r = []; const seen = new Set();
                 document.querySelectorAll('img[src]').forEach(i => {
@@ -1140,7 +1146,6 @@ async def _browser_bing_images(query: str, count: int) -> List[Dict[str, str]]:
                 });
                 return r.slice(0, 50);
             }""")
-
             results = []
             seen = set()
             for img in imgs:
@@ -1150,14 +1155,17 @@ async def _browser_bing_images(query: str, count: int) -> List[Dict[str, str]]:
                     results.append({"title": img.get("alt", ""), "url": u, "source": f"浏览器-{name}"})
                     if len(results) >= count:
                         break
-
-            await browser.close()
-            await p.stop()
-
             if results:
                 return results
         except Exception as e:
             logger.warning(f"[{name}] 浏览器兜底搜索失败: {e}")
+        finally:
+            if browser is not None:
+                with contextlib.suppress(Exception):
+                    await browser.close()
+            if playwright is not None:
+                with contextlib.suppress(Exception):
+                    await playwright.stop()
 
     return []
 
@@ -1350,24 +1358,27 @@ class ResourceFindTool(BaseTool):
         }
 
     async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
-        query = args.get("query", "").strip()
-        resource_type = args.get("resource_type", "any")
-        count = min(args.get("count", 10), 30)
-        site = _resolve_site(args.get("site", ""))
+        query = str(args.get("query") or "").strip()
+        resource_type = str(args.get("resource_type") or "any").strip().lower()
+        try:
+            count = max(1, min(int(args.get("count", 10)), 30))
+        except (TypeError, ValueError):
+            count = 10
+        site = _resolve_site(str(args.get("site") or ""))
 
         if not query:
             return _msg("query_required")
 
         try:
             # Phase 1: 智能多引擎搜索（查询扩展 + Tavily 优先 + 免费引擎兜底）
-            search_results = await _smart_web_search(query, resource_type)
+            search_results = [] if site else await _smart_web_search(query, resource_type)
 
             # Phase 1.5: 图片额外查 booru/pixiv 图源
             booru_results = []
             bili_results = []
             pixiv_results = []
             booru_extra = []
-            if resource_type in ("image", "any"):
+            if resource_type in ("image", "any") and not site:
                 booru_results, bili_results, pixiv_results, r34, gel, kon, safe = await asyncio.gather(
                     _yandere_search(query, count),
                     _bilibili_images(query, count),
@@ -1393,7 +1404,7 @@ class ResourceFindTool(BaseTool):
             bili_video_results = []
             iwara_results = []
             ph_results = []
-            if resource_type in ("video", "any"):
+            if resource_type in ("video", "any") and not site:
                 bili_video_results, iwara_results, ph_results = await asyncio.gather(
                     _bilibili_videos(query, count),
                     _iwara_search(query, count),
@@ -1410,7 +1421,7 @@ class ResourceFindTool(BaseTool):
             # Phase 1.6: APK 额外查应用宝
             yyb_results = []
             package_name = args.get("package_name", "")
-            if resource_type in ("apk", "any") and package_name:
+            if resource_type in ("apk", "any") and package_name and not site:
                 yyb_results = await _yingyongbao_apk(package_name)
 
             # Phase 1.7: 指定网站搜索

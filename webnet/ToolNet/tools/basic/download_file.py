@@ -24,6 +24,16 @@ from webnet.ToolNet.file_categories import classify as _classify
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
+
+
+def _default_ua() -> str:
+    """返回下载请求使用的默认 UA。"""
+    return _DEFAULT_USER_AGENT
+
 
 def _get_config():
     try:
@@ -56,6 +66,33 @@ def _safe_filename(name: str) -> str:
     if not name or name in (".", ".."):
         return "downloaded"
     return name
+
+
+def _as_bool(value: Any, default: bool = True) -> bool:
+    """将配置/模型可能传入的字符串布尔值正确归一化。"""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"false", "0", "no", "off", "否"}:
+            return False
+        if lowered in {"true", "1", "yes", "on", "是"}:
+            return True
+    return default if value is None else bool(value)
+
+
+def _as_number(value: Any, default: float, minimum: float = 0) -> float:
+    try:
+        return max(float(value), minimum)
+    except (TypeError, ValueError):
+        return default
+
+
+def _validate_url(url: str) -> Optional[str]:
+    parsed = urlparse(url)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        return "❌ 仅支持 http/https 文件 URL"
+    return None
 
 
 def _extract_filename(url: str, content_type: str = "") -> str:
@@ -131,21 +168,25 @@ class DownloadFileTool(BaseTool):
         }
 
     async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
-        url = args.get("url", "").strip()
-        save_dir = args.get("save_dir", "")
-        filename = args.get("filename", "")
-        categorize = bool(args.get("categorize", True))
+        url = str(args.get("url") or "").strip()
+        save_dir = str(args.get("save_dir") or "")
+        filename = str(args.get("filename") or "")
+        categorize = _as_bool(args.get("categorize", True), True)
 
         if not url:
             return "❌ 请提供文件 URL"
+        invalid_url = _validate_url(url)
+        if invalid_url:
+            return invalid_url
 
         if filename:
             filename = _safe_filename(filename)
 
         cfg = _get_config()
-        max_size = cfg["max_size_mb"] * 1024 * 1024 if cfg["max_size_mb"] > 0 else float("inf")
-        timeout = cfg["timeout"]
-        max_retries = max(1, int(cfg["max_retries"]))
+        max_size_mb = _as_number(cfg["max_size_mb"], 0)
+        max_size = max_size_mb * 1024 * 1024 if max_size_mb > 0 else float("inf")
+        timeout = _as_number(cfg["timeout"], 600, minimum=1)
+        max_retries = max(1, int(_as_number(cfg["max_retries"], 2)))
 
         miya_root = Path(__file__).resolve().parent.parent.parent.parent.parent
 
@@ -165,10 +206,19 @@ class DownloadFileTool(BaseTool):
                     async with session.get(
                         url, timeout=aiohttp.ClientTimeout(total=timeout), headers=headers
                     ) as resp:
-                        if resp.status != 200:
-                            return f"❌ 下载失败 (HTTP {resp.status})"
+                        if resp.status < 200 or resp.status >= 300:
+                            last_err = f"HTTP {resp.status}"
+                            if resp.status in {401, 403, 404}:
+                                return f"❌ 下载失败 (HTTP {resp.status})"
+                            raise aiohttp.ClientResponseError(
+                                resp.request_info, resp.history, status=resp.status, message="download failed"
+                            )
 
                         content_type = resp.headers.get("Content-Type", "").split(";")[0].strip()
+
+                        content_length = _as_number(resp.headers.get("Content-Length"), 0)
+                        if content_length and content_length > max_size:
+                            return f"❌ 文件超过大小限制 ({max_size_mb:g} MB)"
 
                         if not filename:
                             filename = _safe_filename(_extract_filename(url, content_type))
@@ -188,15 +238,17 @@ class DownloadFileTool(BaseTool):
 
                         downloaded = 0
                         chunk_size = 64 * 1024
-                        with open(dest_path, "wb") as f:
+                        temp_path = dest_path.with_name(f".{dest_path.name}.part")
+                        with open(temp_path, "wb") as f:
                             async for chunk in resp.content.iter_chunked(chunk_size):
                                 downloaded += len(chunk)
                                 if downloaded > max_size:
                                     f.close()
                                     with contextlib.suppress(OSError):
-                                        os.unlink(dest_path)
-                                    return f"❌ 文件超过大小限制 ({cfg['max_size_mb']} MB)"
+                                        os.unlink(temp_path)
+                                    return f"❌ 文件超过大小限制 ({max_size_mb:g} MB)"
                                 f.write(chunk)
+                        os.replace(temp_path, dest_path)
 
                 size_mb = dest_path.stat().st_size / (1024 * 1024)
                 category = _classify(filename)
@@ -218,6 +270,11 @@ class DownloadFileTool(BaseTool):
             except Exception as e:
                 last_err = str(e)
                 logger.error(f"[下载] 异常 (第{attempt}次): {e}", exc_info=True)
+
+            # 无论是超时、网络错误还是其他异常，都清理本次尝试留下的临时文件。
+            with contextlib.suppress(OSError):
+                if "temp_path" in locals() and temp_path.exists():
+                    temp_path.unlink()
 
             if attempt < max_retries:
                 await asyncio.sleep(1 * attempt)

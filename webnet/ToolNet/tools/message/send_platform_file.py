@@ -38,9 +38,12 @@ _DATA_SEARCH_DIRS = [
 ]
 
 
-def _resolve_target(context: ToolContext) -> str:
-    """解析目标 ID：优先用平台原始 ID"""
-    return str(getattr(context, "platform_user_id", None) or context.group_id or context.user_id or "")
+def _resolve_target(context: ToolContext, target_type: str = "private") -> str:
+    """按会话类型解析目标，避免群聊误用发送者 ID。"""
+    platform_user_id = getattr(context, "platform_user_id", None)
+    if target_type == "private":
+        return str(platform_user_id or context.user_id or context.group_id or "")
+    return str(context.group_id or platform_user_id or context.user_id or "")
 
 
 def _resolve_platform_adapter(context: ToolContext):
@@ -66,7 +69,7 @@ def _platform_supports_file(platform) -> bool:
 
 
 def _find_in_data(name_or_pattern: str) -> List[str]:
-    """在 data/ 目录树中查找匹配的文件，按 mtime 倒序"""
+    """在 data/ 目录树中递归查找匹配的文件，按 mtime 倒序。"""
     results: List[str] = []
 
     query_lower = name_or_pattern.lower().strip()
@@ -76,17 +79,31 @@ def _find_in_data(name_or_pattern: str) -> List[str]:
         if not search_path.exists():
             continue
         try:
-            for entry in search_path.iterdir():
+            for entry in search_path.rglob("*"):
                 if not entry.is_file():
                     continue
                 entry_lower = entry.name.lower()
                 if query_lower in entry_lower or entry_lower == query_lower:
                     results.append(str(entry))
+                    if len(results) >= 20:
+                        break
         except PermissionError:
             continue
 
     results.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     return results[:20]
+
+
+def _valid_data_directory(directory: str) -> bool:
+    """确保 list_data_files 的目录参数不会跳出 data/。"""
+    if not directory:
+        return True
+    try:
+        candidate = (_DATA_ROOT / directory).resolve()
+        candidate.relative_to(_DATA_ROOT.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
 
 
 def _resolve_local_path(file_path: str, auto_search: bool = True) -> Optional[str]:
@@ -113,7 +130,7 @@ def _resolve_local_path(file_path: str, auto_search: bool = True) -> Optional[st
 
 
 def _is_url(s: str) -> bool:
-    return s.startswith(("http://", "https://"))
+    return s.lower().startswith(("http://", "https://"))
 
 
 class SendPlatformFileTool(BaseTool):
@@ -148,7 +165,7 @@ class SendPlatformFileTool(BaseTool):
                     "target_type": {
                         "type": "string",
                         "description": "目标会话类型",
-                        "enum": ["group", "private"],
+                        "enum": ["group", "private", "channel"],
                         "default": "group",
                     },
                 },
@@ -158,11 +175,13 @@ class SendPlatformFileTool(BaseTool):
 
     async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
         try:
-            file_path = args.get("file_path", "").strip()
-            file_name = args.get("file_name", "")
-            caption = args.get("caption", "")
-            source = args.get("source", "auto")
-            target_type = args.get("target_type", context.message_type or "private")
+            file_path = str(args.get("file_path") or "").strip()
+            file_name = str(args.get("file_name") or "").strip()
+            caption = str(args.get("caption") or "")
+            source = str(args.get("source") or "auto").strip().lower()
+            target_type = str(args.get("target_type") or context.message_type or "private").strip().lower()
+            if target_type not in {"private", "group", "channel"}:
+                return f"❌ 未知的目标类型: {target_type}"
 
             if not file_path:
                 return "❌ 请提供文件路径、文件名或 URL"
@@ -173,7 +192,7 @@ class SendPlatformFileTool(BaseTool):
             if not _platform_supports_file(platform):
                 return "❌ 当前平台不支持文件发送"
 
-            target_id = _resolve_target(context)
+            target_id = _resolve_target(context, target_type)
             if not target_id:
                 return "❌ 无法确定发送目标"
 
@@ -271,9 +290,14 @@ class ListDataFilesTool(BaseTool):
 
     async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
         try:
-            search = args.get("search", "").strip()
-            directory = args.get("directory", "").strip().rstrip("/\\")
-            limit = args.get("limit", 20)
+            search = str(args.get("search") or "").strip()
+            directory = str(args.get("directory") or "").strip().rstrip("/\\")
+            try:
+                limit = max(1, min(int(args.get("limit", 20)), 100))
+            except (TypeError, ValueError):
+                limit = 20
+            if not _valid_data_directory(directory):
+                return "❌ directory 必须位于 data/ 目录内"
 
             dirs = [directory] if directory else _DATA_SEARCH_DIRS
 
@@ -283,7 +307,11 @@ class ListDataFilesTool(BaseTool):
                 if not search_path.exists():
                     continue
                 try:
-                    for entry in sorted(search_path.iterdir(), key=lambda e: e.stat().st_mtime, reverse=True):
+                    for entry in sorted(
+                        (p for p in search_path.rglob("*") if p.is_file()),
+                        key=lambda e: e.stat().st_mtime,
+                        reverse=True,
+                    ):
                         if not entry.is_file():
                             continue
                         if search and search.lower() not in entry.name.lower():
