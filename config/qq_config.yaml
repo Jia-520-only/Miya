@@ -348,6 +348,12 @@ compatibility:
       support_array: true                 # 支持数组格式
       support_string: true                # 支持字符串格式
       auto_detect: true                   # 自动检测
+    # 图片传输方式：base64 适合 Docker NapCat（默认），file 适合同机 NapCat
+    # 也可用环境变量 QQ_ONEBOT_IMAGE_TRANSPORT=file/base64 临时覆盖
+    image_transport: "base64"
+    # 文件传输方式：base64 适合 Docker NapCat（默认），file 适合同机 NapCat
+    # 也可用环境变量 QQ_ONEBOT_FILE_TRANSPORT=file/base64 临时覆盖
+    file_transport: "base64"
   legacy:
     old_qq_py: false                      # 兼容旧的 qq.py
     import_aliases: true                  # 导入别名

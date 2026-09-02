@@ -88,6 +88,8 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                 with open(config_path, "r", encoding="utf-8") as f:
                     full = yaml.safe_load(f) or {}
                     qq = full.get("qq", {})
+                    compatibility = full.get("compatibility", {})
+                    onebot_compatibility = compatibility.get("onebot", {})
                     return {
                         "superadmin_qq": os.getenv("QQ_SUPERADMIN_QQ", ""),
                         "group_whitelist": qq.get("access_control", {}).get("group_whitelist", []),
@@ -102,6 +104,8 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                         "image_analysis_timeout": qq.get("image_recognition", {})
                         .get("ai_analysis", {})
                         .get("timeout", 30),
+                        "image_transport": onebot_compatibility.get("image_transport", "base64"),
+                        "file_transport": onebot_compatibility.get("file_transport", "base64"),
                     }
         except Exception as e:
             logger.debug(f"[{self.platform_id}] 加载 qq_config.yaml 失败: {e}")
@@ -606,7 +610,6 @@ class OneBotPlatform(MessageMixin, BasePlatform):
     async def _send_onebot_poke_reply(self, user_id: str, group_id: str, text: str):
         """拍一拍回复：文字 + data/emoji 随机图"""
         import random
-        from pathlib import Path
 
         is_group = bool(group_id)
         action = "send_group_msg" if is_group else "send_private_msg"
@@ -626,22 +629,27 @@ class OneBotPlatform(MessageMixin, BasePlatform):
             )
         )
         try:
-            emoji_dir = Path(__file__).parent.parent.parent / "data" / "emoji"
-            images = (
-                [p for ext in ("*.png", "*.jpg", "*.jpeg", "*.gif") for p in emoji_dir.rglob(ext)]
-                if emoji_dir.exists()
-                else []
-            )
+            # NapCat may run in a Linux container while Miya runs on Windows.
+            emoji_dir = Path(__file__).resolve().parents[2] / "data" / "emoji"
+            allowed_extensions = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+            images = [
+                path
+                for path in emoji_dir.rglob("*")
+                if path.is_file() and path.suffix.lower() in allowed_extensions
+            ] if emoji_dir.is_dir() else []
             if images:
-                img = str(random.choice(images).absolute())
-                logger.info(f"[{self.platform_id}] 发送随机表情: {img[-30:]}")
+                image_path = str(random.choice(images))
+                file_ref = await self._get_onebot_image_ref(image_path)
+                if not file_ref:
+                    return
+                logger.info(f"[{self.platform_id}] 发送随机表情: {image_path[-30:]}")
                 await self._ws.send_str(
                     json.dumps(
                         {
                             "action": action,
                             "params": {
                                 target: target_val,
-                                "message": [{"type": "image", "data": {"file": img}}],
+                                "message": [{"type": "image", "data": {"file": file_ref}}],
                             },
                         }
                     )
@@ -1377,6 +1385,61 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         abs_path = _os.path.abspath(file_path).replace(_os.sep, "/")
         return f"file:///{abs_path}"
 
+    def _get_onebot_image_transport(self) -> str:
+        """Return image transport mode: ``file``, ``base64`` or default ``base64``.
+
+        ``file`` is suitable when NapCat runs on the same host.  ``base64``
+        works across Docker/host boundaries and is therefore the default.
+        ``QQ_ONEBOT_IMAGE_TRANSPORT`` overrides the YAML setting at runtime.
+        """
+        configured = os.getenv("QQ_ONEBOT_IMAGE_TRANSPORT", "").strip().lower()
+        if not configured:
+            configured = str(self._config_data.get("image_transport", "base64")).strip().lower()
+        return configured if configured in {"file", "base64"} else "base64"
+
+    async def _get_onebot_image_ref(self, file_path: str) -> Optional[str]:
+        """Build the OneBot image ``file`` value for the selected transport."""
+        if not os.path.exists(file_path):
+            logger.warning(f"[{self.platform_id}] 图片文件不存在: {file_path}")
+            return None
+
+        if self._get_onebot_image_transport() == "file":
+            return await self.upload_image(file_path)
+
+        try:
+            import base64
+
+            with open(file_path, "rb") as image_file:
+                return "base64://" + base64.b64encode(image_file.read()).decode("ascii")
+        except OSError as exc:
+            logger.warning(f"[{self.platform_id}] 图片读取失败: {file_path}: {exc}")
+            return None
+
+    def _get_onebot_file_transport(self) -> str:
+        """Return file transport mode: ``file`` or ``base64`` (default)."""
+        configured = os.getenv("QQ_ONEBOT_FILE_TRANSPORT", "").strip().lower()
+        if not configured:
+            configured = str(self._config_data.get("file_transport", "base64")).strip().lower()
+        return configured if configured in {"file", "base64"} else "base64"
+
+    async def _get_onebot_file_ref(self, file_path: str) -> Optional[str]:
+        """Build the OneBot file segment reference for either deployment mode."""
+        if not os.path.exists(file_path):
+            logger.warning(f"[{self.platform_id}] 文件不存在: {file_path}")
+            return None
+
+        if self._get_onebot_file_transport() == "file":
+            return await self.upload_file(file_path)
+
+        try:
+            import base64
+
+            with open(file_path, "rb") as source:
+                return "base64://" + base64.b64encode(source.read()).decode("ascii")
+        except OSError as exc:
+            logger.warning(f"[{self.platform_id}] 文件读取失败: {file_path}: {exc}")
+            return None
+
     async def send_image(
         self,
         target: str = "",
@@ -1412,7 +1475,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                 logger.warning(f"[{self.platform_id}] 图片文件不存在: {image_path}")
                 return False
 
-            file_id = await self.upload_image(image_path)
+            file_id = await self._get_onebot_image_ref(image_path)
             if not file_id:
                 logger.warning(f"[{self.platform_id}] 图片上传失败: {image_path}")
                 return False
@@ -1637,7 +1700,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         if not target_type:
             target_type = msg_type or "private"
 
-        # 写入临时文件，用 file:// 结构化段发送（NapCat 自动上传）
+        # 写入临时文件，再按 OneBot 图片传输模式构造结构化消息段。
         tmp = tempfile.NamedTemporaryFile(suffix=os.path.splitext(image_name)[1] or ".png", delete=False)
         tmp_path = tmp.name
         tmp.close()
@@ -1645,7 +1708,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
             f.write(image_data)
 
         try:
-            file_ref = await self.upload_image(tmp_path)
+            file_ref = await self._get_onebot_image_ref(tmp_path)
             if not file_ref:
                 return None
             segments = [{"type": "image", "data": {"file": file_ref}}]
@@ -1677,7 +1740,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         if not self._ws or not self._connected:
             return None
 
-        file_id = await self.upload_image(image_path)
+        file_id = await self._get_onebot_image_ref(image_path)
         if not file_id:
             logger.warning(f"[{self.platform_id}] 图片上传失败: {image_path}")
             return None
@@ -1704,7 +1767,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         if not self._ws or not self._connected:
             return None
 
-        file_id = await self.upload_image(image_path)
+        file_id = await self._get_onebot_image_ref(image_path)
         if not file_id:
             logger.warning(f"[{self.platform_id}] 图片上传失败: {image_path}")
             return None
@@ -1722,8 +1785,8 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         return {"status": "ok"}
 
     async def send_group_file(self, group_id: int, file_path: str, caption: str = ""):
-        """发送群文件消息（file 结构化段 + file:// 本地路径）"""
-        file_ref = await self.upload_file(file_path)
+        """发送群文件消息（结构化 file 段，支持本地 URI/base64 双模式）"""
+        file_ref = await self._get_onebot_file_ref(file_path)
         if not file_ref:
             return None
         segments = []
@@ -1742,8 +1805,8 @@ class OneBotPlatform(MessageMixin, BasePlatform):
             return {"status": "ok"}
 
     async def send_private_file(self, user_id: int, file_path: str, caption: str = ""):
-        """发送私聊文件消息（file 结构化段 + file:// 本地路径）"""
-        file_ref = await self.upload_file(file_path)
+        """发送私聊文件消息（结构化 file 段，支持本地 URI/base64 双模式）"""
+        file_ref = await self._get_onebot_file_ref(file_path)
         if not file_ref:
             return None
         segments = []
@@ -2091,7 +2154,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
     async def _send_onebot_file_inner(
         self, file_path: str, file_name: str, caption: str, msg_type: str, target: str
     ) -> bool:
-        """单文件发送核心逻辑（需在 _file_send_lock 内调用）"""
+        """单文件发送核心逻辑（需在 _file_send_lock 内调用）。"""
         import os as _os
 
         is_image = self._is_image_file(file_path)
@@ -2107,13 +2170,13 @@ class OneBotPlatform(MessageMixin, BasePlatform):
             segments.append({"type": "text", "data": {"text": caption}})
 
         if is_image:
-            file_id = await self.upload_image(file_path)
+            file_id = await self._get_onebot_image_ref(file_path)
             if not file_id:
                 logger.warning(f"[{self.platform_id}] 图片上传失败: {file_path}")
                 return False
             segments.append({"type": "image", "data": {"file": file_id}})
         else:
-            file_id = await self.upload_file(file_path)
+            file_id = await self._get_onebot_file_ref(file_path)
             if not file_id:
                 logger.warning(f"[{self.platform_id}] 文件上传失败: {file_path}")
                 return False
