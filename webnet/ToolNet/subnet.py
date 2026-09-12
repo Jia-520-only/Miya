@@ -113,6 +113,8 @@ class ToolSubnet:
         sender_name: Optional[str] = None,
         lifenet: Any = None,
         at_list: List[int] = field(default_factory=list),
+        platform_adapter: Any = None,
+        platform_user_id: Optional[str] = None,
     ) -> str:
         """执行工具
 
@@ -147,6 +149,8 @@ class ToolSubnet:
             message_type=message_type,
             sender_name=sender_name,
             at_list=at_list if at_list is not None else [],
+            platform_adapter=platform_adapter,
+            platform_user_id=platform_user_id,
         )
 
         try:

@@ -84,6 +84,15 @@ def test_onebot_file_reference_log_summary_hides_base64():
     assert "编码120字符" in summary
 
 
+def test_ai_tool_dispatch_preserves_group_context():
+    source = Path(__file__).resolve().parents[1] / "core" / "ai_client.py"
+    text = source.read_text(encoding="utf-8")
+    dispatch = text[text.index("async def _dispatch_tool_execution"):]
+    assert "group_id=context.get(\"group_id\")" in dispatch
+    assert "message_type=context.get(\"message_type\")" in dispatch
+    assert "platform_user_id=context.get(\"platform_user_id\")" in dispatch
+
+
 @pytest.mark.anyio
 async def test_send_platform_file_normalizes_null_arguments():
     result = await send_platform_file.SendPlatformFileTool().execute(

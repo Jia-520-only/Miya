@@ -559,9 +559,22 @@ class BaseAIClient:
         subnet = _get_toolnet_subnet()
         if subnet is None or not subnet.registry.get_tool(tool_name):
             return None
-        context_user = tool_context.get("user_id") if isinstance(tool_context, dict) else None
+        context = tool_context if isinstance(tool_context, dict) else {}
+        context_user = context.get("user_id")
         try:
-            return await subnet.execute_tool(tool_name, args, user_id=context_user)
+            # 保留完整会话上下文。此前这里只传 user_id，导致群聊工具执行时
+            # 丢失 group_id/message_type，文件发送被安全守卫拦截（或旧版本误发私聊）。
+            return await subnet.execute_tool(
+                tool_name,
+                args,
+                user_id=context_user,
+                group_id=context.get("group_id"),
+                message_type=context.get("message_type"),
+                sender_name=context.get("sender_name"),
+                platform_adapter=context.get("platform_adapter"),
+                platform_user_id=context.get("platform_user_id"),
+                at_list=context.get("at_list") or [],
+            )
         except Exception as exc:
             logger.warning(f"[AIClient] ToolNet 分发失败 {tool_name}: {exc}")
             return None
