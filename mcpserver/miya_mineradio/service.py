@@ -16,15 +16,32 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-MINERADIO_PATH = (
-    Path(os.getenv("MINERADIO_PATH", ""))
-    if os.getenv("MINERADIO_PATH")
-    else Path(__file__).resolve().parents[2] / "music" / "Mineradio"
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_DEFAULT_PLAYER_PATHS = (
+    _PROJECT_ROOT.parent / "music" / "MiyaMusicPlayer",
+    _PROJECT_ROOT.parent / "music" / "Mineradio",
+    _PROJECT_ROOT / "music" / "MiyaMusicPlayer",
+    _PROJECT_ROOT / "music" / "Mineradio",
 )
+
+
+def _resolve_player_path() -> Path:
+    configured = os.getenv("MINERADIO_PATH")
+    if configured:
+        return Path(configured).expanduser()
+    for candidate in _DEFAULT_PLAYER_PATHS:
+        if candidate.is_dir():
+            return candidate
+    return _DEFAULT_PLAYER_PATHS[0]
+
+
+MINERADIO_PATH = _resolve_player_path()
 PORT_FILE = MINERADIO_PATH / ".miya-port"
 DEFAULT_PORT = 3000
 WS_PATH = "/miya"
 CONNECT_TIMEOUT = 3.0
+COMMAND_TIMEOUT = 10.0
+SUPPORTED_SOURCES = ("netease", "qq", "kugou", "qishui", "spotify")
 
 
 class MiyaMineradioService:
@@ -41,6 +58,7 @@ class MiyaMineradioService:
         self._state: Dict[str, Any] = {}
         self._listen_task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
+        self._track_cache: Dict[tuple[str, str], Dict[str, Any]] = {}
 
     def get_tool_definitions(self) -> List[dict]:
         return [
@@ -107,7 +125,7 @@ class MiyaMineradioService:
                         "limit": {"type": "integer", "description": "返回数量，默认 10"},
                         "source": {
                             "type": "string",
-                            "description": "音乐源: netease(网易云) 或 qq(QQ音乐)，默认 netease",
+                            "description": "音乐源: netease、qq、kugou、qishui 或 spotify，默认 netease",
                         },
                     },
                     "required": ["query"],
@@ -120,7 +138,7 @@ class MiyaMineradioService:
                     "type": "object",
                     "properties": {
                         "song_id": {"type": "string", "description": "歌曲 ID（来自 mineradio_search 结果）"},
-                        "source": {"type": "string", "description": "音乐源: netease 或 qq，默认 netease"},
+                        "source": {"type": "string", "description": "音乐源: netease、qq、kugou、qishui 或 spotify，默认 netease"},
                         "title": {"type": "string", "description": "歌曲标题（可选）"},
                         "artist": {"type": "string", "description": "歌手名（可选）"},
                         "cover": {"type": "string", "description": "封面 URL（可选）"},
@@ -135,7 +153,7 @@ class MiyaMineradioService:
                     "type": "object",
                     "properties": {
                         "song_id": {"type": "string", "description": "歌曲 ID"},
-                        "source": {"type": "string", "description": "音乐源: netease 或 qq"},
+                        "source": {"type": "string", "description": "音乐源: netease、qq、kugou、qishui 或 spotify"},
                         "title": {"type": "string", "description": "歌曲标题（可选）"},
                         "artist": {"type": "string", "description": "歌手名（可选）"},
                         "cover": {"type": "string", "description": "封面 URL（可选）"},
@@ -155,7 +173,7 @@ class MiyaMineradioService:
             },
             {
                 "name": "mineradio_get_playlists",
-                "description": "获取 Mineradio 中用户的歌单列表（含网易云和 QQ 音乐）",
+                "description": "获取 Mineradio 中各音乐来源的用户歌单列表",
                 "inputSchema": {"type": "object", "properties": {}, "required": []},
             },
             {
@@ -165,7 +183,7 @@ class MiyaMineradioService:
                     "type": "object",
                     "properties": {
                         "playlist_id": {"type": "string", "description": "歌单 ID"},
-                        "source": {"type": "string", "description": "音乐源: netease 或 qq"},
+                        "source": {"type": "string", "description": "音乐源: netease、qq、kugou、qishui 或 spotify"},
                     },
                     "required": ["playlist_id", "source"],
                 },
@@ -177,7 +195,7 @@ class MiyaMineradioService:
                     "type": "object",
                     "properties": {
                         "playlist_id": {"type": "string", "description": "歌单 ID"},
-                        "source": {"type": "string", "description": "音乐源: netease 或 qq"},
+                        "source": {"type": "string", "description": "音乐源: netease、qq、kugou、qishui 或 spotify"},
                     },
                     "required": ["playlist_id", "source"],
                 },
@@ -315,10 +333,18 @@ class MiyaMineradioService:
         try:
             import websockets
         except ImportError:
-            raise RuntimeError("Please install websockets: pip install websockets")
+            raise RuntimeError(
+                "Mineradio control requires the 'websockets' package. "
+                "Install Miya dependencies with: python -m pip install 'websockets>=12.0'"
+            )
+
+        if not MINERADIO_PATH.is_dir():
+            raise RuntimeError(f"Mineradio directory does not exist: {MINERADIO_PATH}")
 
         try:
-            self._ws = await websockets.connect(url, open_timeout=CONNECT_TIMEOUT)
+            ws = await websockets.connect(url, open_timeout=CONNECT_TIMEOUT)
+            await ws.send(json.dumps({"type": "identity", "role": "external"}))
+            self._ws = ws
             self._listen_task = asyncio.create_task(self._listen_loop())
             logger.info("Connected to Mineradio")
             return
@@ -339,7 +365,9 @@ class MiyaMineradioService:
         for i in range(15):
             await asyncio.sleep(1.5)
             try:
-                self._ws = await websockets.connect(url, open_timeout=CONNECT_TIMEOUT)
+                ws = await websockets.connect(url, open_timeout=CONNECT_TIMEOUT)
+                await ws.send(json.dumps({"type": "identity", "role": "external"}))
+                self._ws = ws
                 self._listen_task = asyncio.create_task(self._listen_loop())
                 logger.info("Connected to Mineradio after launch")
                 return
@@ -364,26 +392,37 @@ class MiyaMineradioService:
         return DEFAULT_PORT
 
     async def _listen_loop(self):
+        ws = self._ws
         try:
-            async for raw in self._ws:
+            async for raw in ws:
                 try:
                     msg = json.loads(raw)
                     if msg.get("type") == "response":
                         req_id = msg.get("request_id", "")
-                        if req_id and req_id in self._pending:
-                            self._pending[req_id].set_result(msg)
+                        future = self._pending.get(req_id)
+                        if req_id and future and not future.done():
+                            future.set_result(msg)
                     elif msg.get("type") == "state_update":
                         self._state = msg.get("data", {})
                 except json.JSONDecodeError:
                     pass
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.info("Mineradio WebSocket disconnected: %s", exc)
+        finally:
+            if self._ws is ws:
+                self._ws = None
+            error = ConnectionError("Mineradio WebSocket disconnected")
+            for future in list(self._pending.values()):
+                if not future.done():
+                    future.set_exception(error)
 
     async def _send_command(self, action: str, params: dict = None) -> dict:
         await self._ensure_connected()
+        if self._ws is None:
+            raise ConnectionError("Mineradio WebSocket is not connected")
         self._request_counter += 1
         request_id = str(self._request_counter)
-        future: asyncio.Future = asyncio.Future()
+        future = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
         try:
             payload = json.dumps(
@@ -395,10 +434,65 @@ class MiyaMineradioService:
                 }
             )
             await self._ws.send(payload)
-            result = await asyncio.wait_for(future, timeout=10.0)
+            result = await asyncio.wait_for(future, timeout=COMMAND_TIMEOUT)
+            if action == "get_status" and isinstance(result, dict):
+                data = result.get("data")
+                if isinstance(data, dict):
+                    self._state = data
             return result
+        except (asyncio.TimeoutError, ConnectionError) as exc:
+            if self._ws is not None:
+                try:
+                    await self._ws.close()
+                except Exception:
+                    pass
+                self._ws = None
+            raise RuntimeError(f"Mineradio command '{action}' failed: {exc}") from exc
         finally:
             self._pending.pop(request_id, None)
+
+    @staticmethod
+    def _normalize_source(source: Any) -> str:
+        value = str(source or "netease").strip().lower()
+        if value not in SUPPORTED_SOURCES:
+            supported = ", ".join(SUPPORTED_SOURCES)
+            raise ValueError(f"Unsupported remote music source '{value}'. Supported sources: {supported}")
+        return value
+
+    def _cache_tracks(self, source: str, items: List[dict]) -> None:
+        for item in items:
+            song_id = str(
+                item.get("id")
+                or item.get("song_id")
+                or item.get("mid")
+                or item.get("songmid")
+                or item.get("hash")
+                or item.get("fileHash")
+                or item.get("audioHash")
+                or item.get("providerSongId")
+                or ""
+            ).strip()
+            if not song_id:
+                continue
+            album = item.get("album", "")
+            if isinstance(album, dict):
+                album = album.get("name", "")
+            artist = item.get("artist", "") or item.get("singer", "") or item.get("singerName", "")
+            if not artist and item.get("artists"):
+                artist = ", ".join(str(a.get("name", "")) for a in item["artists"])
+            cached = dict(item)
+            cached.update({
+                "song_id": song_id,
+                "title": item.get("name") or item.get("title", ""),
+                "artist": artist,
+                "album": album,
+                "cover": item.get("cover", ""),
+                "source": source,
+            })
+            self._track_cache[(source, song_id)] = cached
+
+    def _cached_track(self, source: str, song_id: str) -> Optional[Dict[str, Any]]:
+        return self._track_cache.get((source, str(song_id).strip()))
 
     async def _get_status(self, args: dict) -> str:
         resp = await self._send_command("get_status")
@@ -428,6 +522,8 @@ class MiyaMineradioService:
 
     async def _seek(self, args: dict) -> str:
         position = float(args.get("position", 0))
+        if position < 0:
+            return json.dumps({"ok": False, "error": "Seek position must be non-negative"}, ensure_ascii=False)
         resp = await self._send_command("seek", {"position": position})
         return json.dumps(resp, ensure_ascii=False)
 
@@ -441,9 +537,9 @@ class MiyaMineradioService:
         return json.dumps(resp, ensure_ascii=False)
 
     async def _search(self, args: dict) -> str:
-        query = args.get("query", "")
-        limit = int(args.get("limit", 10))
-        source = args.get("source", "netease")
+        query = str(args.get("query", "")).strip()
+        limit = max(1, min(50, int(args.get("limit", 10))))
+        source = self._normalize_source(args.get("source", "netease"))
 
         async def _do_search():
             try:
@@ -481,9 +577,19 @@ class MiyaMineradioService:
             )
         results = []
         for item in data["results"]:
+            song_id = (
+                item.get("id")
+                or item.get("mid")
+                or item.get("songmid")
+                or item.get("hash")
+                or item.get("fileHash")
+                or item.get("audioHash")
+                or item.get("providerSongId")
+                or ""
+            )
             results.append(
                 {
-                    "id": str(item.get("id", "")),
+                    "id": str(song_id),
                     "name": item.get("name", ""),
                     "artist": item.get("artist")
                     or (
@@ -498,8 +604,18 @@ class MiyaMineradioService:
                     or (item.get("album", {}).get("picUrl", "") if isinstance(item.get("album"), dict) else ""),
                     "source": source,
                     "mid": str(item.get("mid", "")),
+                    "provider": item.get("provider", source),
+                    "hash": item.get("hash") or item.get("fileHash") or item.get("audioHash", ""),
+                    "fileHash": item.get("fileHash", ""),
+                    "audioHash": item.get("audioHash", ""),
+                    "albumId": item.get("albumId") or item.get("album_id", ""),
+                    "albumAudioId": item.get("albumAudioId") or item.get("album_audio_id", ""),
+                    "mediaMid": item.get("mediaMid") or item.get("media_mid", ""),
+                    "spotifyId": item.get("spotifyId", ""),
+                    "spotifyUri": item.get("spotifyUri") or item.get("uri", ""),
                 }
             )
+        self._cache_tracks(source, results)
         return json.dumps(
             {
                 "ok": True,
@@ -513,9 +629,34 @@ class MiyaMineradioService:
         )
 
     async def _play_song(self, args: dict) -> str:
-        song_id = args.get("song_id", "")
-        title = args.get("title", "")
-        source = args.get("source", "netease")
+        song_id = str(args.get("song_id", "")).strip()
+        title = str(args.get("title", "")).strip()
+        source = self._normalize_source(args.get("source", "netease"))
+        artist = str(args.get("artist", "")).strip()
+        cover = str(args.get("cover", "")).strip()
+
+        # The current player bridge resolves tracks by title. Reuse metadata from
+        # a preceding search so the documented song_id flow remains usable.
+        if song_id and not title:
+            cached = self._cached_track(source, song_id)
+            if not cached:
+                return json.dumps(
+                    {
+                        "ok": False,
+                        "error": "Unknown song_id. Search first, then play the returned song_id, or provide title.",
+                    },
+                    ensure_ascii=False,
+                )
+            title = cached["title"]
+            artist = artist or cached["artist"]
+            cover = cover or cached["cover"]
+            for key in (
+                "mid", "songmid", "hash", "fileHash", "audioHash", "albumId",
+                "album_id", "albumAudioId", "album_audio_id", "mediaMid", "media_mid",
+                "spotifyId", "spotifyUri", "providerSongId",
+            ):
+                if key not in args and cached.get(key):
+                    args[key] = cached[key]
 
         # If no song_id but a title is provided, auto-search and play first result
         if (not song_id) and title:
@@ -534,8 +675,8 @@ class MiyaMineradioService:
                 song_id = str(first.get("id", ""))
                 title = first.get("name", title)
                 source = first.get("source", source)
-                args["artist"] = first.get("artist", args.get("artist", ""))
-                args["cover"] = first.get("cover", args.get("cover", ""))
+                artist = first.get("artist", artist)
+                cover = first.get("cover", cover)
 
         if not song_id:
             return json.dumps(
@@ -552,21 +693,56 @@ class MiyaMineradioService:
                 "song_id": song_id,
                 "source": source,
                 "title": title,
-                "artist": args.get("artist", ""),
-                "cover": args.get("cover", ""),
+                "artist": artist,
+                "cover": cover,
+                **{key: args[key] for key in (
+                    "mid", "songmid", "hash", "fileHash", "audioHash", "albumId",
+                    "album_id", "albumAudioId", "album_audio_id", "mediaMid", "media_mid",
+                    "spotifyId", "spotifyUri", "providerSongId",
+                ) if args.get(key)},
             },
         )
         return json.dumps(resp, ensure_ascii=False)
 
     async def _add_to_queue(self, args: dict) -> str:
+        song_id = str(args.get("song_id", "")).strip()
+        source = self._normalize_source(args.get("source", "netease"))
+        title = str(args.get("title", "")).strip()
+        artist = str(args.get("artist", "")).strip()
+        cover = str(args.get("cover", "")).strip()
+        if song_id and not title:
+            cached = self._cached_track(source, song_id)
+            if not cached:
+                return json.dumps(
+                    {
+                        "ok": False,
+                        "error": "Unknown song_id. Search first, then add the returned song_id, or provide title.",
+                    },
+                    ensure_ascii=False,
+                )
+            title = cached["title"]
+            artist = artist or cached["artist"]
+            cover = cover or cached["cover"]
+            for key in (
+                "mid", "songmid", "hash", "fileHash", "audioHash", "albumId",
+                "album_id", "albumAudioId", "album_audio_id", "mediaMid", "media_mid",
+                "spotifyId", "spotifyUri", "providerSongId",
+            ):
+                if key not in args and cached.get(key):
+                    args[key] = cached[key]
         resp = await self._send_command(
             "add_to_queue",
             {
-                "song_id": args.get("song_id", ""),
-                "source": args.get("source", "netease"),
-                "title": args.get("title", ""),
-                "artist": args.get("artist", ""),
-                "cover": args.get("cover", ""),
+                "song_id": song_id,
+                "source": source,
+                "title": title,
+                "artist": artist,
+                "cover": cover,
+                **{key: args[key] for key in (
+                    "mid", "songmid", "hash", "fileHash", "audioHash", "albumId",
+                    "album_id", "albumAudioId", "album_audio_id", "mediaMid", "media_mid",
+                    "spotifyId", "spotifyUri", "providerSongId",
+                ) if args.get(key)},
             },
         )
         return json.dumps(resp, ensure_ascii=False)
@@ -588,6 +764,7 @@ class MiyaMineradioService:
                 "queue_length": data.get("queue_length", 0),
                 "queue_index": data.get("queue_index", -1),
                 "mode": data.get("mode", "loop"),
+                "queue": data.get("queue", []),
             },
             ensure_ascii=False,
             indent=2,
@@ -595,11 +772,33 @@ class MiyaMineradioService:
 
     async def _get_playlists(self, args: dict) -> str:
         resp = await self._send_command("get_playlists")
-        return json.dumps(resp.get("data", resp), ensure_ascii=False, indent=2)
+        data = resp.get("data", resp)
+        if not isinstance(data, dict):
+            return json.dumps(data, ensure_ascii=False, indent=2)
+
+        # The player may return provider metadata under a misleading legacy key
+        # (for example a Kugou list inside `netease`). Preserve that information
+        # instead of making callers attempt an incompatible playlist endpoint.
+        grouped = {source: [] for source in SUPPORTED_SOURCES}
+        unsupported: Dict[str, list] = {}
+        for key, playlists in data.items():
+            if not isinstance(playlists, list):
+                continue
+            for playlist in playlists:
+                if not isinstance(playlist, dict):
+                    continue
+                actual_source = str(playlist.get("source") or playlist.get("provider") or key).lower()
+                if actual_source in grouped:
+                    grouped[actual_source].append(playlist)
+                else:
+                    unsupported.setdefault(actual_source, []).append(playlist)
+        if unsupported:
+            grouped["unsupported"] = unsupported
+        return json.dumps(grouped, ensure_ascii=False, indent=2)
 
     async def _get_playlist_tracks(self, args: dict) -> str:
         playlist_id = args.get("playlist_id", "")
-        source = args.get("source", "netease")
+        source = self._normalize_source(args.get("source", "netease"))
         resp = await self._send_command(
             "get_playlist_tracks",
             {
@@ -607,11 +806,16 @@ class MiyaMineradioService:
                 "source": source,
             },
         )
-        return json.dumps(resp.get("data", resp), ensure_ascii=False, indent=2)
+        data = resp.get("data", resp)
+        if isinstance(data, dict):
+            tracks = data.get("tracks") or data.get("songs") or []
+            if isinstance(tracks, list):
+                self._cache_tracks(source, tracks)
+        return json.dumps(data, ensure_ascii=False, indent=2)
 
     async def _play_list(self, args: dict) -> str:
         playlist_id = args.get("playlist_id", "")
-        source = args.get("source", "netease")
+        source = self._normalize_source(args.get("source", "netease"))
 
         tracks_resp = await self._send_command(
             "get_playlist_tracks",
@@ -637,6 +841,15 @@ class MiyaMineradioService:
                     "artist": track.get("artist", ""),
                     "cover": track.get("cover", ""),
                     "source": source,
+                    "provider": track.get("provider", source),
+                    "mid": track.get("mid", ""),
+                    "hash": track.get("hash") or track.get("fileHash") or track.get("audioHash", ""),
+                    "fileHash": track.get("fileHash", ""),
+                    "albumId": track.get("albumId") or track.get("album_id", ""),
+                    "albumAudioId": track.get("albumAudioId") or track.get("album_audio_id", ""),
+                    "mediaMid": track.get("mediaMid") or track.get("media_mid", ""),
+                    "spotifyId": track.get("spotifyId", ""),
+                    "spotifyUri": track.get("spotifyUri") or track.get("uri", ""),
                 }
             )
 
@@ -729,6 +942,8 @@ class MiyaMineradioService:
                     "connected": True,
                     "state": self._state,
                     "port": self._read_port_file(),
+                    "player_path": str(MINERADIO_PATH),
+                    "supported_sources": list(SUPPORTED_SOURCES),
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -736,9 +951,12 @@ class MiyaMineradioService:
         except Exception as e:
             return json.dumps(
                 {
-                    "ok": True,
+                    "ok": False,
                     "connected": False,
                     "error": str(e),
+                    "player_path": str(MINERADIO_PATH),
+                    "port": self._read_port_file(),
+                    "supported_sources": list(SUPPORTED_SOURCES),
                 },
                 ensure_ascii=False,
                 indent=2,
