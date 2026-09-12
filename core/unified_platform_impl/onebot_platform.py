@@ -234,6 +234,59 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                         at_list.append(int(at_qq))
         return at_list
 
+    def _direct_image_analysis_allowed(
+        self,
+        content: str = "",
+        *,
+        message_type: str = "group",
+        is_at_bot: bool = False,
+        is_owner: bool = False,
+        user_id: str = "",
+        group_id: str = "",
+    ) -> bool:
+        """判断当前消息中的直接图片是否允许进入视觉模型。
+
+        图片消息在进入视觉模型前必须经过这一层检查，否则 DecisionHub
+        后置的群聊守卫虽然会丢弃回复，视觉模型调用产生的 token 消耗却已经
+        发生。私聊直接图片不在这里分析，需通过引用图片分支触发；引用消息
+        由调用方单独处理，因此不在这里作为触发条件判断。
+        """
+        if message_type != "group":
+            return False
+        if is_at_bot or is_owner:
+            return True
+
+        try:
+            from core.text_loader import get_chatbot_keywords
+
+            content_lower = (content or "").lower()
+            if any(kw.lower() in content_lower for kw in get_chatbot_keywords()):
+                return True
+        except Exception:
+            # 关键词配置不可用时继续检查其它条件；对图片消息宁可跳过分析，
+            # 也不要在无法确认触发条件时调用视觉模型。
+            pass
+
+        # 关闭“仅关键词触发”后，活跃会话可继续触发回复。配置/谛听不可用
+        # 时保持默认的关键词模式，避免无意放行图片视觉分析。
+        try:
+            from config.config_utils import get_qq_config
+
+            keyword_only = bool(get_qq_config("qq", "features", "passive_chat_keyword_only", default=True))
+        except Exception:
+            keyword_only = True
+
+        if not keyword_only:
+            try:
+                from memory.diteng_listener import get_diting
+
+                if get_diting().is_user_active_with_bot(str(group_id), str(user_id)):
+                    return True
+            except Exception:
+                pass
+
+        return False
+
     # ============ 群名解析 (OneBot 专用) ============
 
     async def _resolve_group_name(self, group_id: str) -> str:
@@ -854,15 +907,29 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         if isinstance(raw_message, str) and "[CQ:image" in raw_message:
             asyncio.ensure_future(self._auto_save_string_images(raw_message, user_id))
 
-        # === 9. 图片 / 表情预过滤（纯图片且非@非超管的群消息跳过） ===
+        # === 9. 图片 / 表情预过滤 ===
+        # 群聊中的直接图片只有在 @、关键词、超管或活跃会话触发时才进入
+        # 视觉模型；私聊直接图片不自动分析；引用消息由后面的引用处理分支
+        # 单独分析。
+        direct_image_analysis_allowed = True
+        if has_direct_images:
+            direct_image_analysis_allowed = self._direct_image_analysis_allowed(
+                content,
+                message_type=msg_type,
+                is_at_bot=is_at_bot,
+                is_owner=is_owner,
+                user_id=user_id,
+                group_id=group_id_str,
+            )
         if (
             msg_type == "group"
-            and not is_at_bot
-            and not is_owner
             and has_direct_images
-            and (not content or content in ("[图片]", "[动画表情]", ""))
+            and not reply_id
+            and not direct_image_analysis_allowed
+            and not file_segments
+            and not voice_segments
         ):
-            logger.debug(f"[{self.platform_id}] 预过滤纯图片群消息: group={group_id_str}")
+            logger.debug(f"[{self.platform_id}] 预过滤未触发的群聊图片消息: group={group_id_str}")
             return
         if msg_type == "group" and not is_at_bot and not is_owner and face_only and not content:
             logger.debug(f"[{self.platform_id}] 预过滤纯表情群消息: group={group_id_str}")
@@ -877,7 +944,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                 extra["at_names"] = names
         has_media = has_direct_images
 
-        if has_direct_images and not reply_id:
+        if has_direct_images and not reply_id and direct_image_analysis_allowed:
             # 直接发送的图片（非引用）→ 下载 + 视觉分析
             for seg in image_segments[:2]:
                 img_data = seg.get("data", {})
