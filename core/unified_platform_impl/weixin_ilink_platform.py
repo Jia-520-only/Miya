@@ -113,6 +113,29 @@ class WeixinIlinkPlatform(MessageMixin, BasePlatform):
         except (TypeError, ValueError):
             configured_interval = 0.6
         self._media_send_interval = max(configured_interval, 0.0)
+        try:
+            configured_timeout = float(self.config.get("media_upload_timeout", 120.0))
+        except (TypeError, ValueError):
+            configured_timeout = 120.0
+        self._media_upload_timeout = max(configured_timeout, 15.0)
+        try:
+            configured_max_mb = float(self.config.get("media_max_mb", 0.0))
+        except (TypeError, ValueError):
+            configured_max_mb = 0.0
+        self._media_max_bytes = (
+            sys.maxsize if configured_max_mb <= 0 else max(1, int(configured_max_mb * 1024 * 1024))
+        )
+        try:
+            configured_attempts = int(self.config.get("media_upload_attempts", 3))
+        except (TypeError, ValueError):
+            configured_attempts = 3
+        self._media_upload_attempts = max(1, min(configured_attempts, 5))
+
+    def _create_ilink_transport(self):
+        """为 CDN 媒体上传创建宽松的超时传输层。"""
+        from weixin_ilink_client import IlinkTransport
+
+        return IlinkTransport(api_timeout_seconds=self._media_upload_timeout)
 
     async def _do_connect(self) -> bool:
         try:
@@ -172,11 +195,13 @@ class WeixinIlinkPlatform(MessageMixin, BasePlatform):
 
             options = ClientOptions(
                 cdn_base_url=self._cdn_base_url,
-                media_max_bytes=sys.maxsize,  # 不限制，交由微信实际能力决定
+                media_max_bytes=self._media_max_bytes,
+                media_upload_attempts=self._media_upload_attempts,
             )
 
             self._client = AsyncWeixinIlinkClient(
                 credentials,
+                transport=self._create_ilink_transport(),
                 state_store=state_store,
                 options=options,
             )

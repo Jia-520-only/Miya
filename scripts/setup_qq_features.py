@@ -178,12 +178,12 @@ qq:
   multimedia:
     # 图片处理
     image:
-      max_size: 10485760           # 10MB
+      max_size: 0                  # 0=无限制
       allowed_formats: [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]
     
     # 文件处理
     file:
-      max_size: 52428800           # 50MB
+      max_size: 0                  # 0=无限制
       allowed_formats:
         text: [".txt", ".log", ".md", ".json", ".xml", ".html", ".csv"]
         document: [".pdf", ".doc", ".docx", ".xls", ".xlsx"]

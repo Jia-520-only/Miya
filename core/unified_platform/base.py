@@ -496,7 +496,10 @@ class BasePlatform(ABC):
         return type(self)._do_send_file is not BasePlatform._do_send_file
 
     async def _ensure_online(self) -> bool:
-        if not self.is_online:
+        # DEGRADED still means the adapter is connected.  In particular,
+        # webhook/API based platforms can keep their outbound HTTP API fully
+        # usable while an inbound websocket health check is recovering.
+        if self.status not in (PlatformStatus.ONLINE, PlatformStatus.DEGRADED):
             logger.warning(f"[{self.platform_id}] 平台未在线，无法发送文件")
             return False
         return True

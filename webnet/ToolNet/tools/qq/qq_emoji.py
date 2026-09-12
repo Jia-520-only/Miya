@@ -593,12 +593,6 @@ class QQEmojiTool(BaseTool):
             if not os.path.exists(emoji_info["path"]):
                 return f"❌ 表情包文件不存在: {emoji_info['path']}"
 
-            # 检查文件大小
-            max_size = 5242880  # 5MB
-            file_size = os.path.getsize(emoji_info["path"])
-            if file_size > max_size:
-                return f"❌ 表情包文件过大: {file_size}字节 > {max_size}字节"
-
             # 读取文件并转换为 base64
             import base64
 

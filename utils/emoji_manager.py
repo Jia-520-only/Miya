@@ -292,7 +292,7 @@ class SmartEmojiManager:
                 "emoji_dir": "data/emoji",
                 "stickers_dir": "data/stickers",
                 "allowed_formats": [".gif", ".jpg", ".jpeg", ".png", ".webp", ".bmp"],
-                "max_file_size": 5242880,
+                "max_file_size": 0,
             }
         }
 
@@ -360,8 +360,8 @@ class SmartEmojiManager:
             stat = os.stat(file_path)
             file_size = stat.st_size
 
-            max_size = self.config.get("resources", {}).get("max_file_size", 5242880)
-            if file_size > max_size:
+            max_size = self.config.get("resources", {}).get("max_file_size", 0)
+            if max_size > 0 and file_size > max_size:
                 logger.warning(f"文件过大跳过: {file_path} ({file_size}字节)")
                 return None
 

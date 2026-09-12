@@ -237,6 +237,9 @@ WEIXIN_ILINK_CONFIG = {
     "cdn_base_url": "https://novac2c.cdn.weixin.qq.com/c2c",
     "bot_type": "3",
     "state_dir": "",  # 状态文件目录 (留空用系统默认)
+    "media_upload_timeout": 120,  # CDN 大文件单次上传超时（秒）
+    "media_upload_attempts": 3,
+    "media_max_mb": 0,  # 0=不预限制，交由微信服务端判定大小上限
 }
 
 # ==================== Slack ====================

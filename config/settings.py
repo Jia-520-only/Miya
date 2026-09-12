@@ -217,7 +217,7 @@ class Settings:
             },
             "multimedia": {
                 "image": {
-                    "max_size": 10485760,
+                    "max_size": 0,  # 0=无限制
                     "allowed_formats": [
                         ".jpg",
                         ".jpeg",
@@ -228,7 +228,7 @@ class Settings:
                     ],
                 },
                 "file": {
-                    "max_size": 52428800,
+                    "max_size": 0,  # 0=无限制
                 },
             },
             "image_recognition": {

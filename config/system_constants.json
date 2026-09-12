@@ -120,8 +120,8 @@
 
   "qq": {
     "max_message_size": 104857600,
-    "image_max_size": 10485760,
-    "file_max_size": 52428800,
+    "image_max_size": 0,
+    "file_max_size": 0,
     "max_daily_messages": 10,
     "min_interval": 300,
     "max_retry": 3,

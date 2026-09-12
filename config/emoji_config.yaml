@@ -17,8 +17,8 @@ emoji:
     # 支持的文件格式
     allowed_formats: [".gif", ".jpg", ".jpeg", ".png", ".webp", ".bmp"]
     
-    # 文件大小限制（单位：字节）
-    max_file_size: 5242880  # 5MB
+    # 文件大小限制（单位：字节），0=无限制
+    max_file_size: 0
     
     # 缓存配置
     cache_size_mb: 100
@@ -89,7 +89,7 @@ emoji:
   # 访问控制
   access_control:
     allow_user_upload: true
-    max_user_upload_size_mb: 5
+    max_user_upload_size_mb: 0       # 0=无限制
     allowed_upload_groups: []
     allowed_upload_users: []
     
@@ -99,7 +99,7 @@ emoji:
     save_category: "user_uploaded"
     max_user_uploads_per_user: 50
     min_image_size_kb: 10
-    max_image_size_kb: 5120
+    max_image_size_kb: 0              # 0=无限制
     
     smart_filtering:
       enabled: true

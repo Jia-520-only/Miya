@@ -211,6 +211,14 @@ class LarkPlatform(WebhookPlatform):
                 await self._ws_client._disconnect()
         self._ws_client = None
 
+    async def _do_health_check(self) -> bool:
+        """长连接客户端存在时平台仍可用。
+
+        文件发送使用独立的 HTTP API，不应因为长连接短暂重连
+        而被统一出站层拦截。
+        """
+        return self._ws_client is not None
+
     async def _do_send_file(self, target: str, outbound_file: Any, **kwargs) -> bool:
         """飞书文件发送 — upload + send"""
         if not self._app_id or not self._app_secret:
@@ -227,62 +235,91 @@ class LarkPlatform(WebhookPlatform):
         if not data:
             return False
 
-        import json as _json
         from io import BytesIO
 
         import lark_oapi as lark
         from lark_oapi.api.im.v1 import (
             CreateFileRequest,
             CreateFileRequestBody,
+            CreateImageRequest,
+            CreateImageRequestBody,
             CreateMessageRequest,
             CreateMessageRequestBody,
         )
 
         client = lark.Client.builder().app_id(self._app_id).app_secret(self._app_secret).build()
 
-        peer_id = self._resolve_lark_peer(target)
+        target_type = str(kwargs.get("message_type", "private")).lower()
+        receive_id_type = "chat_id" if target_type in {"group", "channel"} else "user_id"
+        peer_id = target if receive_id_type == "chat_id" else self._resolve_lark_peer(target)
 
         try:
-            file_type = "stream"
             if outbound_file.is_image:
-                file_type = "image"
-
-            upload_body = (
-                CreateFileRequestBody.builder()
-                .file_type(file_type)
-                .file_name(outbound_file.file_name)
-                .file(BytesIO(data))
-                .build()
-            )
-            upload_req = CreateFileRequest.builder().request_body(upload_body).build()
-            upload_resp = client.im.v1.file.create(upload_req)
+                # 飞书图片和普通文件是两套上传 API；文件 API 的
+                # file_type 不接受 "image"。
+                upload_body = (
+                    CreateImageRequestBody.builder().image_type("message").image(BytesIO(data)).build()
+                )
+                upload_req = CreateImageRequest.builder().request_body(upload_body).build()
+                upload_resp = await client.im.v1.image.acreate(upload_req)
+                media_key = getattr(getattr(upload_resp, "data", None), "image_key", "")
+                msg_content = json.dumps({"image_key": media_key})
+                media_msg_type = "image"
+            else:
+                upload_body = (
+                    CreateFileRequestBody.builder()
+                    .file_type("stream")
+                    .file_name(outbound_file.file_name)
+                    .file(BytesIO(data))
+                    .build()
+                )
+                upload_req = CreateFileRequest.builder().request_body(upload_body).build()
+                upload_resp = await client.im.v1.file.acreate(upload_req)
+                media_key = getattr(getattr(upload_resp, "data", None), "file_key", "")
+                msg_content = json.dumps({"file_key": media_key})
+                media_msg_type = "file"
 
             if not upload_resp.success():
                 logger.error(f"[lark] 文件上传失败 ({upload_resp.code}): {upload_resp.msg}")
                 return False
-
-            file_key = upload_resp.data.file_key
-
-            if outbound_file.is_image:
-                msg_content = json.dumps({"image_key": file_key})
-                msg_type = "image"
-            else:
-                msg_content = json.dumps({"file_key": file_key})
-                msg_type = "file"
-
-            caption = getattr(outbound_file, "caption", "") or ""
-            if caption:
-                msg_content = json.dumps({"file_key": file_key, "caption": caption})
+            if not media_key:
+                logger.error("[lark] 文件上传成功但未返回 media key")
+                return False
 
             msg_body = (
-                CreateMessageRequestBody.builder().receive_id(peer_id).msg_type(msg_type).content(msg_content).build()
+                CreateMessageRequestBody.builder()
+                .receive_id(peer_id)
+                .msg_type(media_msg_type)
+                .content(msg_content)
+                .build()
             )
-            msg_req = CreateMessageRequest.builder().receive_id_type("user_id").request_body(msg_body).build()
-            msg_resp = client.im.v1.message.create(msg_req)
+            msg_req = CreateMessageRequest.builder().receive_id_type(receive_id_type).request_body(msg_body).build()
+            msg_resp = await client.im.v1.message.acreate(msg_req)
 
             if not msg_resp.success():
                 logger.error(f"[lark] 文件消息发送失败 ({msg_resp.code}): {msg_resp.msg}")
                 return False
+
+            # 飞书 image/file 消息的 content 不支持 caption 字段。
+            # 媒体成功后再单独发送说明，避免附件因非法 JSON 失败。
+            caption = (getattr(outbound_file, "caption", "") or "").strip()
+            if caption:
+                caption_body = (
+                    CreateMessageRequestBody.builder()
+                    .receive_id(peer_id)
+                    .msg_type("text")
+                    .content(json.dumps({"text": caption}))
+                    .build()
+                )
+                caption_req = (
+                    CreateMessageRequest.builder()
+                    .receive_id_type(receive_id_type)
+                    .request_body(caption_body)
+                    .build()
+                )
+                caption_resp = await client.im.v1.message.acreate(caption_req)
+                if not caption_resp.success():
+                    logger.warning(f"[lark] 文件已发送，但说明发送失败 ({caption_resp.code}): {caption_resp.msg}")
 
             self._record_message_out()
             logger.info(f"[lark] 文件已发送: {outbound_file.file_name} -> {peer_id}")
@@ -313,7 +350,6 @@ class LarkPlatform(WebhookPlatform):
         except Exception:
             pass
         return target
-        return self._ws_client is not None
 
 
 class KOOKPlatform(WebhookPlatform):

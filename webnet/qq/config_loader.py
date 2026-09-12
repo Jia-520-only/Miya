@@ -76,11 +76,11 @@ class QQConfigLoader:
                 },
                 "multimedia": {
                     "image": {
-                        "max_size": 10485760,
+                        "max_size": 0,  # 0=无限制
                         "allowed_formats": [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"],
                     },
                     "file": {
-                        "max_size": 52428800,
+                        "max_size": 0,  # 0=无限制
                         "allowed_formats": {
                             "text": [".txt", ".log", ".md", ".json", ".xml", ".html", ".csv"],
                             "document": [".pdf", ".doc", ".docx"],

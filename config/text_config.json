@@ -223,7 +223,7 @@
             ".bmp",
             ".webp"
         ],
-        "max_file_size": 5242880,
+        "max_file_size": 0,
         "random_emoji_probability": 0.3
     },
     "chatbot_keywords": {

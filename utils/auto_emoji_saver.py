@@ -78,12 +78,12 @@ class AutoEmojiSaver:
         """
         # 检查图片大小
         min_size_kb = self.config.get("min_image_size_kb", 10)
-        max_size_kb = self.config.get("max_image_size_kb", 5120)
+        max_size_kb = self.config.get("max_image_size_kb", 0)
         size_kb = len(image_data) / 1024
 
         if size_kb < min_size_kb:
             return False, f"图片太小（{size_kb:.1f}KB < {min_size_kb}KB）"
-        if size_kb > max_size_kb:
+        if max_size_kb > 0 and size_kb > max_size_kb:
             return False, f"图片太大（{size_kb:.1f}KB > {max_size_kb}KB）"
 
         # 检测图片格式

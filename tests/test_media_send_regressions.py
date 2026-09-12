@@ -1,13 +1,44 @@
 """媒体下载/发送链路回归测试。"""
 
 import asyncio
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from webnet.ToolNet.tools.basic.download_file import _default_ua
 from webnet.ToolNet.tools.message import send_platform_file
 from webnet.ToolNet.base import ToolContext
+
+
+def _load_media_platform_types():
+    """按需加载媒体适配器，避免可选 AI 依赖阻塞基础回归测试收集。"""
+    try:
+        from core.file_context import OutboundFile
+        from core.unified_platform.base import BasePlatform
+        from core.unified_platform.status import PlatformStatus
+        from core.unified_platform_impl.webhook_platforms import LarkPlatform
+        from core.unified_platform_impl.weixin_ilink_platform import WeixinIlinkPlatform
+
+        return OutboundFile, BasePlatform, PlatformStatus, LarkPlatform, WeixinIlinkPlatform
+    except ModuleNotFoundError as exc:
+        pytest.skip(f"媒体适配器可选依赖未安装: {exc.name}")
+
+
+def test_file_send_size_limits_default_to_unlimited(tmp_path):
+    """应用侧发送配置使用 0 表示不预限制文件字节数。"""
+    project_root = Path(__file__).resolve().parents[1]
+    constants = json.loads((project_root / "config" / "system_constants.json").read_text(encoding="utf-8"))
+    assert constants["qq"]["image_max_size"] == 0
+    assert constants["qq"]["file_max_size"] == 0
+
+    from webnet.qq.config_loader import QQConfigLoader
+
+    fallback = QQConfigLoader(config_path=str(tmp_path / "missing_qq_config.yaml"))._get_default_config()
+    multimedia = fallback["qq"]["multimedia"]
+    assert multimedia["image"]["max_size"] == 0
+    assert multimedia["file"]["max_size"] == 0
 
 
 def test_download_has_runtime_user_agent():
@@ -77,3 +108,156 @@ async def test_send_platform_file_serializes_same_adapter(tmp_path):
 
     assert all("已发送" in result for result in results)
     assert platform.max_active == 1
+
+
+@pytest.mark.anyio
+async def test_degraded_platform_can_still_attempt_http_file_send():
+    _, BasePlatform, PlatformStatus, _, _ = _load_media_platform_types()
+
+    class FakePlatform(BasePlatform):
+        platform_id = "http-platform"
+        platform_name = "HTTP platform"
+
+        def __init__(self):
+            super().__init__()
+            self.sent = False
+
+        async def _do_connect(self):
+            return True
+
+        async def _do_disconnect(self):
+            return None
+
+        async def _do_health_check(self):
+            return False
+
+        async def _do_send_file(self, target, outbound_file, **kwargs):
+            self.sent = True
+            return True
+
+    platform = FakePlatform()
+    platform._set_status(PlatformStatus.DEGRADED)
+
+    assert await platform.send_file(target="user", file_data=b"ok", file_name="note.txt")
+    assert platform.sent
+
+
+class _LarkResponse:
+    code = 0
+    msg = ""
+
+    def __init__(self, **data):
+        self.data = SimpleNamespace(**data)
+
+    def success(self):
+        return True
+
+
+class _LarkEndpoint:
+    def __init__(self, response):
+        self.response = response
+        self.calls = []
+
+    async def acreate(self, request):
+        self.calls.append(request)
+        return self.response
+
+
+def _fake_lark_client():
+    image = _LarkEndpoint(_LarkResponse(image_key="img-key"))
+    file = _LarkEndpoint(_LarkResponse(file_key="file-key"))
+    message = _LarkEndpoint(_LarkResponse())
+    client = SimpleNamespace(im=SimpleNamespace(v1=SimpleNamespace(image=image, file=file, message=message)))
+    return client, image, file, message
+
+
+def _patch_lark_client(monkeypatch, client):
+    import lark_oapi as lark
+
+    class Builder:
+        def app_id(self, _value):
+            return self
+
+        def app_secret(self, _value):
+            return self
+
+        def build(self):
+            return client
+
+    monkeypatch.setattr(lark.Client, "builder", staticmethod(Builder))
+
+
+@pytest.mark.anyio
+async def test_lark_health_uses_its_long_connection_client():
+    _, _, _, LarkPlatform, _ = _load_media_platform_types()
+
+    platform = LarkPlatform({"app_id": "app", "app_secret": "secret"})
+    assert not await platform._do_health_check()
+    platform._ws_client = object()
+    assert await platform._do_health_check()
+
+
+@pytest.mark.anyio
+async def test_lark_uses_image_api_group_target_and_separate_caption(monkeypatch):
+    OutboundFile, _, _, LarkPlatform, _ = _load_media_platform_types()
+
+    client, image, file, message = _fake_lark_client()
+    _patch_lark_client(monkeypatch, client)
+    platform = LarkPlatform({"app_id": "app", "app_secret": "secret"})
+    outbound = OutboundFile.from_bytes(b"png", filename="photo.png", caption="图片说明")
+
+    assert await platform._do_send_file("chat-id", outbound, message_type="group")
+    assert len(image.calls) == 1
+    assert not file.calls
+    assert len(message.calls) == 2
+
+    media_request, caption_request = message.calls
+    assert media_request.receive_id_type == "chat_id"
+    assert media_request.request_body.receive_id == "chat-id"
+    assert media_request.request_body.msg_type == "image"
+    assert json.loads(media_request.request_body.content) == {"image_key": "img-key"}
+    assert caption_request.receive_id_type == "chat_id"
+    assert caption_request.request_body.msg_type == "text"
+    assert json.loads(caption_request.request_body.content) == {"text": "图片说明"}
+
+
+@pytest.mark.anyio
+async def test_lark_uses_file_api_for_arbitrary_private_files(monkeypatch):
+    OutboundFile, _, _, LarkPlatform, _ = _load_media_platform_types()
+
+    client, image, file, message = _fake_lark_client()
+    _patch_lark_client(monkeypatch, client)
+    platform = LarkPlatform({"app_id": "app", "app_secret": "secret"})
+    monkeypatch.setattr(platform, "_resolve_lark_peer", lambda _target: "mapped-user")
+    outbound = OutboundFile.from_bytes(b"zip", filename="archive.zip")
+
+    assert await platform._do_send_file("canonical-user", outbound, message_type="private")
+    assert not image.calls
+    assert len(file.calls) == 1
+    assert file.calls[0].request_body.file_type == "stream"
+    assert len(message.calls) == 1
+    request = message.calls[0]
+    assert request.receive_id_type == "user_id"
+    assert request.request_body.receive_id == "mapped-user"
+    assert request.request_body.msg_type == "file"
+    assert json.loads(request.request_body.content) == {"file_key": "file-key"}
+
+
+@pytest.mark.anyio
+async def test_weixin_media_transport_uses_configured_large_upload_timeout():
+    _, _, _, _, WeixinIlinkPlatform = _load_media_platform_types()
+
+    platform = WeixinIlinkPlatform(
+        {
+            "media_upload_timeout": 180,
+            "media_upload_attempts": 4,
+            "media_max_mb": 64,
+        }
+    )
+    transport = platform._create_ilink_transport()
+    try:
+        assert transport.api_timeout_seconds == 180
+        assert platform._media_upload_attempts == 4
+        assert platform._media_max_bytes == 64 * 1024 * 1024
+    finally:
+        await transport.aclose()
