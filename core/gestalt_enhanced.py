@@ -543,6 +543,8 @@ class GestaltControllerEnhanced:
                 bot_qq: Any = None
                 image_data: Any = None
                 image_analysis: Any = None
+                platform_adapter: Any = None
+                platform_user_id: Any = None
 
         supported_fields = {
             "qq_net",
@@ -564,6 +566,8 @@ class GestaltControllerEnhanced:
             "bot_qq",
             "image_data",
             "image_analysis",
+            "platform_adapter",
+            "platform_user_id",
         }
 
         filtered = {k: v for k, v in context.items() if k in supported_fields}

@@ -671,13 +671,15 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         "set_group_ban",
     }
 
-    async def _call_onebot_api(self, action: str, params: Dict, timeout: float = 3.0) -> Optional[Dict]:
+    async def _call_onebot_api(
+        self, action: str, params: Dict, timeout: float = 3.0, *, detailed: bool = False
+    ) -> Optional[Dict]:
         """调用 OneBot API — 优先 WebSocket echo；查询类动作失败才回退 HTTP。
 
         发送类动作（消息/文件/点赞/拍一拍）非幂等：echo 超时并不意味着发送失败
         （NapCat 上传图片/文件后才应答，耗时常超过 3 秒），此时通过 HTTP 重发
         会造成群聊/私聊收到重复消息。因此发送类动作：
-        - 使用更长的 echo 超时（15s）
+        - 使用至少 15s 的 echo 超时；媒体上传可显式延长到 120s
         - 永不回退 HTTP 重发
         - 超时时返回 {"echo_timeout": True} 标记，视为"结果未知但已处理"
         """
@@ -685,7 +687,9 @@ class OneBotPlatform(MessageMixin, BasePlatform):
             return None
 
         is_send = action in self._SEND_ACTIONS
-        effective_timeout = 15.0 if is_send else timeout
+        # 调用方可为媒体上传显式提供更长窗口（例如 120s）；普通文字发送
+        # 仍使用 15s，避免异常连接长期占用任务。
+        effective_timeout = max(15.0, float(timeout)) if is_send else timeout
         echo = f"miya_{action}_{id(params)}"
         future: asyncio.Future = asyncio.get_event_loop().create_future()
         self._pending_echoes[echo] = future
@@ -704,9 +708,13 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                 return result.get("data")
             if is_send:
                 # NapCat 明确返回失败状态 → 不重试，避免重复发送
+                if detailed:
+                    return {"_miya_status": "failed", "response": result or {}}
                 return None
         except asyncio.TimeoutError:
             if is_send:
+                if detailed:
+                    return {"_miya_status": "timeout"}
                 logger.warning(
                     f"[{self.platform_id}] {action} echo 超时({effective_timeout:.0f}s)："
                     f"消息可能已送达，跳过 HTTP 重发以避免重复发送"
@@ -714,6 +722,8 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                 return {"status": "ok", "data": {"echo_timeout": True}}
         except Exception as e:
             if is_send:
+                if detailed:
+                    return {"_miya_status": "error", "error": str(e)}
                 logger.warning(f"[{self.platform_id}] {action} WS 发送异常，跳过 HTTP 重发: {e}")
                 return None
         finally:
@@ -1786,43 +1796,21 @@ class OneBotPlatform(MessageMixin, BasePlatform):
 
     async def send_group_file(self, group_id: int, file_path: str, caption: str = ""):
         """发送群文件消息（结构化 file 段，支持本地 URI/base64 双模式）"""
-        file_ref = await self._get_onebot_file_ref(file_path)
-        if not file_ref:
+        if not self._ws or not self._connected:
             return None
-        segments = []
-        if caption:
-            segments.append({"type": "text", "data": {"text": caption}})
-        segments.append({"type": "file", "data": {"file": file_ref}})
-        if self._ws and self._connected:
-            await self._ws.send_str(
-                json.dumps(
-                    {
-                        "action": "send_group_msg",
-                        "params": {"group_id": group_id, "message": segments},
-                    }
-                )
-            )
-            return {"status": "ok"}
+        ok = await self._do_send_onebot_file(
+            file_path, os.path.basename(file_path), caption, "group", str(group_id)
+        )
+        return {"status": "ok"} if ok else None
 
     async def send_private_file(self, user_id: int, file_path: str, caption: str = ""):
         """发送私聊文件消息（结构化 file 段，支持本地 URI/base64 双模式）"""
-        file_ref = await self._get_onebot_file_ref(file_path)
-        if not file_ref:
+        if not self._ws or not self._connected:
             return None
-        segments = []
-        if caption:
-            segments.append({"type": "text", "data": {"text": caption}})
-        segments.append({"type": "file", "data": {"file": file_ref}})
-        if self._ws and self._connected:
-            await self._ws.send_str(
-                json.dumps(
-                    {
-                        "action": "send_private_msg",
-                        "params": {"user_id": user_id, "message": segments},
-                    }
-                )
-            )
-            return {"status": "ok"}
+        ok = await self._do_send_onebot_file(
+            file_path, os.path.basename(file_path), caption, "private", str(user_id)
+        )
+        return {"status": "ok"} if ok else None
 
     async def download_image(self, url: str) -> Optional[bytes]:
         """从 URL 下载图片数据"""
@@ -2169,6 +2157,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         if caption:
             segments.append({"type": "text", "data": {"text": caption}})
 
+        transport = self._get_onebot_image_transport() if is_image else self._get_onebot_file_transport()
         if is_image:
             file_id = await self._get_onebot_image_ref(file_path)
             if not file_id:
@@ -2189,17 +2178,55 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         else:
             params["group_id"] = target_id
 
-        # 与文字消息相同的直发路径（不等待 echo 回执）：
-        # NapCat 上传图片/文件耗时较长，且其内部确认事件偶发超时（sendMsg Timeout）。
-        # 若等待回执，每次发送会白卡 15 秒甚至触发重发；直发后由 NapCat 自行完成上传送达。
-        await self._ws.send_str(
-            json.dumps(
-                {
-                    "action": action,
-                    "params": params,
-                }
-            )
-        )
+        # 文件/图片上传必须等待 NapCat 的真实 echo 回执。
+        # 旧实现只 send_str 后立即返回，导致 rich media transfer failed
+        # 仍被上层误报为“已发送”。大文件给 NapCat 更长的上传窗口，且
+        # detailed=True 能区分明确失败与超时未知状态。
+        result = await self._call_onebot_api(action, params, timeout=120.0, detailed=True)
+        result_status = result.get("_miya_status") if isinstance(result, dict) else None
+        if not result or result_status in {"failed", "error", "timeout"}:
+            status = result_status or "failed"
+
+            # Docker 中 NapCat 通常看不到宿主机路径。若 file:// 明确失败，
+            # 安全地改用 base64 重试；明确失败意味着首个请求未送达，
+            # 不会因重试制造重复文件。超时则不重试，避免未知状态下重复投递。
+            if status == "failed" and transport == "file":
+                try:
+                    import base64
+
+                    with open(file_path, "rb") as source:
+                        fallback_ref = "base64://" + base64.b64encode(source.read()).decode("ascii")
+                    fallback_params = {**params, "message": [
+                        *([{"type": "text", "data": {"text": caption}}] if caption else []),
+                        {"type": "image" if is_image else "file", "data": {"file": fallback_ref}},
+                    ]}
+                    logger.warning(
+                        "[%s] %s 传输失败，切换 base64 兜底: %s",
+                        self.platform_id,
+                        "图片" if is_image else "文件",
+                        file_name,
+                    )
+                    result = await self._call_onebot_api(
+                        action, fallback_params, timeout=120.0, detailed=True
+                    )
+                    result_status = result.get("_miya_status") if isinstance(result, dict) else None
+                    if not result or result_status in {"failed", "error", "timeout"}:
+                        status = result_status or "failed"
+                except (OSError, ValueError) as exc:
+                    logger.warning("[%s] base64 兜底准备失败: %s", self.platform_id, exc)
+
+            result_status = result.get("_miya_status") if isinstance(result, dict) else None
+            if not result or result_status in {"failed", "error", "timeout"}:
+                logger.warning(
+                    "[%s] %s发送未确认成功: target=%s status=%s size=%sB",
+                    self.platform_id,
+                    "图片" if is_image else "文件",
+                    target,
+                    status,
+                    file_size,
+                )
+                return False
+
         self._record_message_out()
         logger.info(f"[{self.platform_id}] 文件已发送: {file_name} -> {target} (action={action}, size={file_size}B)")
         return True

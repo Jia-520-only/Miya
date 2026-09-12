@@ -42,9 +42,13 @@ _DATA_SEARCH_DIRS = [
 def _resolve_target(context: ToolContext, target_type: str = "private") -> str:
     """按会话类型解析目标，避免群聊误用发送者 ID。"""
     platform_user_id = getattr(context, "platform_user_id", None)
+    if target_type == "group":
+        # 群消息必须使用真实群号；绝不能回退到发送者 QQ 号，
+        # 否则日志看似“群聊发送”，实际文件会被投递到个人私聊。
+        return str(getattr(context, "group_id", None) or "")
     if target_type == "private":
         return str(platform_user_id or context.user_id or context.group_id or "")
-    return str(context.group_id or platform_user_id or context.user_id or "")
+    return str(platform_user_id or context.user_id or context.group_id or "")
 
 
 def _resolve_platform_adapter(context: ToolContext):
@@ -206,7 +210,24 @@ class SendPlatformFileTool(BaseTool):
 
             target_id = _resolve_target(context, target_type)
             if not target_id:
+                if target_type == "group":
+                    logger.warning(
+                        "群聊文件发送缺少 group_id: user_id=%r platform_user_id=%r message_type=%r",
+                        getattr(context, "user_id", None),
+                        getattr(context, "platform_user_id", None),
+                        getattr(context, "message_type", None),
+                    )
+                    return "❌ 无法确定群聊发送目标（缺少 group_id）"
                 return "❌ 无法确定发送目标"
+
+            logger.info(
+                "文件发送目标已解析: target_type=%s target=%s group_id=%r user_id=%r platform_user_id=%r",
+                target_type,
+                target_id,
+                getattr(context, "group_id", None),
+                getattr(context, "user_id", None),
+                getattr(context, "platform_user_id", None),
+            )
 
             # ── auto 模式：先本地搜索，再判断是否 URL ──
             if source == "auto":

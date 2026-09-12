@@ -69,6 +69,11 @@ def test_target_resolution_uses_group_id_for_group_messages():
     assert send_platform_file._resolve_target(context, "private") == "user-native"
 
 
+def test_group_target_never_falls_back_to_sender_id():
+    context = ToolContext(user_id=123, platform_user_id="user-native")
+    assert send_platform_file._resolve_target(context, "group") == ""
+
+
 @pytest.mark.anyio
 async def test_send_platform_file_normalizes_null_arguments():
     result = await send_platform_file.SendPlatformFileTool().execute(
@@ -108,6 +113,67 @@ async def test_send_platform_file_serializes_same_adapter(tmp_path):
 
     assert all("已发送" in result for result in results)
     assert platform.max_active == 1
+
+
+@pytest.mark.anyio
+async def test_onebot_file_waits_for_echo_and_rejects_rich_media_failure(tmp_path):
+    pytest.importorskip("numpy")
+    from core.unified_platform_impl.onebot_platform import OneBotPlatform
+
+    class FakeWS:
+        async def send_str(self, payload):
+            return None
+
+    path = Path(tmp_path) / "note.txt"
+    path.write_bytes(b"hello")
+    platform = OneBotPlatform.__new__(OneBotPlatform)
+    platform._ws = FakeWS()
+    platform._connected = True
+    platform._file_send_lock = asyncio.Lock()
+    platform._get_onebot_file_transport = lambda: "base64"
+    platform._get_onebot_file_ref = lambda _path: _async_value("base64://aGVsbG8=")
+    platform._is_image_file = lambda _path: False
+    platform._record_message_out = lambda: None
+    platform._call_onebot_api = lambda *args, **kwargs: _async_value(
+        {"_miya_status": "failed", "response": {"status": "failed"}}
+    )
+
+    assert not await platform._send_onebot_file_inner(str(path), "note.txt", "", "group", "456")
+
+
+@pytest.mark.anyio
+async def test_onebot_file_falls_back_to_base64_after_path_failure(tmp_path):
+    pytest.importorskip("numpy")
+    from core.unified_platform_impl.onebot_platform import OneBotPlatform
+
+    path = Path(tmp_path) / "note.txt"
+    path.write_bytes(b"hello")
+    platform = OneBotPlatform.__new__(OneBotPlatform)
+    platform._ws = object()
+    platform._connected = True
+    platform._file_send_lock = asyncio.Lock()
+    platform._get_onebot_file_transport = lambda: "file"
+    platform._get_onebot_file_ref = lambda _path: _async_value("file:///container-missing/note.txt")
+    platform._is_image_file = lambda _path: False
+    platform._record_message_out = lambda: None
+    calls = []
+
+    async def call_api(_action, params, **_kwargs):
+        calls.append(params)
+        if len(calls) == 1:
+            return {"_miya_status": "failed"}
+        return {"message_id": 42}
+
+    platform._call_onebot_api = call_api
+
+    assert await platform._send_onebot_file_inner(str(path), "note.txt", "", "group", "456")
+    assert len(calls) == 2
+    assert calls[0]["message"][0]["data"]["file"].startswith("file://")
+    assert calls[1]["message"][0]["data"]["file"].startswith("base64://")
+
+
+async def _async_value(value):
+    return value
 
 
 @pytest.mark.anyio

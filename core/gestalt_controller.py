@@ -67,6 +67,8 @@ class GestaltController:
                 # 图片相关
                 image_data: Any = None
                 image_analysis: Any = None
+                platform_adapter: Any = None
+                platform_user_id: Any = None
 
                 def __post_init__(self):
                     if self.at_list is None:
@@ -95,6 +97,8 @@ class GestaltController:
             # 图片相关
             "image_data",
             "image_analysis",
+            "platform_adapter",
+            "platform_user_id",
         }
 
         filtered = {k: v for k, v in context.items() if k in supported_fields}
