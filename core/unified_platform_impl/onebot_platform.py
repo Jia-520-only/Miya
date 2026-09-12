@@ -1407,6 +1407,22 @@ class OneBotPlatform(MessageMixin, BasePlatform):
             configured = str(self._config_data.get("image_transport", "base64")).strip().lower()
         return configured if configured in {"file", "base64"} else "base64"
 
+    @staticmethod
+    def _summarize_file_ref(file_ref: Any) -> str:
+        """为日志压缩媒体引用，避免把完整 base64 编码刷到终端。"""
+        if not file_ref:
+            return "-"
+        ref = str(file_ref)
+        if ref.startswith("base64://"):
+            encoded_length = len(ref) - len("base64://")
+            approx_bytes = encoded_length * 3 // 4
+            return f"base64://<约{approx_bytes / 1024:.1f}KB, 编码{encoded_length}字符>"
+        if ref.startswith("file://"):
+            return f"file://<本地路径:{os.path.basename(ref.rstrip('/'))}>"
+        if len(ref) > 96:
+            return f"{ref[:32]}...<{len(ref)}字符>"
+        return ref
+
     async def _get_onebot_image_ref(self, file_path: str) -> Optional[str]:
         """Build the OneBot image ``file`` value for the selected transport."""
         if not os.path.exists(file_path):
@@ -1519,7 +1535,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                 logger.warning(f"[{self.platform_id}] 图片发送失败: {target}: {e}")
                 return False
             self._record_message_out()
-            logger.info(f"[{self.platform_id}] 图片已发送到 {target} (file_id={file_id})")
+            logger.info(f"[{self.platform_id}] 图片已发送到 {target} (file_ref={self._summarize_file_ref(file_id)})")
             return True
         finally:
             if tmp_path and _os.path.exists(tmp_path):
@@ -1764,7 +1780,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         if result is None:
             logger.warning(f"[{self.platform_id}] 群图片发送失败: {group_id}")
             return None
-        logger.info(f"[{self.platform_id}] 群图片已发送到 {group_id} (file_id={file_id})")
+        logger.info(f"[{self.platform_id}] 群图片已发送到 {group_id} (file_ref={self._summarize_file_ref(file_id)})")
         return {"status": "ok"}
 
     async def send_private_image(self, user_id: int, image_path: str, caption: str = ""):
@@ -1791,7 +1807,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         if result is None:
             logger.warning(f"[{self.platform_id}] 私聊图片发送失败: {user_id}")
             return None
-        logger.info(f"[{self.platform_id}] 私聊图片已发送给 {user_id} (file_id={file_id})")
+        logger.info(f"[{self.platform_id}] 私聊图片已发送给 {user_id} (file_ref={self._summarize_file_ref(file_id)})")
         return {"status": "ok"}
 
     async def send_group_file(self, group_id: int, file_path: str, caption: str = ""):
@@ -2012,7 +2028,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
             except Exception as e:
                 logger.debug(f"[{self.platform_id}] 直接下载图片失败(url): {e}")
 
-        logger.debug(f"[{self.platform_id}] 图片下载失败: file={file_id[:30] if file_id else '-'}")
+        logger.debug(f"[{self.platform_id}] 图片下载失败: file={self._summarize_file_ref(file_id)}")
         return None
 
     async def _auto_save_images(self, image_segments: list, user_id: str):

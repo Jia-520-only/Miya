@@ -74,6 +74,16 @@ def test_group_target_never_falls_back_to_sender_id():
     assert send_platform_file._resolve_target(context, "group") == ""
 
 
+def test_onebot_file_reference_log_summary_hides_base64():
+    pytest.importorskip("numpy")
+    from core.unified_platform_impl.onebot_platform import OneBotPlatform
+
+    summary = OneBotPlatform._summarize_file_ref("base64://" + "A" * 120)
+    assert "base64://<" in summary
+    assert "AAAA" not in summary
+    assert "编码120字符" in summary
+
+
 @pytest.mark.anyio
 async def test_send_platform_file_normalizes_null_arguments():
     result = await send_platform_file.SendPlatformFileTool().execute(
