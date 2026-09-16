@@ -12,6 +12,8 @@
 import logging
 import os
 import uuid
+import json
+import urllib.request
 from typing import Any, Dict, Optional
 
 from core.earth_online_store import get_earth_store
@@ -487,6 +489,106 @@ class EarthOnlineRoutes:
             """现实优先的生活中枢快照。"""
             return self.store.get_life_hub()
 
+        # ── v18: 现实收益情报与计划 (MVP) ──
+        @self.router.get("/earning/guidance")
+        async def earning_guidance():
+            return self.store.earning_guidance()
+
+        @self.router.get("/earning/preferences")
+        async def earning_preferences():
+            return self.store.get_earning_preferences()
+
+        @self.router.put("/earning/preferences")
+        async def update_earning_preferences(request: Dict[str, Any] = None):
+            return self.store.update_earning_preferences(request or {})
+
+        @self.router.get("/earning/opportunities")
+        async def earning_opportunities(status: str = "", kind: str = "", limit: int = 100):
+            return self.store.list_earning_opportunities(status=status, kind=kind, limit=limit)
+
+        @self.router.get("/earning/sources")
+        async def earning_sources():
+            return self.store.list_earning_sources()
+
+        @self.router.post("/earning/sources")
+        async def create_earning_source(request: Dict[str, Any] = None):
+            try: return self.store.create_earning_source(request or {})
+            except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.put("/earning/sources/{source_id}")
+        async def update_earning_source(source_id: int, request: Dict[str, Any] = None):
+            try: result = self.store.update_earning_source(source_id, request or {})
+            except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
+            if result is None: raise HTTPException(status_code=404, detail="信息源不存在")
+            return result
+
+        @self.router.delete("/earning/sources/{source_id}")
+        async def delete_earning_source(source_id: int):
+            if not self.store.delete_earning_source(source_id): raise HTTPException(status_code=404, detail="信息源不存在")
+            return {"success": True}
+
+        @self.router.post("/earning/sync")
+        async def sync_earning_sources(source_id: Optional[int] = None):
+            return self.store.sync_earning_sources(source_id=source_id)
+
+        @self.router.post("/earning/opportunities")
+        async def create_earning_opportunity(request: Dict[str, Any] = None):
+            try: return self.store.create_earning_opportunity(request or {})
+            except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.put("/earning/opportunities/{opportunity_id}")
+        async def update_earning_opportunity(opportunity_id: int, request: Dict[str, Any] = None):
+            result = self.store.update_earning_opportunity(opportunity_id, request or {})
+            if result is None: raise HTTPException(status_code=404, detail="收益情报不存在")
+            return result
+
+        @self.router.post("/earning/opportunities/{opportunity_id}/to-quest")
+        async def convert_earning_opportunity_to_quest(opportunity_id: int, request: Dict[str, Any] = None):
+            result = self.store.convert_earning_opportunity_to_quest(opportunity_id, request or {})
+            if not result.get("success"):
+                raise HTTPException(status_code=404 if result.get("message") == "收益情报不存在" else 400, detail=result.get("message", "转换失败"))
+            return result
+
+        @self.router.get("/earning/plans")
+        async def earning_plans(status: str = ""):
+            return self.store.list_earning_plans(status=status)
+
+        @self.router.post("/earning/plans")
+        async def create_earning_plan(request: Dict[str, Any] = None):
+            try: return self.store.create_earning_plan(request or {})
+            except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.get("/earning/plan-steps")
+        async def earning_plan_steps(plan_id: Optional[int] = None):
+            return self.store.list_earning_plan_steps(plan_id=plan_id)
+
+        @self.router.post("/earning/plans/{plan_id}/steps")
+        async def create_earning_plan_step(plan_id: int, request: Dict[str, Any] = None):
+            try: return self.store.create_earning_plan_step(plan_id, request or {})
+            except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.put("/earning/plan-steps/{step_id}")
+        async def update_earning_plan_step(step_id: int, request: Dict[str, Any] = None):
+            result = self.store.update_earning_plan_step(step_id, request or {})
+            if result is None: raise HTTPException(status_code=404, detail="收益阶段不存在")
+            return result
+
+        @self.router.post("/earning/plan-steps/{step_id}/to-quest")
+        async def convert_earning_plan_step_to_quest(step_id: int):
+            result = self.store.convert_earning_plan_step_to_quest(step_id)
+            if not result.get("success"):
+                raise HTTPException(status_code=404 if result.get("message") == "收益阶段不存在" else 400, detail=result.get("message", "转换失败"))
+            return result
+
+        @self.router.get("/earning/records")
+        async def earning_records(limit: int = 100):
+            return self.store.list_income_records(limit=limit)
+
+        @self.router.post("/earning/records")
+        async def record_earning(request: Dict[str, Any] = None):
+            try: return self.store.record_income(request or {})
+            except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
+
         # ── 称号系统 ──
 
         @self.router.get("/titles")
@@ -521,12 +623,151 @@ class EarthOnlineRoutes:
 
         @self.router.get("/world")
         async def world_regions():
-            """获取世界地图区域与个人探索进度"""
+            """获取现实世界地图数据；旧版虚拟区域不再注入默认世界视图。"""
             return {
-                "regions": self.store.list_world_regions(),
-                "discoveries": self.store.list_world_discoveries(limit=200),
+                "regions": [],
+                "places": self.store.list_real_places(),
+                "discoveries": [],
                 "status": self.store.get_world_status(),
+                "mode": "real_world",
             }
+
+        @self.router.get("/world/places")
+        async def world_places(limit: int = 200):
+            return self.store.list_real_places(limit=limit)
+
+        @self.router.get("/world/geocode")
+        async def geocode_world_place(query: str = ""):
+            query = str(query or "").strip()
+            if not query:
+                raise HTTPException(status_code=400, detail="搜索地点不能为空")
+            result = self.store._geocode_real_place(query)
+            if not result:
+                raise HTTPException(status_code=404, detail="没有找到这个地点")
+            return {"success": True, "query": query, **result}
+
+        @self.router.get("/world/search")
+        async def search_world_places(query: str = "", limit: int = 5):
+            """搜索真实 POI 候选，不把第一条结果偷偷当成唯一答案。"""
+            query = str(query or "").strip()
+            if not query:
+                raise HTTPException(status_code=400, detail="搜索地点不能为空")
+            return {"success": True, "query": query, "results": self.store.search_real_places(query, limit=limit)}
+
+        @self.router.get("/world/nearby")
+        async def nearby_world_places(latitude: float, longitude: float, radius_m: int = 1500, limit: int = 40):
+            """按玩家主动提供的坐标查询附近 POI；查询本身不持久化精确位置。"""
+            if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+                raise HTTPException(status_code=400, detail="地图坐标超出有效范围")
+            results = self.store.search_nearby_real_places(latitude, longitude, radius_m=radius_m, limit=limit)
+            return {
+                "success": True,
+                "center": {"latitude": latitude, "longitude": longitude},
+                "radius_m": max(100, min(5000, int(radius_m))),
+                "results": results,
+                "source": "openstreetmap_overpass",
+            }
+
+        @self.router.get("/world/reverse-geocode")
+        async def reverse_geocode_world_place(latitude: float, longitude: float):
+            if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+                raise HTTPException(status_code=400, detail="地图坐标超出有效范围")
+            result = self.store.reverse_geocode_real_place(latitude, longitude)
+            if not result:
+                return {"success": False, "name": "所选地点", "latitude": latitude, "longitude": longitude, "address": {}}
+            return {"success": True, **result}
+
+        @self.router.post("/world/route")
+        async def world_route(request: Dict[str, Any] = None):
+            """按真实道路规划路线。默认使用 OSRM；步行/骑行需配置支持对应 profile 的路由服务。"""
+            request = request or {}
+            profile = str(request.get("profile", "driving") or "driving").strip().lower()
+            if profile not in {"driving", "walking", "cycling"}:
+                raise HTTPException(status_code=400, detail="路线方式必须是 driving、walking 或 cycling")
+            raw_coordinates = request.get("coordinates") or []
+            if not isinstance(raw_coordinates, list) or not (2 <= len(raw_coordinates) <= 25):
+                raise HTTPException(status_code=400, detail="至少需要 2 个、最多 25 个有效地点坐标")
+            coordinates = []
+            try:
+                for item in raw_coordinates:
+                    lng, lat = float(item[0]), float(item[1])
+                    if not (-180 <= lng <= 180 and -90 <= lat <= 90):
+                        raise ValueError
+                    coordinates.append((lng, lat))
+            except (TypeError, ValueError, IndexError):
+                raise HTTPException(status_code=400, detail="路线坐标格式无效，应为 [经度, 纬度]")
+            base_url = str(os.getenv("EARTH_ROUTING_OSRM_URL", "https://router.project-osrm.org/route/v1") or "").rstrip("/")
+            # OSRM demo 服务通常只提供 driving；自建服务可通过同名 profile 提供步行/骑行。
+            service_profile = {"driving": "driving", "walking": "foot", "cycling": "bike"}[profile]
+            url = f"{base_url}/{service_profile}/{';'.join(f'{lng:.7f},{lat:.7f}' for lng, lat in coordinates)}?overview=full&geometries=geojson&steps=false"
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Miya-EarthOnline/1.0", "Accept": "application/json"})
+                with urllib.request.urlopen(req, timeout=12) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+            except Exception as exc:
+                logger.warning("[EarthOnline] route provider unavailable: %s", exc)
+                raise HTTPException(status_code=502, detail="真实道路路线服务暂时不可用，请稍后重试或配置 EARTH_ROUTING_OSRM_URL")
+            if payload.get("code") != "Ok" or not payload.get("routes"):
+                message = str(payload.get("message") or "路线服务没有返回可行道路")
+                raise HTTPException(status_code=422, detail=message)
+            route = payload["routes"][0]
+            geometry = route.get("geometry") or {}
+            return {
+                "success": True,
+                "provider": "osrm",
+                "profile": profile,
+                "distance_m": route.get("distance"),
+                "duration_s": route.get("duration"),
+                "geometry": geometry,
+                "legs": route.get("legs") or [],
+            }
+
+        @self.router.post("/world/places/visits")
+        async def record_world_place_visit(request: Dict[str, Any] = None):
+            request = request or {}
+            place = self.store.record_real_place_visit(
+                name=str(request.get("name", "")),
+                latitude=request.get("latitude"), longitude=request.get("longitude"),
+                note=str(request.get("note", "")), visited_at=str(request.get("visited_at", "")),
+                source=str(request.get("source", "manual")), confidence=float(request.get("confidence", 1.0)),
+                accuracy_m=request.get("accuracy_m"),
+                place_key=str(request.get("place_key", "")), provider_id=str(request.get("provider_id", "")),
+                display_address=str(request.get("display_address", "")), category=str(request.get("category", "")),
+            )
+            if not place:
+                raise HTTPException(status_code=400, detail="地点名称不能为空")
+            return {"success": True, "place": place}
+
+        @self.router.get("/world/places/{place_key}")
+        async def get_world_place(place_key: str):
+            place = self.store.get_real_place(place_key)
+            if not place:
+                raise HTTPException(status_code=404, detail="现实地点不存在")
+            return place
+
+        @self.router.put("/world/places/{place_key}")
+        async def update_world_place(place_key: str, request: Dict[str, Any] = None):
+            try:
+                place = self.store.update_real_place(place_key, request or {})
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if not place:
+                raise HTTPException(status_code=404, detail="现实地点不存在")
+            return {"success": True, "place": place}
+
+        @self.router.delete("/world/places/{place_key}")
+        async def delete_world_place(place_key: str):
+            if not self.store.delete_real_place(place_key):
+                raise HTTPException(status_code=404, detail="现实地点不存在")
+            return {"success": True}
+
+        @self.router.post("/world/places/{place_key}/image")
+        async def upload_real_place_image(place_key: str, file: UploadFile = File(...)):
+            path = self._save_upload(file)
+            place = self.store.update_real_place_image(place_key, path)
+            if not place:
+                raise HTTPException(status_code=404, detail="现实地点不存在")
+            return {"success": True, "image_path": path, "place": place}
 
         @self.router.get("/world/status")
         async def world_status():
@@ -659,21 +900,13 @@ class EarthOnlineRoutes:
 
         @self.router.get("/world/discoveries")
         async def world_discoveries(region_key: str = "", limit: int = 100):
-            """获取已发现的世界事件"""
-            return self.store.list_world_discoveries(region_key=region_key, limit=limit)
+            """旧版虚拟发现接口；现实世界模式不再展示或生成虚拟发现。"""
+            return []
 
         @self.router.post("/world/{region_key}/explore")
         async def explore_world_region(region_key: str, request: Dict[str, Any] = None):
-            """探索一个区域，首次发现事件会发放奖励；区域启用地理围栏时需携带真实坐标"""
-            request = request or {}
-            result = self.store.explore_world_region(
-                region_key,
-                latitude=request.get("latitude"),
-                longitude=request.get("longitude"),
-            )
-            if not result.get("success"):
-                raise HTTPException(status_code=400, detail=result.get("message", "探索失败"))
-            return result
+            """旧版虚拟区域探索接口，现实地图模式下不再生成虚拟发现。"""
+            raise HTTPException(status_code=410, detail="虚拟区域探索已停用，请使用现实地图记录地点")
 
         # ── 限时活动管理 (内置 + 后台自定义) ──
 
@@ -720,10 +953,7 @@ class EarthOnlineRoutes:
 
         @self.router.post("/world/discoveries/{discovery_id}/choice")
         async def choose_world_discovery(discovery_id: int, request: Dict[str, Any] = None):
-            result = self.store.choose_world_discovery(discovery_id, str((request or {}).get("choice", "")))
-            if not result.get("success"):
-                raise HTTPException(status_code=400, detail=result.get("message", "同行选择失败"))
-            return result
+            raise HTTPException(status_code=410, detail="虚拟世界发现与同行选择已停用")
 
         @self.router.post("/world/{region_key}/image")
         async def upload_world_region_image(region_key: str, file: UploadFile = File(...)):
@@ -736,11 +966,8 @@ class EarthOnlineRoutes:
 
         @self.router.post("/world/{region_key}/commission")
         async def world_commission(region_key: str):
-            """领取指定区域当天的专属委托"""
-            result = self.store.create_region_commission(region_key)
-            if not result.get("success"):
-                raise HTTPException(status_code=400, detail=result.get("message", "领取委托失败"))
-            return result
+            """旧版虚拟区域委托接口。"""
+            raise HTTPException(status_code=410, detail="虚拟区域委托已停用，请创建普通现实任务")
 
         # ── 剧情 ──
 

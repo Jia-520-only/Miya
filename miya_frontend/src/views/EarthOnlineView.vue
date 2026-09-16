@@ -5,10 +5,11 @@ import EarthAPI from '@/api/earth'
 
 const PlayerView = defineAsyncComponent(() => import('./earth/PlayerView.vue'))
 const AdminView = defineAsyncComponent(() => import('./earth/AdminView.vue'))
+const EarningView = defineAsyncComponent(() => import('./earth/EarningView.vue'))
 
 // ── 地球online 壳: 前台展示 (玩家视角) / 后台管理 (数据录入) 双界面 ──
 
-const view = ref<'player' | 'admin'>('player')
+const view = ref<'player' | 'admin' | 'earning'>('player')
 const theme = ref<EarthTheme>({ accent: '#78cfd1', accent_light: '#a2f5ee', accent_deep: '#4f9fa5', background: '', background_opacity: 0.25, glass: true })
 const shellThemeVars = computed(() => ({
   '--earth-accent': theme.value.accent,
@@ -26,6 +27,7 @@ onMounted(async () => {
 const VIEW_LABELS = {
   player: '玩家视角 · 展示面板 / 接取任务',
   admin: '管理视角 · 录入与编辑数据',
+  earning: '收益中枢 · 情报 / 计划 / 收入记录',
 } as const
 </script>
 
@@ -39,11 +41,15 @@ const VIEW_LABELS = {
         <button class="view-btn" :class="{ active: view === 'admin' }" @click="view = 'admin'">
           ⚙ 后台管理
         </button>
+        <button class="view-btn" :class="{ active: view === 'earning' }" @click="view = 'earning'">
+          ◇ 收益中枢
+        </button>
       </div>
       <span class="view-hint">{{ VIEW_LABELS[view] }}</span>
     </div>
     <PlayerView v-if="view === 'player'" />
-    <AdminView v-else />
+    <AdminView v-else-if="view === 'admin'" />
+    <EarningView v-else />
   </div>
 </template>
 

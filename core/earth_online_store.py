@@ -21,6 +21,7 @@
 - memory_pulls    回忆抽卡记录 (v17: 记忆碎片卡池)
 - commemorations  纪念日 (v17: 每年循环, 临近自动开限时活动)
 - battle_pass_claims 每周纪行领取记录 (v17)
+- earning_opportunities / earning_plans / income_records 现实收益情报、计划与收入流水 (v18)
 """
 
 import json
@@ -29,8 +30,15 @@ import os
 import shutil
 import sqlite3
 import threading
+import ipaddress
+import hashlib
+import re
+import urllib.request
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
+from html import unescape
+from urllib.parse import urlencode, urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -1073,12 +1081,170 @@ class EarthOnlineStore:
                 )
                 """
             )
+            # v18: 现实收益情报与计划 (MVP)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS earning_opportunities (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    source TEXT DEFAULT '',
+                    url TEXT DEFAULT '',
+                    kind TEXT NOT NULL DEFAULT 'other',
+                    description TEXT DEFAULT '',
+                    income_min REAL NOT NULL DEFAULT 0,
+                    income_max REAL NOT NULL DEFAULT 0,
+                    hours REAL NOT NULL DEFAULT 0,
+                    risk TEXT NOT NULL DEFAULT 'unknown',
+                    confidence TEXT NOT NULL DEFAULT 'unknown',
+                    status TEXT NOT NULL DEFAULT 'inbox',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS real_places (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    place_key TEXT UNIQUE NOT NULL,
+                    name TEXT NOT NULL,
+                    subtitle TEXT DEFAULT '',
+                    latitude REAL,
+                    longitude REAL,
+                    visit_count INTEGER NOT NULL DEFAULT 0,
+                    first_visited_at TEXT DEFAULT '',
+                    last_visited_at TEXT DEFAULT '',
+                    source TEXT NOT NULL DEFAULT 'manual',
+                    confidence REAL NOT NULL DEFAULT 1.0,
+                    accuracy_m REAL,
+                    country TEXT DEFAULT '',
+                    admin1 TEXT DEFAULT '',
+                    city TEXT DEFAULT '',
+                    district TEXT DEFAULT '',
+                    neighborhood TEXT DEFAULT '',
+                    image_path TEXT DEFAULT '',
+                    display_address TEXT DEFAULT '',
+                    provider_id TEXT DEFAULT '',
+                    category TEXT NOT NULL DEFAULT 'other',
+                    tags TEXT NOT NULL DEFAULT '[]',
+                    favorite INTEGER NOT NULL DEFAULT 0,
+                    notes TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS real_place_visits (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    place_key TEXT NOT NULL,
+                    visited_at TEXT NOT NULL,
+                    latitude REAL,
+                    longitude REAL,
+                    accuracy_m REAL,
+                    source TEXT NOT NULL DEFAULT 'manual',
+                    note TEXT DEFAULT '',
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS real_place_photos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    place_key TEXT NOT NULL,
+                    image_path TEXT NOT NULL,
+                    caption TEXT DEFAULT '',
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS earning_plans (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    goal_amount REAL NOT NULL DEFAULT 0,
+                    target_date TEXT DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'active',
+                    notes TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS earning_sources (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    url TEXT NOT NULL UNIQUE,
+                    kind TEXT NOT NULL DEFAULT 'rss',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    last_synced_at TEXT DEFAULT '',
+                    last_error TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS income_records (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    opportunity_id INTEGER,
+                    amount REAL NOT NULL DEFAULT 0,
+                    cost REAL NOT NULL DEFAULT 0,
+                    hours REAL NOT NULL DEFAULT 0,
+                    note TEXT DEFAULT '',
+                    recorded_at TEXT NOT NULL,
+                    FOREIGN KEY (opportunity_id) REFERENCES earning_opportunities(id)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS earning_plan_steps (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    plan_id INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT DEFAULT '',
+                    position INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    quest_id INTEGER,
+                    completed_at TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (plan_id) REFERENCES earning_plans(id)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS earning_preferences (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    skills TEXT NOT NULL DEFAULT '[]',
+                    preferred_kinds TEXT NOT NULL DEFAULT '[]',
+                    weekly_hours REAL NOT NULL DEFAULT 5,
+                    target_amount REAL NOT NULL DEFAULT 500,
+                    min_hourly_rate REAL NOT NULL DEFAULT 0,
+                    risk_tolerance TEXT NOT NULL DEFAULT 'low',
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                "INSERT OR IGNORE INTO earning_preferences (id, updated_at) VALUES (1, ?)",
+                (datetime.now().isoformat(),),
+            )
 
             # ── v2 迁移: 自定义字段 (JSON) ──
             self._ensure_column(conn, "items", "fields", "TEXT NOT NULL DEFAULT '{}'")
             self._ensure_column(conn, "quests", "fields", "TEXT NOT NULL DEFAULT '{}'")
             self._ensure_column(conn, "story_events", "fields", "TEXT NOT NULL DEFAULT '{}'")
             self._ensure_column(conn, "characters", "fields", "TEXT NOT NULL DEFAULT '{}'")
+            self._ensure_column(conn, "earning_opportunities", "quest_id", "INTEGER")
 
             # ── v3 迁移: 任务难度星级 (1-5) ──
             self._ensure_column(conn, "quests", "difficulty", "INTEGER NOT NULL DEFAULT 1")
@@ -1107,6 +1273,22 @@ class EarthOnlineStore:
             self._ensure_column(conn, "world_regions", "latitude", "REAL")
             self._ensure_column(conn, "world_regions", "longitude", "REAL")
             self._ensure_column(conn, "world_regions", "geofence_radius", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "real_places", "country", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "real_places", "admin1", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "real_places", "city", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "real_places", "district", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "real_places", "neighborhood", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "real_places", "image_path", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "real_places", "accuracy_m", "REAL")
+            self._ensure_column(conn, "real_places", "display_address", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "real_places", "provider_id", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "real_places", "category", "TEXT NOT NULL DEFAULT 'other'")
+            self._ensure_column(conn, "real_places", "tags", "TEXT NOT NULL DEFAULT '[]'")
+            self._ensure_column(conn, "real_places", "favorite", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "real_place_visits", "accuracy_m", "REAL")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_real_places_provider ON real_places(provider_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_real_place_visits_key ON real_place_visits(place_key, visited_at DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_real_place_photos_key ON real_place_photos(place_key, id DESC)")
             # ── v17 迁移: 签到睡眠记录 + 抽卡保底计数 + 属性恢复时间戳 ──
             self._ensure_column(conn, "daily_checkins", "sleep_hours", "REAL")
             self._ensure_column(conn, "daily_checkins", "energy_bonus", "INTEGER NOT NULL DEFAULT 0")
@@ -1962,9 +2144,16 @@ class EarthOnlineStore:
             "activity": self.list_activity(limit=2000),
             "world_regions": self.list_world_regions(),
             "world_discoveries": self.list_world_discoveries(limit=10000),
+            "real_places": self.list_real_places(limit=1000),
             "memory_pulls": self.list_memory_pulls(limit=10000),
             "commemorations": self.list_commemorations(),
             "currency_ledger": self.list_currency_ledger(limit=2000),
+            "earning_opportunities": self.list_earning_opportunities(limit=500),
+            "earning_sources": self.list_earning_sources(),
+            "earning_preferences": self.get_earning_preferences(),
+            "earning_plans": self.list_earning_plans(),
+            "earning_plan_steps": self.list_earning_plan_steps(),
+            "income_records": self.list_income_records(limit=2000),
             "templates": self.get_templates(),
         }
 
@@ -2186,6 +2375,30 @@ class EarthOnlineStore:
                             str(act.get("created_at", now)),
                         ),
                     )
+                # v18: 重建收益情报、计划和收入记录 (兼容旧镜像)
+                if "earning_opportunities" in data:
+                    conn.execute("DELETE FROM earning_opportunities")
+                    for item in data.get("earning_opportunities", []):
+                        conn.execute("INSERT INTO earning_opportunities (id, title, source, url, kind, description, income_min, income_max, hours, risk, confidence, status, quest_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (int(item.get("id", 0)) if item.get("id") else None, str(item.get("title", "")), str(item.get("source", "")), str(item.get("url", "")), str(item.get("kind", "other")), str(item.get("description", "")), float(item.get("income_min", 0) or 0), float(item.get("income_max", 0) or 0), float(item.get("hours", 0) or 0), str(item.get("risk", "unknown")), str(item.get("confidence", "unknown")), str(item.get("status", "inbox")), int(item["quest_id"]) if item.get("quest_id") else None, str(item.get("created_at", now)), str(item.get("updated_at", now))))
+                if "earning_sources" in data:
+                    conn.execute("DELETE FROM earning_sources")
+                    for source in data.get("earning_sources", []):
+                        conn.execute("INSERT INTO earning_sources (id, name, url, kind, enabled, last_synced_at, last_error, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)", (int(source.get("id", 0)) if source.get("id") else None, str(source.get("name", "")), str(source.get("url", "")), str(source.get("kind", "rss")), 1 if source.get("enabled", 1) else 0, str(source.get("last_synced_at", "")), str(source.get("last_error", "")), str(source.get("created_at", now)), str(source.get("updated_at", now))))
+                if isinstance(data.get("earning_preferences"), dict):
+                    prefs = data["earning_preferences"]
+                    conn.execute("UPDATE earning_preferences SET skills = ?, preferred_kinds = ?, weekly_hours = ?, target_amount = ?, min_hourly_rate = ?, risk_tolerance = ?, updated_at = ? WHERE id = 1", (json.dumps(prefs.get("skills", []), ensure_ascii=False), json.dumps(prefs.get("preferred_kinds", []), ensure_ascii=False), float(prefs.get("weekly_hours", 5) or 0), float(prefs.get("target_amount", 500) or 0), float(prefs.get("min_hourly_rate", 0) or 0), str(prefs.get("risk_tolerance", "low")), str(prefs.get("updated_at", now))))
+                if "earning_plans" in data:
+                    conn.execute("DELETE FROM earning_plans")
+                    for plan in data.get("earning_plans", []):
+                        conn.execute("INSERT INTO earning_plans (id, title, goal_amount, target_date, status, notes, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)", (int(plan.get("id", 0)) if plan.get("id") else None, str(plan.get("title", "")), float(plan.get("goal_amount", 0) or 0), str(plan.get("target_date", "")), str(plan.get("status", "active")), str(plan.get("notes", "")), str(plan.get("created_at", now)), str(plan.get("updated_at", now))))
+                if "earning_plan_steps" in data:
+                    conn.execute("DELETE FROM earning_plan_steps")
+                    for step in data.get("earning_plan_steps", []):
+                        conn.execute("INSERT INTO earning_plan_steps (id, plan_id, title, description, position, status, quest_id, completed_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)", (int(step.get("id", 0)) if step.get("id") else None, int(step.get("plan_id", 0)), str(step.get("title", "")), str(step.get("description", "")), int(step.get("position", 0) or 0), str(step.get("status", "pending")), int(step["quest_id"]) if step.get("quest_id") else None, str(step.get("completed_at", "")), str(step.get("created_at", now)), str(step.get("updated_at", now))))
+                if "income_records" in data:
+                    conn.execute("DELETE FROM income_records")
+                    for record in data.get("income_records", []):
+                        conn.execute("INSERT INTO income_records (id, opportunity_id, amount, cost, hours, note, recorded_at) VALUES (?,?,?,?,?,?,?)", (int(record.get("id", 0)) if record.get("id") else None, int(record["opportunity_id"]) if record.get("opportunity_id") else None, float(record.get("amount", 0) or 0), float(record.get("cost", 0) or 0), float(record.get("hours", 0) or 0), str(record.get("note", "")), str(record.get("recorded_at", now))))
                 # 重建世界地图探索进度；缺少该字段时保留当前已播种区域
                 if "world_regions" in data:
                     conn.execute("DELETE FROM world_discoveries")
@@ -3469,6 +3682,370 @@ class EarthOnlineStore:
             conn.close()
 
     # ── 单人开放世界探索 ────────────────────────────
+
+    def list_real_places(self, limit: int = 200) -> List[Dict[str, Any]]:
+        """获取现实地图地点，按最近到访时间倒序。"""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM real_places ORDER BY CASE WHEN last_visited_at = '' THEN 1 ELSE 0 END, last_visited_at DESC, id DESC LIMIT ?",
+                (max(1, min(1000, int(limit))),),
+            ).fetchall()
+            return [self._decode_real_place(row) for row in rows]
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _decode_real_place(row: sqlite3.Row) -> Dict[str, Any]:
+        place = dict(row)
+        try:
+            place["tags"] = json.loads(place.get("tags") or "[]")
+        except (TypeError, json.JSONDecodeError):
+            place["tags"] = []
+        place["favorite"] = bool(place.get("favorite"))
+        return place
+
+    def get_real_place(self, place_key: str) -> Optional[Dict[str, Any]]:
+        """读取地点完整档案，包括逐次到访与多张照片。"""
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT * FROM real_places WHERE place_key=?", (str(place_key or ""),)).fetchone()
+            if not row:
+                return None
+            place = self._decode_real_place(row)
+            place["visits"] = [dict(item) for item in conn.execute(
+                "SELECT * FROM real_place_visits WHERE place_key=? ORDER BY visited_at DESC, id DESC",
+                (place_key,),
+            ).fetchall()]
+            place["photos"] = [dict(item) for item in conn.execute(
+                "SELECT * FROM real_place_photos WHERE place_key=? ORDER BY id DESC",
+                (place_key,),
+            ).fetchall()]
+            # 兼容升级前只有封面图、没有相册记录的地点。
+            if place.get("image_path") and not any(photo["image_path"] == place["image_path"] for photo in place["photos"]):
+                place["photos"].append({"id": 0, "place_key": place_key, "image_path": place["image_path"], "caption": "", "created_at": place.get("updated_at", "")})
+            return place
+        finally:
+            conn.close()
+
+    def update_real_place_image(self, place_key: str, image_path: str) -> Optional[Dict[str, Any]]:
+        """向地点相册追加照片；首张/最新照片同时作为旧版封面字段。"""
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                exists = conn.execute("SELECT 1 FROM real_places WHERE place_key=?", (str(place_key or ""),)).fetchone()
+                if not exists:
+                    return None
+                conn.execute(
+                    "INSERT INTO real_place_photos (place_key,image_path,caption,created_at) VALUES (?,?,?,?)",
+                    (str(place_key), str(image_path or ""), "", now),
+                )
+                conn.execute("UPDATE real_places SET image_path=?, updated_at=? WHERE place_key=?", (str(image_path or ""), now, str(place_key)))
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_real_place(place_key)
+
+    def update_real_place(self, place_key: str, values: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """编辑地点档案，不把编辑误记成一次新的到访。"""
+        allowed = {"name", "subtitle", "notes", "category", "favorite", "latitude", "longitude", "accuracy_m", "display_address", "country", "admin1", "city", "district", "neighborhood"}
+        updates: Dict[str, Any] = {}
+        for key in allowed:
+            if key in values:
+                updates[key] = values[key]
+        if "tags" in values:
+            raw_tags = values.get("tags")
+            if isinstance(raw_tags, str):
+                raw_tags = [part.strip() for part in raw_tags.split(",")]
+            tags = list(dict.fromkeys(str(tag).strip() for tag in (raw_tags or []) if str(tag).strip()))[:20]
+            updates["tags"] = json.dumps(tags, ensure_ascii=False)
+        if "favorite" in updates:
+            updates["favorite"] = 1 if bool(updates["favorite"]) else 0
+        if "name" in updates:
+            updates["name"] = str(updates["name"] or "").strip()
+            if not updates["name"]:
+                raise ValueError("地点名称不能为空")
+        for coord, low, high in (("latitude", -90, 90), ("longitude", -180, 180)):
+            if coord in updates:
+                try:
+                    updates[coord] = float(updates[coord]) if updates[coord] not in (None, "") else None
+                except (TypeError, ValueError):
+                    raise ValueError(f"{coord} 不是有效数字")
+                if updates[coord] is not None and not low <= updates[coord] <= high:
+                    raise ValueError(f"{coord} 超出有效范围")
+        if not updates:
+            return self.get_real_place(place_key)
+        updates["updated_at"] = datetime.now().isoformat()
+        columns = ", ".join(f"{key}=?" for key in updates)
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(f"UPDATE real_places SET {columns} WHERE place_key=?", (*updates.values(), str(place_key or "")))
+                if conn.total_changes == 0:
+                    return None
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_real_place(place_key)
+
+    def delete_real_place(self, place_key: str) -> bool:
+        """删除地点及其结构化档案；已上传原图保留，避免不可恢复的文件误删。"""
+        with self._lock:
+            conn = self._connect()
+            try:
+                exists = conn.execute("SELECT 1 FROM real_places WHERE place_key=?", (str(place_key or ""),)).fetchone()
+                if not exists:
+                    return False
+                conn.execute("DELETE FROM real_place_visits WHERE place_key=?", (place_key,))
+                conn.execute("DELETE FROM real_place_photos WHERE place_key=?", (place_key,))
+                conn.execute("DELETE FROM real_places WHERE place_key=?", (place_key,))
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return True
+
+    def record_real_place_visit(
+        self,
+        name: str,
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
+        note: str = "",
+        visited_at: str = "",
+        source: str = "manual",
+        confidence: float = 1.0,
+        accuracy_m: Optional[float] = None,
+        place_key: str = "",
+        provider_id: str = "",
+        display_address: str = "",
+        category: str = "",
+    ) -> Optional[Dict[str, Any]]:
+        """记录一次现实地点到访；优先按档案/provider/近邻合并，同名远距离地点可并存。"""
+        name = str(name or "").strip()
+        if not name:
+            return None
+        try:
+            lat = float(latitude) if latitude not in (None, "") else None
+            lng = float(longitude) if longitude not in (None, "") else None
+        except (TypeError, ValueError):
+            lat = lng = None
+        if lat is not None and not -90 <= lat <= 90:
+            lat = None
+        if lng is not None and not -180 <= lng <= 180:
+            lng = None
+        geocoded = None
+        if lat is None or lng is None:
+            geocoded = self._geocode_real_place(name)
+            if geocoded:
+                lat = geocoded["latitude"]
+                lng = geocoded["longitude"]
+        elif not display_address:
+            geocoded = self.reverse_geocode_real_place(lat, lng)
+        address = geocoded.get("address", {}) if geocoded else {}
+        provider_id = str(provider_id or (geocoded or {}).get("provider_id") or "").strip()
+        display_address = str(display_address or (geocoded or {}).get("display_name") or "").strip()
+        provided_category = str(category or "").strip()[:80]
+        category = str(provided_category or (geocoded or {}).get("category") or "other").strip()[:80]
+        now = datetime.now().isoformat()
+        visited = str(visited_at or "").strip() or now
+        slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+        base_key = slug or f"place-{name.encode('utf-8').hex()}"
+        confidence = max(0.0, min(1.0, float(confidence or 0)))
+        try:
+            accuracy_m = max(0.0, float(accuracy_m)) if accuracy_m not in (None, "") else None
+        except (TypeError, ValueError):
+            accuracy_m = None
+        with self._lock:
+            conn = self._connect()
+            try:
+                existing = conn.execute("SELECT * FROM real_places WHERE place_key=?", (place_key,)).fetchone() if place_key else None
+                if not existing and provider_id:
+                    existing = conn.execute("SELECT * FROM real_places WHERE provider_id=? ORDER BY id LIMIT 1", (provider_id,)).fetchone()
+                if not existing and lat is not None and lng is not None:
+                    candidates = conn.execute("SELECT * FROM real_places WHERE lower(name)=lower(?) AND latitude IS NOT NULL AND longitude IS NOT NULL", (name,)).fetchall()
+                    existing = next((row for row in candidates if self._geo_distance_m(lat, lng, float(row["latitude"]), float(row["longitude"])) <= max(100.0, accuracy_m or 0.0)), None)
+                if not existing and lat is None and lng is None:
+                    existing = conn.execute("SELECT * FROM real_places WHERE lower(name)=lower(?) ORDER BY id LIMIT 1", (name,)).fetchone()
+                if existing:
+                    place_key = str(existing["place_key"])
+                elif provider_id:
+                    safe_provider = re.sub(r"[^a-zA-Z0-9_-]+", "-", provider_id).strip("-")
+                    place_key = f"osm-{safe_provider}"[:180]
+                elif lat is not None and lng is not None:
+                    digest = hashlib.sha1(f"{lat:.5f},{lng:.5f}".encode("ascii")).hexdigest()[:10]
+                    place_key = f"{base_key}-{digest}"[:180]
+                else:
+                    place_key = base_key[:180]
+                if existing:
+                    conn.execute(
+                        "UPDATE real_places SET latitude=COALESCE(?, latitude), longitude=COALESCE(?, longitude), accuracy_m=COALESCE(?, accuracy_m), display_address=COALESCE(NULLIF(?, ''), display_address), provider_id=COALESCE(NULLIF(?, ''), provider_id), category=COALESCE(NULLIF(?, ''), category), country=COALESCE(NULLIF(?, ''), country), admin1=COALESCE(NULLIF(?, ''), admin1), city=COALESCE(NULLIF(?, ''), city), district=COALESCE(NULLIF(?, ''), district), neighborhood=COALESCE(NULLIF(?, ''), neighborhood), visit_count=visit_count+1, first_visited_at=CASE WHEN first_visited_at='' OR ? < first_visited_at THEN ? ELSE first_visited_at END, last_visited_at=CASE WHEN last_visited_at='' OR ? > last_visited_at THEN ? ELSE last_visited_at END, notes=CASE WHEN ? <> '' THEN ? ELSE notes END, updated_at=? WHERE place_key=?",
+                        (lat, lng, accuracy_m, display_address, provider_id, provided_category, address.get("country", ""), address.get("state", address.get("province", "")), address.get("city", address.get("town", address.get("municipality", ""))), address.get("county", address.get("city_district", "")), address.get("suburb", address.get("neighbourhood", "")), visited, visited, visited, visited, note, note, now, place_key),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO real_places (place_key,name,latitude,longitude,visit_count,first_visited_at,last_visited_at,source,confidence,accuracy_m,display_address,provider_id,category,country,admin1,city,district,neighborhood,notes,created_at,updated_at) VALUES (?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (place_key, name, lat, lng, visited, visited, ("geocoded" if geocoded else source or "manual"), confidence, accuracy_m, display_address, provider_id, category, address.get("country", ""), address.get("state", address.get("province", "")), address.get("city", address.get("town", address.get("municipality", ""))), address.get("county", address.get("city_district", "")), address.get("suburb", address.get("neighbourhood", "")), note, now, now),
+                    )
+                conn.execute(
+                    "INSERT INTO real_place_visits (place_key,visited_at,latitude,longitude,accuracy_m,source,note,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                    (place_key, visited, lat, lng, accuracy_m, source or "manual", note, now),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_real_place(place_key)
+
+    @staticmethod
+    def _geocode_real_place(name: str) -> Optional[Dict[str, Any]]:
+        """用开放地理编码解析地点名称；失败时保持离线可用。"""
+        results = EarthOnlineStore.search_real_places(name, limit=1)
+        return results[0] if results else None
+
+    @staticmethod
+    def search_real_places(query_text: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """通过 Nominatim 搜索真实 POI，返回可供用户选择的候选项。"""
+        try:
+            query = urlencode({"q": str(query_text or "").strip(), "format": "jsonv2", "limit": max(1, min(10, int(limit))), "accept-language": "zh-CN", "addressdetails": 1})
+            request = urllib.request.Request(
+                f"https://nominatim.openstreetmap.org/search?{query}",
+                headers={"User-Agent": "MiyaEarthOnline/1.0 (personal map)"},
+            )
+            with urllib.request.urlopen(request, timeout=5) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            return [EarthOnlineStore._normalize_geocode_result(item) for item in payload]
+        except Exception as exc:
+            logger.debug("现实地点地理编码失败: %s", exc)
+            return []
+
+    @staticmethod
+    def search_nearby_real_places(
+        latitude: float,
+        longitude: float,
+        radius_m: int = 1500,
+        limit: int = 40,
+    ) -> List[Dict[str, Any]]:
+        """通过 Overpass 查询坐标附近的命名 POI，不保存玩家坐标或查询结果。"""
+        lat = float(latitude)
+        lng = float(longitude)
+        if not -90 <= lat <= 90 or not -180 <= lng <= 180:
+            raise ValueError("地图坐标超出有效范围")
+        radius = max(100, min(5000, int(radius_m)))
+        result_limit = max(1, min(80, int(limit)))
+        selectors = (
+            'nwr(around:{radius},{lat:.7f},{lng:.7f})["name"]["amenity"];'
+            'nwr(around:{radius},{lat:.7f},{lng:.7f})["name"]["shop"];'
+            'nwr(around:{radius},{lat:.7f},{lng:.7f})["name"]["tourism"];'
+            'nwr(around:{radius},{lat:.7f},{lng:.7f})["name"]["leisure"];'
+            'nwr(around:{radius},{lat:.7f},{lng:.7f})["name"]["public_transport"];'
+            'nwr(around:{radius},{lat:.7f},{lng:.7f})["name"]["railway"~"station|halt"];'
+        ).format(radius=radius, lat=lat, lng=lng)
+        query = f"[out:json][timeout:12];({selectors});out center {result_limit};"
+        try:
+            body = urlencode({"data": query}).encode("utf-8")
+            request = urllib.request.Request(
+                "https://overpass-api.de/api/interpreter",
+                data=body,
+                headers={
+                    "User-Agent": "MiyaEarthOnline/1.0 (personal map)",
+                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                    "Accept": "application/json",
+                },
+            )
+            with urllib.request.urlopen(request, timeout=15) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            results = []
+            seen = set()
+            for item in payload.get("elements") or []:
+                normalized = EarthOnlineStore._normalize_nearby_result(item, lat, lng)
+                if not normalized or normalized["provider_id"] in seen:
+                    continue
+                seen.add(normalized["provider_id"])
+                results.append(normalized)
+            results.sort(key=lambda place: (place["distance_m"], -place.get("importance", 0)))
+            return results[:result_limit]
+        except Exception as exc:
+            logger.debug("附近现实地点查询失败: %s", exc)
+            return []
+
+    @staticmethod
+    def _normalize_nearby_result(item: Dict[str, Any], origin_latitude: float, origin_longitude: float) -> Optional[Dict[str, Any]]:
+        """把 Overpass node/way/relation 统一成地图候选地点。"""
+        tags = item.get("tags") or {}
+        center = item.get("center") or {}
+        raw_lat = item.get("lat", center.get("lat"))
+        raw_lng = item.get("lon", center.get("lon"))
+        name = str(tags.get("name:zh") or tags.get("name") or "").strip()
+        if not name or raw_lat is None or raw_lng is None:
+            return None
+        lat = float(raw_lat)
+        lng = float(raw_lng)
+        category_key = next((key for key in ("amenity", "shop", "tourism", "leisure", "public_transport", "railway") if tags.get(key)), "other")
+        category_value = str(tags.get(category_key) or "other")
+        address_parts = [
+            tags.get("addr:province"), tags.get("addr:city"), tags.get("addr:district"),
+            tags.get("addr:street"), tags.get("addr:housenumber"),
+        ]
+        display_name = " ".join(str(part).strip() for part in address_parts if str(part or "").strip())
+        if not display_name:
+            display_name = f"{name} · {category_value}"
+        element_type = str(item.get("type") or "osm")
+        element_id = str(item.get("id") or "")
+        return {
+            "name": name,
+            "display_name": display_name,
+            "latitude": lat,
+            "longitude": lng,
+            "address": {key[5:]: value for key, value in tags.items() if key.startswith("addr:")},
+            "provider_id": f"{element_type}-{element_id}" if element_id else "",
+            "category": category_value,
+            "category_group": category_key,
+            "type": category_value,
+            "importance": 0.0,
+            "distance_m": round(EarthOnlineStore._geo_distance_m(origin_latitude, origin_longitude, lat, lng)),
+            "source": "openstreetmap_overpass",
+            "fetched_at": datetime.now().isoformat(),
+            "website": str(tags.get("website") or tags.get("contact:website") or ""),
+            "phone": str(tags.get("phone") or tags.get("contact:phone") or ""),
+            "opening_hours": str(tags.get("opening_hours") or ""),
+        }
+
+    @staticmethod
+    def reverse_geocode_real_place(latitude: float, longitude: float) -> Optional[Dict[str, Any]]:
+        """把地图点选/GPS 坐标反查为可读地址。"""
+        try:
+            query = urlencode({"lat": f"{float(latitude):.7f}", "lon": f"{float(longitude):.7f}", "format": "jsonv2", "accept-language": "zh-CN", "addressdetails": 1, "zoom": 18})
+            request = urllib.request.Request(
+                f"https://nominatim.openstreetmap.org/reverse?{query}",
+                headers={"User-Agent": "MiyaEarthOnline/1.0 (personal map)"},
+            )
+            with urllib.request.urlopen(request, timeout=5) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            return EarthOnlineStore._normalize_geocode_result(payload) if payload and not payload.get("error") else None
+        except Exception as exc:
+            logger.debug("现实坐标反向地理编码失败: %s", exc)
+            return None
+
+    @staticmethod
+    def _normalize_geocode_result(item: Dict[str, Any]) -> Dict[str, Any]:
+        address = item.get("address") or {}
+        name = str(item.get("name") or address.get("amenity") or address.get("tourism") or address.get("building") or item.get("display_name") or "所选地点").split(",")[0]
+        osm_type = str(item.get("osm_type") or "osm")
+        osm_id = str(item.get("osm_id") or "")
+        return {
+            "name": name,
+            "display_name": str(item.get("display_name") or ""),
+            "latitude": float(item["lat"]),
+            "longitude": float(item["lon"]),
+            "address": address,
+            "provider_id": f"{osm_type}-{osm_id}" if osm_id else "",
+            "category": str(item.get("category") or item.get("type") or "other"),
+            "type": str(item.get("type") or ""),
+            "importance": float(item.get("importance") or 0),
+        }
 
     def list_world_regions(self) -> List[Dict[str, Any]]:
         """获取世界地图区域与玩家探索进度。"""
@@ -5193,6 +5770,451 @@ class EarthOnlineStore:
             "stars_label": "★" * stars + "☆" * (3 - stars),
             "progress_percent": round(min(100, done / WEEKLY_CHALLENGE_GOAL * 100)),
         }
+
+    # ── v18: 现实收益情报与计划 (MVP) ─────────────────
+
+    @staticmethod
+    def _public_feed_url(value: Any) -> str:
+        parsed = urlparse(str(value or "").strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("信息源必须是公开 http/https 地址")
+        host = parsed.hostname.lower().rstrip(".")
+        if host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
+            raise ValueError("不允许使用本机地址作为信息源")
+        try:
+            ip = ipaddress.ip_address(host)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                raise ValueError("不允许使用内网或本机地址作为信息源")
+        except ValueError as exc:
+            if str(exc).startswith("不允许"):
+                raise
+        return str(value).strip()[:1000]
+
+    def list_earning_sources(self) -> List[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            return [dict(row) for row in conn.execute("SELECT * FROM earning_sources ORDER BY enabled DESC, id DESC").fetchall()]
+        finally:
+            conn.close()
+
+    def create_earning_source(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        data = data if isinstance(data, dict) else {}
+        name = str(data.get("name", "")).strip()[:120]
+        url = self._public_feed_url(data.get("url"))
+        if not name: name = urlparse(url).hostname or "公开信息源"
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute("SELECT * FROM earning_sources WHERE url = ?", (url,)).fetchone()
+                if row:
+                    conn.execute("UPDATE earning_sources SET name = ?, kind = ?, enabled = ?, updated_at = ? WHERE id = ?", (name, str(data.get("kind", "rss"))[:30], 1 if data.get("enabled", True) else 0, now, int(row["id"])))
+                    source_id = int(row["id"])
+                else:
+                    cur = conn.execute("INSERT INTO earning_sources (name, url, kind, enabled, created_at, updated_at) VALUES (?,?,?,?,?,?)", (name, url, str(data.get("kind", "rss"))[:30], 1 if data.get("enabled", True) else 0, now, now)); source_id = cur.lastrowid
+                conn.commit()
+            finally: conn.close()
+        self._write_mirror()
+        return self.get_earning_source(int(source_id)) or {}
+
+    def get_earning_source(self, source_id: int) -> Optional[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT * FROM earning_sources WHERE id = ?", (int(source_id),)).fetchone(); return dict(row) if row else None
+        finally: conn.close()
+
+    def update_earning_source(self, source_id: int, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        source = self.get_earning_source(source_id)
+        if not source: return None
+        data = data if isinstance(data, dict) else {}; updates = {}
+        if "name" in data and str(data["name"] or "").strip(): updates["name"] = str(data["name"]).strip()[:120]
+        if "url" in data: updates["url"] = self._public_feed_url(data["url"])
+        if "enabled" in data: updates["enabled"] = 1 if data["enabled"] else 0
+        if not updates: return source
+        updates["updated_at"] = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(f"UPDATE earning_sources SET {', '.join(f'{k} = ?' for k in updates)} WHERE id = ?", (*updates.values(), int(source_id))); conn.commit()
+            finally: conn.close()
+        self._write_mirror(); return self.get_earning_source(source_id)
+
+    def delete_earning_source(self, source_id: int) -> bool:
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute("DELETE FROM earning_sources WHERE id = ?", (int(source_id),)); conn.commit(); deleted = cur.rowcount > 0
+            finally: conn.close()
+        if deleted: self._write_mirror()
+        return deleted
+
+    @staticmethod
+    def _feed_text(value: str) -> str:
+        return re.sub(r"\s+", " ", unescape(re.sub(r"<[^>]+>", " ", str(value or "")))).strip()[:2000]
+
+    def _parse_public_feed(self, payload: bytes) -> List[Dict[str, str]]:
+        root = ET.fromstring(payload)
+        entries = []
+        for node in root.iter():
+            tag = node.tag.rsplit("}", 1)[-1].lower() if isinstance(node.tag, str) else ""
+            if tag not in {"item", "entry"}: continue
+            values: Dict[str, str] = {}
+            for child in list(node):
+                child_tag = child.tag.rsplit("}", 1)[-1].lower() if isinstance(child.tag, str) else ""
+                text = self._feed_text(child.text or "")
+                if child_tag == "link" and child.attrib.get("href"): text = str(child.attrib["href"])
+                values[child_tag] = text
+            title, link = values.get("title", ""), values.get("link", "") or values.get("guid", "")
+            if title and link: entries.append({"title": title, "url": link, "description": values.get("description", "") or values.get("summary", "")})
+        return entries[:30]
+
+    def sync_earning_sources(self, source_id: Optional[int] = None) -> Dict[str, Any]:
+        sources = [self.get_earning_source(source_id)] if source_id else self.list_earning_sources()
+        sources = [source for source in sources if source and source.get("enabled")]
+        created, skipped, errors = [], 0, []
+        for source in sources:
+            try:
+                request = urllib.request.Request(source["url"], headers={"User-Agent": "Miya-EarthOnline/1.0", "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml"})
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    payload = response.read(1024 * 1024 + 1)
+                if len(payload) > 1024 * 1024: raise ValueError("信息源响应超过 1MB")
+                entries = self._parse_public_feed(payload); now = datetime.now().isoformat()
+                with self._lock:
+                    conn = self._connect()
+                    try:
+                        for entry in entries:
+                            if conn.execute("SELECT id FROM earning_opportunities WHERE url = ?", (entry["url"],)).fetchone(): skipped += 1; continue
+                            cur = conn.execute("INSERT INTO earning_opportunities (title, source, url, kind, description, risk, confidence, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)", (entry["title"], source["name"], entry["url"], "public_feed", entry["description"], "unknown", "medium", "inbox", now, now)); created.append({"id": cur.lastrowid, "title": entry["title"], "source": source["name"]})
+                        conn.execute("UPDATE earning_sources SET last_synced_at = ?, last_error = '', updated_at = ? WHERE id = ?", (now, now, int(source["id"]))); conn.commit()
+                    finally: conn.close()
+            except Exception as exc:
+                errors.append({"source": source.get("name", ""), "error": str(exc)[:300]})
+                with self._lock:
+                    conn = self._connect()
+                    try: conn.execute("UPDATE earning_sources SET last_error = ?, updated_at = ? WHERE id = ?", (str(exc)[:500], datetime.now().isoformat(), int(source["id"]))); conn.commit()
+                    finally: conn.close()
+        if sources: self._write_mirror()
+        return {"success": not errors, "created": created, "created_count": len(created), "skipped": skipped, "errors": errors}
+
+    @staticmethod
+    def _normalise_earning_status(value: Any, allowed: tuple[str, ...], default: str) -> str:
+        value = str(value or default).strip().lower()
+        return value if value in allowed else default
+
+    def get_earning_preferences(self) -> Dict[str, Any]:
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT * FROM earning_preferences WHERE id = 1").fetchone()
+            if not row:
+                return {"skills": [], "preferred_kinds": [], "weekly_hours": 5, "target_amount": 500, "min_hourly_rate": 0, "risk_tolerance": "low"}
+            result = dict(row)
+            for key in ("skills", "preferred_kinds"):
+                try: result[key] = json.loads(result.get(key) or "[]")
+                except (TypeError, ValueError): result[key] = []
+            return result
+        finally: conn.close()
+
+    def update_earning_preferences(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        data = data if isinstance(data, dict) else {}; current = self.get_earning_preferences()
+        def list_value(key: str) -> List[str]:
+            raw = data.get(key, current.get(key, []))
+            if isinstance(raw, str): raw = raw.split(",")
+            if not isinstance(raw, list): raw = []
+            return [str(value).strip()[:40] for value in raw if str(value).strip()][:30]
+        def number(key: str, fallback: float) -> float:
+            try: return max(0.0, float(data.get(key, fallback) or 0))
+            except (TypeError, ValueError): return fallback
+        tolerance = str(data.get("risk_tolerance", current.get("risk_tolerance", "low"))).lower()
+        if tolerance not in {"low", "medium", "high"}: tolerance = "low"
+        updated = {"skills": list_value("skills"), "preferred_kinds": list_value("preferred_kinds"), "weekly_hours": number("weekly_hours", 5), "target_amount": number("target_amount", 500), "min_hourly_rate": number("min_hourly_rate", 0), "risk_tolerance": tolerance}
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("UPDATE earning_preferences SET skills = ?, preferred_kinds = ?, weekly_hours = ?, target_amount = ?, min_hourly_rate = ?, risk_tolerance = ?, updated_at = ? WHERE id = 1", (json.dumps(updated["skills"], ensure_ascii=False), json.dumps(updated["preferred_kinds"], ensure_ascii=False), updated["weekly_hours"], updated["target_amount"], updated["min_hourly_rate"], updated["risk_tolerance"], datetime.now().isoformat())); conn.commit()
+            finally: conn.close()
+        self._write_mirror(); return self.get_earning_preferences()
+
+    def list_earning_opportunities(self, status: str = "", kind: str = "", limit: int = 100) -> List[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            clauses, params = [], []
+            if status: clauses.append("status = ?"); params.append(str(status))
+            if kind: clauses.append("kind = ?"); params.append(str(kind))
+            where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+            params.append(max(1, min(500, int(limit))))
+            rows = conn.execute(f"SELECT * FROM earning_opportunities{where} ORDER BY updated_at DESC, id DESC LIMIT ?", params).fetchall()
+            return [dict(row) for row in rows]
+        finally: conn.close()
+
+    def get_earning_opportunity(self, opportunity_id: int) -> Optional[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT * FROM earning_opportunities WHERE id = ?", (int(opportunity_id),)).fetchone()
+            return dict(row) if row else None
+        finally: conn.close()
+
+    def create_earning_opportunity(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        data = data if isinstance(data, dict) else {}
+        title = str(data.get("title", "")).strip()[:200]
+        if not title: raise ValueError("情报标题不能为空")
+        now = datetime.now().isoformat()
+        def num(key: str) -> float:
+            try: return max(0.0, float(data.get(key, 0) or 0))
+            except (TypeError, ValueError): return 0.0
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute("INSERT INTO earning_opportunities (title, source, url, kind, description, income_min, income_max, hours, risk, confidence, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", (title, str(data.get("source", ""))[:120], str(data.get("url", ""))[:1000], str(data.get("kind", "other"))[:40], str(data.get("description", ""))[:2000], num("income_min"), num("income_max"), num("hours"), self._normalise_earning_status(data.get("risk"), ("low", "medium", "high", "unknown"), "unknown"), self._normalise_earning_status(data.get("confidence"), ("low", "medium", "high", "unknown"), "unknown"), self._normalise_earning_status(data.get("status"), ("inbox", "shortlisted", "applied", "won", "closed"), "inbox"), now, now))
+                row_id = cur.lastrowid
+                self._log_activity(conn, "earning", "◇", f"收录收益情报: {title}", str(data.get("source", ""))[:200])
+                conn.commit()
+            finally: conn.close()
+        self._write_mirror()
+        return self.get_earning_opportunity(int(row_id)) or {}
+
+    def update_earning_opportunity(self, opportunity_id: int, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        data = data if isinstance(data, dict) else {}
+        updates: Dict[str, Any] = {}
+        for key in ("title", "source", "url", "kind", "description", "income_min", "income_max", "hours", "risk", "confidence", "status"):
+            if key not in data: continue
+            if key in {"income_min", "income_max", "hours"}:
+                try: updates[key] = max(0.0, float(data[key] or 0))
+                except (TypeError, ValueError): continue
+            elif key == "status": updates[key] = self._normalise_earning_status(data[key], ("inbox", "shortlisted", "applied", "won", "closed"), "inbox")
+            elif key in {"risk", "confidence"}: updates[key] = self._normalise_earning_status(data[key], ("low", "medium", "high", "unknown"), "unknown")
+            else: updates[key] = str(data[key] or "").strip()[:2000]
+        if not updates: return self.get_earning_opportunity(opportunity_id)
+        with self._lock:
+            conn = self._connect()
+            try:
+                assignments = ", ".join(f"{key} = ?" for key in updates)
+                conn.execute(f"UPDATE earning_opportunities SET {assignments}, updated_at = ? WHERE id = ?", (*updates.values(), datetime.now().isoformat(), int(opportunity_id)))
+                conn.commit()
+            finally: conn.close()
+        self._write_mirror()
+        return self.get_earning_opportunity(opportunity_id)
+
+    def convert_earning_opportunity_to_quest(self, opportunity_id: int, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """把收益情报转成地球online 委托，保留来源与收益预估。"""
+        opportunity = self.get_earning_opportunity(opportunity_id)
+        if not opportunity:
+            return {"success": False, "message": "收益情报不存在"}
+        if opportunity.get("quest_id"):
+            return {"success": False, "message": "这条情报已经转成委托", "quest": self.get_quest(int(opportunity["quest_id"])), "opportunity": opportunity}
+        data = data if isinstance(data, dict) else {}
+        title = str(data.get("title") or f"执行收益机会：{opportunity['title']}").strip()[:200]
+        description = str(data.get("description") or opportunity.get("description") or "完成后在收益中枢记录真实收入与成本。").strip()[:2000]
+        fields = {
+            "earning_opportunity_id": int(opportunity_id),
+            "earning_source": opportunity.get("source", ""),
+            "earning_url": opportunity.get("url", ""),
+            "income_min": opportunity.get("income_min", 0),
+            "income_max": opportunity.get("income_max", 0),
+            "estimated_hours": opportunity.get("hours", 0),
+            "risk": opportunity.get("risk", "unknown"),
+            "confidence": opportunity.get("confidence", "unknown"),
+        }
+        try:
+            quest = self.create_quest(
+                title=title,
+                description=description,
+                quest_type="optional",
+                must_complete=False,
+                reward_currency=0,
+                reward_exp=max(0, int(data.get("reward_exp", 10) or 0)),
+                penalty_currency=0,
+                deadline=str(data.get("deadline", ""))[:40],
+                source="earning",
+                difficulty=max(1, min(5, int(data.get("difficulty", 2) or 2))),
+                fields=fields,
+            )
+        except (TypeError, ValueError) as exc:
+            return {"success": False, "message": str(exc)}
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("UPDATE earning_opportunities SET status = 'shortlisted', quest_id = ?, updated_at = ? WHERE id = ?", (int(quest["id"]), datetime.now().isoformat(), int(opportunity_id)))
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return {"success": True, "quest": quest, "opportunity": self.get_earning_opportunity(opportunity_id)}
+
+    def list_earning_plan_steps(self, plan_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            if plan_id is None:
+                rows = conn.execute("SELECT * FROM earning_plan_steps ORDER BY plan_id ASC, position ASC, id ASC").fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM earning_plan_steps WHERE plan_id = ? ORDER BY position ASC, id ASC", (int(plan_id),)).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def _earning_plan_with_steps(self, plan: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not plan:
+            return None
+        result = dict(plan)
+        steps = self.list_earning_plan_steps(int(plan["id"]))
+        result["steps"] = steps
+        result["completed_steps"] = sum(1 for step in steps if step.get("status") == "done")
+        result["progress_percent"] = round(result["completed_steps"] / len(steps) * 100) if steps else 0
+        return result
+
+    def create_earning_plan_step(self, plan_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.get_earning_plan(plan_id):
+            raise ValueError("收益计划不存在")
+        data = data if isinstance(data, dict) else {}
+        title = str(data.get("title", "")).strip()[:200]
+        if not title:
+            raise ValueError("阶段标题不能为空")
+        try:
+            position = max(0, int(data.get("position", 0) or 0))
+        except (TypeError, ValueError):
+            position = 0
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute("INSERT INTO earning_plan_steps (plan_id, title, description, position, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?)", (int(plan_id), title, str(data.get("description", ""))[:1000], position, self._normalise_earning_status(data.get("status"), ("pending", "doing", "done", "skipped"), "pending"), now, now))
+                conn.execute("UPDATE earning_plans SET updated_at = ? WHERE id = ?", (now, int(plan_id)))
+                conn.commit(); step_id = cur.lastrowid
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_earning_plan_step(int(step_id)) or {}
+
+    def get_earning_plan_step(self, step_id: int) -> Optional[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT * FROM earning_plan_steps WHERE id = ?", (int(step_id),)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def update_earning_plan_step(self, step_id: int, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        step = self.get_earning_plan_step(step_id)
+        if not step:
+            return None
+        data = data if isinstance(data, dict) else {}
+        updates: Dict[str, Any] = {}
+        if "title" in data and str(data["title"] or "").strip(): updates["title"] = str(data["title"]).strip()[:200]
+        if "description" in data: updates["description"] = str(data["description"] or "")[:1000]
+        if "position" in data:
+            try: updates["position"] = max(0, int(data["position"] or 0))
+            except (TypeError, ValueError): pass
+        if "status" in data: updates["status"] = self._normalise_earning_status(data["status"], ("pending", "doing", "done", "skipped"), "pending")
+        if not updates: return step
+        if updates.get("status") == "done": updates["completed_at"] = datetime.now().isoformat()
+        elif updates.get("status") in {"pending", "doing"}: updates["completed_at"] = ""
+        with self._lock:
+            conn = self._connect()
+            try:
+                assignments = ", ".join(f"{key} = ?" for key in updates)
+                now = datetime.now().isoformat()
+                conn.execute(f"UPDATE earning_plan_steps SET {assignments}, updated_at = ? WHERE id = ?", (*updates.values(), now, int(step_id)))
+                conn.execute("UPDATE earning_plans SET updated_at = ? WHERE id = ?", (now, int(step["plan_id"])))
+                conn.commit()
+            finally: conn.close()
+        self._write_mirror()
+        return self.get_earning_plan_step(step_id)
+
+    def convert_earning_plan_step_to_quest(self, step_id: int) -> Dict[str, Any]:
+        step = self.get_earning_plan_step(step_id)
+        if not step:
+            return {"success": False, "message": "收益阶段不存在"}
+        if step.get("quest_id"):
+            return {"success": False, "message": "这个阶段已经转成委托", "step": step, "quest": self.get_quest(int(step["quest_id"]))}
+        plan = self.get_earning_plan(int(step["plan_id"])) or {}
+        quest = self.create_quest(title=f"收益计划：{step['title']}", description=str(step.get("description") or f"完成收益计划「{plan.get('title', '')}」的这一阶段。"), quest_type="optional", reward_currency=0, reward_exp=5, source="earning_plan", difficulty=2, fields={"earning_plan_id": int(step["plan_id"]), "earning_plan_step_id": int(step_id)})
+        self.update_earning_plan_step(step_id, {"status": "doing"})
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("UPDATE earning_plan_steps SET quest_id = ?, updated_at = ? WHERE id = ?", (int(quest["id"]), datetime.now().isoformat(), int(step_id)))
+                conn.commit()
+            finally: conn.close()
+        self._write_mirror()
+        return {"success": True, "step": self.get_earning_plan_step(step_id), "quest": quest}
+
+    def list_earning_plans(self, status: str = "") -> List[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            rows = conn.execute("SELECT * FROM earning_plans WHERE status = ? ORDER BY updated_at DESC, id DESC" if status else "SELECT * FROM earning_plans ORDER BY updated_at DESC, id DESC", (status,) if status else ()).fetchall()
+            return [self._earning_plan_with_steps(dict(row)) or {} for row in rows]
+        finally: conn.close()
+
+    def get_earning_plan(self, plan_id: int) -> Optional[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT * FROM earning_plans WHERE id = ?", (int(plan_id),)).fetchone()
+            return self._earning_plan_with_steps(dict(row)) if row else None
+        finally: conn.close()
+
+    def create_earning_plan(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        data = data if isinstance(data, dict) else {}; title = str(data.get("title", "")).strip()[:200]
+        if not title: raise ValueError("收益计划标题不能为空")
+        try: goal = max(0.0, float(data.get("goal_amount", 0) or 0))
+        except (TypeError, ValueError): goal = 0.0
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute("INSERT INTO earning_plans (title, goal_amount, target_date, status, notes, created_at, updated_at) VALUES (?,?,?,?,?,?,?)", (title, goal, str(data.get("target_date", ""))[:30], self._normalise_earning_status(data.get("status"), ("active", "paused", "completed", "archived"), "active"), str(data.get("notes", ""))[:2000], now, now)); row_id = cur.lastrowid; conn.commit()
+            finally: conn.close()
+        self._write_mirror(); return self.get_earning_plan(int(row_id)) or {}
+
+    def list_income_records(self, limit: int = 100) -> List[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            rows = conn.execute("SELECT * FROM income_records ORDER BY recorded_at DESC, id DESC LIMIT ?", (max(1, min(1000, int(limit))),)).fetchall(); return [dict(row) for row in rows]
+        finally: conn.close()
+
+    def record_income(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        data = data if isinstance(data, dict) else {}
+        def num(key: str) -> float:
+            try: return float(data.get(key, 0) or 0)
+            except (TypeError, ValueError): return 0.0
+        amount, cost, hours = num("amount"), max(0.0, num("cost")), max(0.0, num("hours"))
+        if amount < 0: raise ValueError("收入金额不能为负数，请用成本字段记录支出")
+        opportunity_id = int(data["opportunity_id"]) if data.get("opportunity_id") else None
+        if opportunity_id and not self.get_earning_opportunity(opportunity_id):
+            raise ValueError("关联的收益情报不存在")
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute("INSERT INTO income_records (opportunity_id, amount, cost, hours, note, recorded_at) VALUES (?,?,?,?,?,?)", (opportunity_id, amount, cost, hours, str(data.get("note", ""))[:2000], str(data.get("recorded_at", now))[:40]))
+                if opportunity_id:
+                    conn.execute("UPDATE earning_opportunities SET status = 'won', updated_at = ? WHERE id = ?", (now, opportunity_id))
+                self._ledger_locked(conn, "earth", amount - cost, "现实收益记录"); self._log_activity(conn, "earning", "◆", f"记录现实收益 ¥{amount - cost:.2f}", str(data.get("note", ""))[:200]); conn.commit(); row_id = cur.lastrowid
+            finally: conn.close()
+        self._write_mirror(); return {"success": True, "record": self.get_income_record(int(row_id)), "player": self.get_player()}
+
+    def get_income_record(self, record_id: int) -> Optional[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT * FROM income_records WHERE id = ?", (int(record_id),)).fetchone(); return dict(row) if row else None
+        finally: conn.close()
+
+    def earning_guidance(self) -> Dict[str, Any]:
+        opportunities = self.list_earning_opportunities(limit=200); plans = self.list_earning_plans(); records = self.list_income_records(limit=200); prefs = self.get_earning_preferences(); ranked = []
+        skills = [str(value).lower() for value in prefs.get("skills", [])]; preferred_kinds = [str(value).lower() for value in prefs.get("preferred_kinds", [])]
+        for raw in opportunities:
+            item = dict(raw); hours = float(item.get("hours") or 0); lo = float(item.get("income_min") or 0); hi = float(item.get("income_max") or 0); text = f"{item.get('title', '')} {item.get('description', '')} {item.get('kind', '')}".lower(); item["hourly_estimate"] = round((lo + hi) / 2 / hours, 2) if hours > 0 else 0
+            score = item["hourly_estimate"] * ({"low": 1, "medium": .7, "high": .4}.get(item.get("risk"), .5)) + ({"high": 10, "medium": 4}.get(item.get("confidence"), 0)); reasons = []
+            if preferred_kinds and any(kind in text for kind in preferred_kinds): score += 15; reasons.append("符合偏好类型")
+            if skills and any(skill in text for skill in skills): score += 25; reasons.append("与已填写技能相关")
+            if float(prefs.get("min_hourly_rate") or 0) and item["hourly_estimate"] < float(prefs["min_hourly_rate"]): score -= 20; reasons.append("低于最低时薪")
+            if float(prefs.get("weekly_hours") or 0) and hours > float(prefs["weekly_hours"]): score -= 10; reasons.append("预计耗时超过每周可用时间")
+            if float(prefs.get("target_amount") or 0) and hi >= float(prefs["target_amount"]): score += 5; reasons.append("单次预估上限可覆盖阶段目标")
+            tolerance = prefs.get("risk_tolerance", "low")
+            if tolerance == "low" and item.get("risk") == "high": score -= 25; reasons.append("风险高于你的接受范围")
+            elif tolerance == "high" and item.get("risk") == "low": reasons.append("风险低于你的上限")
+            if not reasons: reasons.append("按预估时薪、风险与可信度排序")
+            item["fit_score"] = round(score, 2); item["fit_reasons"] = reasons; ranked.append(item)
+        ranked.sort(key=lambda x: x["fit_score"], reverse=True)
+        return {"opportunities": ranked[:10], "plans": plans[:10], "income_records": records[:10], "preferences": prefs, "totals": {"net_income": round(sum(float(r.get("amount") or 0) - float(r.get("cost") or 0) for r in records), 2), "opportunity_count": len(opportunities), "active_plan_count": sum(1 for p in plans if p.get("status") == "active")}, "boundary": "建议基于你记录的资料，不保证收益；涉及外部平台、付款或提交前需要你确认。"}
 
     # ── 汇总 (弥娅/前端一键读取) ────────────────────
 

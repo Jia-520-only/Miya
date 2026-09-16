@@ -58,6 +58,95 @@ export interface EarthLifeHub {
   boundary: string
 }
 
+export interface EarthEarningOpportunity {
+  id: number
+  title: string
+  source: string
+  url: string
+  kind: string
+  description: string
+  income_min: number
+  income_max: number
+  hours: number
+  risk: 'low' | 'medium' | 'high' | 'unknown'
+  confidence: 'low' | 'medium' | 'high' | 'unknown'
+  status: 'inbox' | 'shortlisted' | 'applied' | 'won' | 'closed'
+  quest_id?: number | null
+  hourly_estimate?: number
+  fit_score?: number
+  fit_reasons?: string[]
+  created_at?: string
+  updated_at?: string
+}
+
+export interface EarthEarningPlan {
+  id: number
+  title: string
+  goal_amount: number
+  target_date: string
+  status: 'active' | 'paused' | 'completed' | 'archived'
+  notes: string
+  created_at?: string
+  updated_at?: string
+  steps?: EarthEarningPlanStep[]
+  completed_steps?: number
+  progress_percent?: number
+}
+
+export interface EarthEarningPlanStep {
+  id: number
+  plan_id: number
+  title: string
+  description: string
+  position: number
+  status: 'pending' | 'doing' | 'done' | 'skipped'
+  quest_id?: number | null
+  completed_at?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface EarthIncomeRecord {
+  id: number
+  opportunity_id?: number | null
+  amount: number
+  cost: number
+  hours: number
+  note: string
+  recorded_at: string
+}
+
+export interface EarthEarningGuidance {
+  opportunities: EarthEarningOpportunity[]
+  plans: EarthEarningPlan[]
+  income_records: EarthIncomeRecord[]
+  totals: { net_income: number, opportunity_count: number, active_plan_count: number }
+  preferences: EarthEarningPreferences
+  boundary: string
+}
+
+export interface EarthEarningPreferences {
+  skills: string[]
+  preferred_kinds: string[]
+  weekly_hours: number
+  target_amount: number
+  min_hourly_rate: number
+  risk_tolerance: 'low' | 'medium' | 'high'
+  updated_at?: string
+}
+
+export interface EarthEarningSource {
+  id: number
+  name: string
+  url: string
+  kind: string
+  enabled: boolean | number
+  last_synced_at?: string
+  last_error?: string
+  created_at?: string
+  updated_at?: string
+}
+
 export interface EarthWorldRegion {
   id: number
   key: string
@@ -82,6 +171,73 @@ export interface EarthWorldRegion {
   latitude?: number | null
   longitude?: number | null
   geofence_radius?: number
+}
+
+export interface EarthRealPlace {
+  id: number
+  place_key: string
+  name: string
+  subtitle?: string
+  latitude?: number | null
+  longitude?: number | null
+  visit_count: number
+  first_visited_at?: string
+  last_visited_at?: string
+  source?: string
+  confidence?: number
+  accuracy_m?: number | null
+  image_path?: string
+  country?: string
+  admin1?: string
+  city?: string
+  district?: string
+  neighborhood?: string
+  notes?: string
+  display_address?: string
+  provider_id?: string
+  category?: string
+  tags?: string[]
+  favorite?: boolean
+  visits?: EarthRealPlaceVisit[]
+  photos?: EarthRealPlacePhoto[]
+}
+
+export interface EarthRealPlaceVisit {
+  id: number
+  place_key: string
+  visited_at: string
+  latitude?: number | null
+  longitude?: number | null
+  accuracy_m?: number | null
+  source?: string
+  note?: string
+}
+
+export interface EarthRealPlacePhoto {
+  id: number
+  place_key: string
+  image_path: string
+  caption?: string
+  created_at?: string
+}
+
+export interface EarthMapSearchResult {
+  name: string
+  display_name: string
+  latitude: number
+  longitude: number
+  address?: Record<string, string>
+  provider_id?: string
+  category?: string
+  type?: string
+  importance?: number
+  distance_m?: number
+  category_group?: string
+  source?: string
+  fetched_at?: string
+  website?: string
+  phone?: string
+  opening_hours?: string
 }
 
 export interface EarthWorldDiscovery {
@@ -202,9 +358,21 @@ export interface EarthMiyaShopItemInput {
 
 export interface EarthWorldResponse {
   regions: EarthWorldRegion[]
+  places?: EarthRealPlace[]
   discoveries: EarthWorldDiscovery[]
   /** 世界模块降级或尚未初始化时可能暂无状态。 */
   status: EarthWorldStatus | null
+  mode?: 'real_world' | string
+}
+
+export interface EarthWorldRoute {
+  success: boolean
+  provider: string
+  profile: 'driving' | 'walking' | 'cycling'
+  distance_m: number
+  duration_s: number
+  geometry: { type: 'LineString', coordinates: [number, number][] }
+  legs?: Array<Record<string, any>>
 }
 
 export interface EarthWorldEventArea {
@@ -891,6 +1059,83 @@ export class EarthApiClient extends ApiClient {
     return this.instance.get('/api/earth/currency/ledger', { params: { limit, currency } })
   }
 
+  // ── v18: 现实收益情报与计划 ──
+  async earningGuidance(): Promise<EarthEarningGuidance> {
+    return this.instance.get('/api/earth/earning/guidance')
+  }
+
+  async earningPreferences(): Promise<EarthEarningPreferences> {
+    return this.instance.get('/api/earth/earning/preferences')
+  }
+
+  async updateEarningPreferences(data: Partial<EarthEarningPreferences>): Promise<EarthEarningPreferences> {
+    return this.instance.put('/api/earth/earning/preferences', data)
+  }
+
+  async earningOpportunities(params?: { status?: string, kind?: string, limit?: number }): Promise<EarthEarningOpportunity[]> {
+    return this.instance.get('/api/earth/earning/opportunities', { params })
+  }
+
+  async earningSources(): Promise<EarthEarningSource[]> {
+    return this.instance.get('/api/earth/earning/sources')
+  }
+
+  async addEarningSource(data: { name?: string, url: string, kind?: string, enabled?: boolean }): Promise<EarthEarningSource> {
+    return this.instance.post('/api/earth/earning/sources', data)
+  }
+
+  async updateEarningSource(id: number, data: Partial<EarthEarningSource>): Promise<EarthEarningSource> {
+    return this.instance.put(`/api/earth/earning/sources/${id}`, data)
+  }
+
+  async deleteEarningSource(id: number): Promise<{ success: boolean }> {
+    return this.instance.delete(`/api/earth/earning/sources/${id}`)
+  }
+
+  async syncEarningSources(sourceId?: number): Promise<{ success: boolean, created: Array<{ id: number, title: string, source: string }>, created_count: number, skipped: number, errors: Array<{ source: string, error: string }> }> {
+    return this.instance.post('/api/earth/earning/sync', undefined, { params: sourceId ? { source_id: sourceId } : undefined })
+  }
+
+  async addEarningOpportunity(data: Partial<EarthEarningOpportunity>): Promise<EarthEarningOpportunity> {
+    return this.instance.post('/api/earth/earning/opportunities', data)
+  }
+
+  async updateEarningOpportunity(id: number, data: Partial<EarthEarningOpportunity>): Promise<EarthEarningOpportunity> {
+    return this.instance.put(`/api/earth/earning/opportunities/${id}`, data)
+  }
+
+  async convertEarningOpportunityToQuest(id: number, data?: { title?: string, deadline?: string, difficulty?: number, reward_exp?: number }): Promise<{ success: boolean, quest: EarthQuest, opportunity: EarthEarningOpportunity }> {
+    return this.instance.post(`/api/earth/earning/opportunities/${id}/to-quest`, data || {})
+  }
+
+  async earningPlans(status = ''): Promise<EarthEarningPlan[]> {
+    return this.instance.get('/api/earth/earning/plans', { params: status ? { status } : undefined })
+  }
+
+  async addEarningPlan(data: Partial<EarthEarningPlan>): Promise<EarthEarningPlan> {
+    return this.instance.post('/api/earth/earning/plans', data)
+  }
+
+  async addEarningPlanStep(planId: number, data: Partial<EarthEarningPlanStep>): Promise<EarthEarningPlanStep> {
+    return this.instance.post(`/api/earth/earning/plans/${planId}/steps`, data)
+  }
+
+  async updateEarningPlanStep(id: number, data: Partial<EarthEarningPlanStep>): Promise<EarthEarningPlanStep> {
+    return this.instance.put(`/api/earth/earning/plan-steps/${id}`, data)
+  }
+
+  async convertEarningPlanStepToQuest(id: number): Promise<{ success: boolean, step: EarthEarningPlanStep, quest: EarthQuest }> {
+    return this.instance.post(`/api/earth/earning/plan-steps/${id}/to-quest`)
+  }
+
+  async incomeRecords(limit = 100): Promise<EarthIncomeRecord[]> {
+    return this.instance.get('/api/earth/earning/records', { params: { limit } })
+  }
+
+  async recordIncome(data: Partial<EarthIncomeRecord>): Promise<{ success: boolean, record: EarthIncomeRecord, player: EarthPlayer }> {
+    return this.instance.post('/api/earth/earning/records', data)
+  }
+
   // ── v17: 回忆卡池 ──
   async memoryPool(): Promise<EarthMemoryPool> {
     return this.instance.get('/api/earth/memory')
@@ -988,6 +1233,51 @@ export class EarthApiClient extends ApiClient {
   // ── 单人开放世界 ──
   async world(): Promise<EarthWorldResponse> {
     return this.instance.get('/api/earth/world')
+  }
+
+  async listRealPlaces(limit = 200): Promise<EarthRealPlace[]> {
+    return this.instance.get('/api/earth/world/places', { params: { limit } })
+  }
+
+  async geocodeWorldPlace(query: string): Promise<{ success: boolean, query: string, latitude: number, longitude: number, address?: Record<string, string> }> {
+    return this.instance.get('/api/earth/world/geocode', { params: { query } })
+  }
+
+  async searchWorldPlaces(query: string, limit = 6): Promise<{ success: boolean, query: string, results: EarthMapSearchResult[] }> {
+    return this.instance.get('/api/earth/world/search', { params: { query, limit } })
+  }
+
+  async nearbyWorldPlaces(latitude: number, longitude: number, radiusM = 1500, limit = 40): Promise<{ success: boolean, center: { latitude: number, longitude: number }, radius_m: number, results: EarthMapSearchResult[], source: string }> {
+    return this.instance.get('/api/earth/world/nearby', { params: { latitude, longitude, radius_m: radiusM, limit } })
+  }
+
+  async reverseGeocodeWorldPlace(latitude: number, longitude: number): Promise<EarthMapSearchResult & { success: boolean }> {
+    return this.instance.get('/api/earth/world/reverse-geocode', { params: { latitude, longitude } })
+  }
+
+  async worldRoute(values: { profile: 'driving' | 'walking' | 'cycling', coordinates: [number, number][] }): Promise<EarthWorldRoute> {
+    return this.instance.post('/api/earth/world/route', values)
+  }
+
+  async recordPlaceVisit(values: { name: string, latitude?: number | null, longitude?: number | null, accuracy_m?: number | null, note?: string, visited_at?: string, source?: string, place_key?: string, provider_id?: string, display_address?: string, category?: string }): Promise<{ success: boolean, place: EarthRealPlace }> {
+    return this.instance.post('/api/earth/world/places/visits', values)
+  }
+
+  async getRealPlace(placeKey: string): Promise<EarthRealPlace> {
+    return this.instance.get(`/api/earth/world/places/${encodeURIComponent(placeKey)}`)
+  }
+
+  async updateRealPlace(placeKey: string, values: Partial<EarthRealPlace>): Promise<{ success: boolean, place: EarthRealPlace }> {
+    return this.instance.put(`/api/earth/world/places/${encodeURIComponent(placeKey)}`, values)
+  }
+
+  async deleteRealPlace(placeKey: string): Promise<{ success: boolean }> {
+    return this.instance.delete(`/api/earth/world/places/${encodeURIComponent(placeKey)}`)
+  }
+
+  async uploadRealPlaceImage(placeKey: string, file: File): Promise<{ success: boolean, image_path: string, place: EarthRealPlace }> {
+    const form = new FormData(); form.append('file', file)
+    return this.instance.post(`/api/earth/world/places/${encodeURIComponent(placeKey)}/image`, form, { headers: { 'Content-Type': 'multipart/form-data' } })
   }
 
   async worldStatus(): Promise<EarthWorldStatus> {

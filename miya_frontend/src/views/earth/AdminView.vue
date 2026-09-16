@@ -1372,7 +1372,7 @@ function questStars(difficulty: number): string {
       <!-- 世界管理 -->
       <section v-else-if="activeTab === 'world'" class="earth-panel">
         <div class="panel-head">
-          <h3>地球online 世界管理 <small>现实连接、区域照片与自定义发现</small></h3>
+          <h3>地球online 现实地图管理 <small>天气连接、定位精度与地图服务</small></h3>
           <button class="btn-primary" :disabled="worldBusy" @click="loadWorldAdmin">↻ 刷新</button>
         </div>
         <div class="world-admin-grid">
@@ -1388,7 +1388,7 @@ function questStars(difficulty: number): string {
             <input v-model="weatherApiKey" type="password" placeholder="留空表示不修改" autocomplete="off" />
             <button class="btn-primary" :disabled="worldBusy" @click="saveRealSettings">保存并刷新现实</button>
           </div>
-          <div class="world-admin-card">
+          <div v-if="false" class="world-admin-card">
             <h4>区域编辑</h4>
             <select @change="selectWorldRegion">
               <option value="">选择一个区域</option>
@@ -1411,7 +1411,7 @@ function questStars(difficulty: number): string {
             </template>
           </div>
         </div>
-        <div class="world-admin-card">
+        <div v-if="false" class="world-admin-card">
           <h4>区域现实照片</h4>
           <div class="world-admin-region-list">
             <div v-for="region in worldRegions" :key="region.key" class="world-admin-region">
@@ -1421,7 +1421,7 @@ function questStars(difficulty: number): string {
             </div>
           </div>
         </div>
-        <div class="world-admin-card">
+        <div v-if="false" class="world-admin-card">
           <h4>新增自定义发现</h4>
           <div class="modal-row"><div><label>区域</label><select v-model="worldEventForm.region_key"><option v-for="region in worldRegions" :key="region.key" :value="region.key">{{ region.name }}</option></select></div><div><label>类型</label><select v-model="worldEventForm.kind"><option value="story">剧情</option><option value="chest">宝箱</option><option value="hidden">隐藏</option></select></div></div>
           <label>标题</label><input v-model="worldEventForm.title" placeholder="例如：窗边的新光" />
@@ -1432,7 +1432,7 @@ function questStars(difficulty: number): string {
         </div>
 
         <!-- 限时活动管理 -->
-        <div class="world-admin-card">
+        <div v-if="false" class="world-admin-card">
           <h4>限时活动管理 <small>内置活动不可修改；自定义活动可编辑 / 删除并管理商品</small></h4>
           <div v-if="eventAreas.length" class="event-area-list">
             <div v-for="area in eventAreas" :key="area.key" class="event-area-row">

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import EarthAPI, {
   type EarthAchievement,
   type EarthActivity,
@@ -22,15 +22,20 @@ import EarthAPI, {
   type EarthWeeklyChallenge,
   type EarthWeeklyReport,
   type EarthLifeHub,
-  type EarthWorldDiscovery,
-  type EarthWorldRegion,
+  type EarthRealPlace,
+  type EarthMapSearchResult,
   type EarthWorldStatus,
   type EarthRealContext,
   type EarthWorldShop,
   type EarthMiyaShop,
+  type EarthWorldRoute,
 } from '@/api/earth'
 import Markdown from '@/components/Markdown.vue'
 import { isLegacyBackground } from '@/utils/backgroundAssets'
+
+declare global {
+  interface Window { maplibregl?: any }
+}
 
 // ── 前台展示面板: 玩家视角 · 鸣潮官网式整屏分节布局 ──
 // 7 个导航节 (首页/委托/背包/角色/剧情/档案/数据) + 结尾页 · 滚轮/导航翻页
@@ -51,12 +56,404 @@ const titles = ref<EarthTitles | null>(null)
 const dueSoonList = ref<EarthQuest[]>([])
 const weekly = ref<EarthWeeklyReport | null>(null)
 const rates = ref<EarthExchangeRates | null>(null)
-const worldRegions = ref<EarthWorldRegion[]>([])
-const worldDiscoveries = ref<EarthWorldDiscovery[]>([])
+const realPlaces = ref<EarthRealPlace[]>([])
 const worldStatus = ref<EarthWorldStatus | null>(null)
 const realContext = ref<EarthRealContext | null>(null)
 const worldShop = ref<EarthWorldShop | null>(null)
 const miyaShop = ref<EarthMiyaShop | null>(null)
+
+// 现实世界地图视图状态 (标准 XYZ 瓦片协议，支持全球到街道级缩放)
+const REAL_MAP_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+const realMapZoom = ref(2)
+const realMapCenter = reactive({ latitude: 25, longitude: 105 })
+const realMapPan = reactive({ x: 0, y: 0 })
+const worldMapDragging = ref(false)
+const worldMapDragOrigin = reactive({ x: 0, y: 0, px: 0, py: 0 })
+const realMapViewport = ref<HTMLElement | null>(null)
+const mapLibreContainer = ref<HTMLElement | null>(null)
+const mapLibreReady = ref(false)
+const mapLibreInstance = ref<any>(null)
+const mapLibreMarkers = ref<any[]>([])
+const mapSearchResult = ref<EarthMapSearchResult | null>(null)
+const mapSearchResults = ref<EarthMapSearchResult[]>([])
+const nearbyPlaces = ref<EarthMapSearchResult[]>([])
+const nearbyBusy = ref(false)
+const nearbyRadius = ref(1500)
+const nearbyError = ref('')
+const mapPicking = ref(false)
+type LiveLocation = { latitude: number, longitude: number, accuracy: number, timestamp: number, speed: number | null, heading: number | null, altitude: number | null }
+const currentLocation = ref<LiveLocation | null>(null)
+const locationTrail = ref<Array<{ latitude: number, longitude: number, timestamp: number }>>([])
+const liveTracking = ref(false)
+const followLiveLocation = ref(true)
+const locationError = ref('')
+let locationWatchId: number | null = null
+const mapSearch = ref('')
+const mapCountry = ref('')
+const mapAdmin1 = ref('')
+const mapCity = ref('')
+const mapDistrict = ref('')
+const routeProfile = ref<'driving' | 'walking' | 'cycling'>('driving')
+const realRoute = ref<EarthWorldRoute | null>(null)
+const routeBusy = ref(false)
+const routeError = ref('')
+const showPlaceRecorder = ref(false)
+const placeForm = reactive({ name: '', latitude: '', longitude: '', note: '', visited_at: '', place_key: '', provider_id: '', display_address: '', category: 'other' })
+const worldMapSelected = ref<EarthRealPlace | null>(null)
+const placeDetailLoading = ref(false)
+const placeEditing = ref(false)
+const placeEditForm = reactive({ name: '', subtitle: '', notes: '', category: 'other', tags: '', favorite: false })
+const mapCountries = computed(() => [...new Set(realPlaces.value.map(place => place.country).filter(Boolean))].sort())
+const mapAdmin1Options = computed(() => [...new Set(realPlaces.value.filter(place => !mapCountry.value || place.country === mapCountry.value).map(place => place.admin1).filter(Boolean))].sort())
+const mapCityOptions = computed(() => [...new Set(realPlaces.value.filter(place => (!mapCountry.value || place.country === mapCountry.value) && (!mapAdmin1.value || place.admin1 === mapAdmin1.value)).map(place => place.city).filter(Boolean))].sort())
+const mapDistrictOptions = computed(() => [...new Set(realPlaces.value.filter(place => (!mapCountry.value || place.country === mapCountry.value) && (!mapAdmin1.value || place.admin1 === mapAdmin1.value) && (!mapCity.value || place.city === mapCity.value)).map(place => place.district).filter(Boolean))].sort())
+const filteredRealPlaces = computed(() => realPlaces.value.filter((place) => {
+  const query = mapSearch.value.trim().toLowerCase()
+  return (!query || [place.name, place.country, place.admin1, place.city, place.district, place.neighborhood].some(value => String(value || '').toLowerCase().includes(query)))
+    && (!mapCountry.value || place.country === mapCountry.value)
+    && (!mapAdmin1.value || place.admin1 === mapAdmin1.value)
+    && (!mapCity.value || place.city === mapCity.value)
+    && (!mapDistrict.value || place.district === mapDistrict.value)
+}))
+const mapRoutePlaces = computed(() => [...filteredRealPlaces.value].filter(place => place.latitude != null && place.longitude != null).sort((a, b) => String(a.first_visited_at || '').localeCompare(String(b.first_visited_at || ''))))
+const routeInputSignature = computed(() => mapRoutePlaces.value.map(place => `${place.place_key}:${Number(place.longitude).toFixed(7)},${Number(place.latitude).toFixed(7)}`).join('|'))
+const mapRoutePath = computed(() => mapRoutePlaces.value.map(place => { const point = projectMap(Number(place.latitude), Number(place.longitude), realMapTileZoom.value); return `${point.x},${point.y}` }).join(' '))
+const realRoutePath = computed(() => (realRoute.value?.geometry?.coordinates || []).map(([lng, lat]) => { const point = projectMap(Number(lat), Number(lng), realMapTileZoom.value); return `${point.x},${point.y}` }).join(' '))
+const routeProfileLabel = computed(() => ({ driving: '驾车', walking: '步行', cycling: '骑行' }[routeProfile.value]))
+const mapVectorStyleEnabled = computed(() => Boolean(String((import.meta as any).env?.VITE_MAPTILER_KEY || '').trim()))
+const mapEngineLabel = computed(() => mapVectorStyleEnabled.value && mapLibreReady.value ? '矢量地图样式 · MapTiler' : '真实地图引擎 · OSM 栅格回退')
+const liveLocationStatus = computed(() => {
+  if (liveTracking.value) return '弥娅监控中'
+  if (currentLocation.value) return '单次定位已就绪'
+  return '定位未开启'
+})
+const liveSpeedLabel = computed(() => currentLocation.value?.speed == null ? '未提供' : `${(currentLocation.value.speed * 3.6).toFixed(1)} km/h`)
+const liveHeadingLabel = computed(() => {
+  const heading = currentLocation.value?.heading
+  if (heading == null || Number.isNaN(heading)) return '未提供'
+  const directions = ['北', '东北', '东', '东南', '南', '西南', '西', '西北']
+  return `${directions[Math.round(heading / 45) % 8]} · ${Math.round(heading)}°`
+})
+function createMapLibreStyle() {
+  const key = String((import.meta as any).env?.VITE_MAPTILER_KEY || '').trim()
+  if (key)
+    return `https://api.maptiler.com/maps/streets-v2/style.json?key=${encodeURIComponent(key)}`
+  return {
+    version: 8,
+    sources: { osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OpenStreetMap contributors' } },
+    layers: [{ id: 'osm', type: 'raster', source: 'osm' }],
+  }
+}
+function clearMapLibreMarkers() { mapLibreMarkers.value.forEach(marker => marker.remove()); mapLibreMarkers.value = [] }
+function addMapLibreMarker(lng: number, lat: number, label: string, className: string, click: () => void) {
+  const lib = window.maplibregl
+  const map = mapLibreInstance.value
+  if (!lib || !map) return
+  const element = document.createElement('button'); element.type = 'button'; element.className = className; element.setAttribute('aria-label', label); element.title = label; element.addEventListener('click', click)
+  const marker = new lib.Marker({ element, anchor: 'bottom' }).setLngLat([lng, lat]).addTo(map)
+  mapLibreMarkers.value.push(marker)
+}
+function updateMapLibreLayers() {
+  const map = mapLibreInstance.value
+  if (!map || !mapLibreReady.value) return
+  clearMapLibreMarkers()
+  filteredRealPlaces.value.filter(place => place.latitude != null && place.longitude != null).forEach(place => {
+    const selected = worldMapSelected.value?.place_key === place.place_key
+    addMapLibreMarker(Number(place.longitude), Number(place.latitude), `查看到访地点 ${place.name}`, `miya-map-marker miya-map-marker-place${selected ? ' is-selected' : ''}`, () => focusRealPlace(place))
+  })
+  nearbyPlaces.value.forEach(place => {
+    const selected = isMapResultSelected(place)
+    addMapLibreMarker(place.longitude, place.latitude, `附近地点 ${place.name}`, `miya-map-marker miya-map-marker-nearby${selected ? ' is-selected' : ''}`, () => selectMapSearchResult(place))
+  })
+  const location = currentLocation.value || (realContext.value?.latitude != null && realContext.value?.longitude != null ? { latitude: Number(realContext.value.latitude), longitude: Number(realContext.value.longitude), accuracy: 0 } : null)
+  if (location)
+    addMapLibreMarker(location.longitude, location.latitude, `当前位置${location.accuracy ? ` · 误差约 ${Math.round(location.accuracy)} 米` : ''}`, 'miya-map-marker miya-map-marker-current', () => undefined)
+  if (mapSearchResult.value && !isNearbyResult(mapSearchResult.value)) {
+    const result = mapSearchResult.value
+    addMapLibreMarker(result.longitude, result.latitude, `搜索结果 ${result.name}`, `miya-map-marker miya-map-marker-search${isMapResultSelected(result) ? ' is-selected' : ''}`, () => preparePlaceFromMapResult(result))
+  }
+  const accuracyData = { type: 'Feature', geometry: location && location.accuracy > 0 ? createAccuracyPolygon(location.latitude, location.longitude, location.accuracy) : null }
+  const accuracySource = map.getSource('miya-location-accuracy')
+  if (accuracySource) accuracySource.setData(accuracyData)
+  else {
+    map.addSource('miya-location-accuracy', { type: 'geojson', data: accuracyData })
+    map.addLayer({ id: 'miya-location-accuracy-fill', type: 'fill', source: 'miya-location-accuracy', paint: { 'fill-color': '#ffca70', 'fill-opacity': .13 } })
+    map.addLayer({ id: 'miya-location-accuracy-line', type: 'line', source: 'miya-location-accuracy', paint: { 'line-color': '#ffca70', 'line-width': 1.5, 'line-opacity': .8 } })
+  }
+  const trailCoordinates = locationTrail.value.map(point => [point.longitude, point.latitude])
+  const trailData = { type: 'Feature', geometry: trailCoordinates.length >= 2 ? { type: 'LineString', coordinates: trailCoordinates } : null }
+  const trailSource = map.getSource('miya-location-trail')
+  if (trailSource) trailSource.setData(trailData)
+  else {
+    map.addSource('miya-location-trail', { type: 'geojson', data: trailData })
+    map.addLayer({ id: 'miya-location-trail-line', type: 'line', source: 'miya-location-trail', paint: { 'line-color': '#ffca70', 'line-width': 4, 'line-opacity': .88 } })
+  }
+  const coordinates = mapRoutePlaces.value.filter(place => place.latitude != null && place.longitude != null).map(place => [Number(place.longitude), Number(place.latitude)])
+  const data = { type: 'Feature', geometry: coordinates.length >= 2 ? { type: 'LineString', coordinates } : null }
+  const source = map.getSource('miya-visit-route')
+  if (source) source.setData(data)
+  else {
+    map.addSource('miya-visit-route', { type: 'geojson', data })
+    map.addLayer({ id: 'miya-visit-route-line', type: 'line', source: 'miya-visit-route', paint: { 'line-color': '#f6c873', 'line-width': 3, 'line-dasharray': [2, 2], 'line-opacity': .9 } })
+  }
+  const routedCoordinates = realRoute.value?.geometry?.coordinates || []
+  const routeData = { type: 'Feature', geometry: routedCoordinates.length >= 2 ? { type: 'LineString', coordinates: routedCoordinates } : null }
+  const routedSource = map.getSource('miya-real-route')
+  if (routedSource) routedSource.setData(routeData)
+  else {
+    map.addSource('miya-real-route', { type: 'geojson', data: routeData })
+    map.addLayer({ id: 'miya-real-route-line', type: 'line', source: 'miya-real-route', paint: { 'line-color': '#4dd7e8', 'line-width': 5, 'line-opacity': .95 } })
+  }
+}
+function isMapResultSelected(result: EarthMapSearchResult) {
+  const selected = mapSearchResult.value
+  if (!selected) return false
+  if (selected.provider_id && result.provider_id) return selected.provider_id === result.provider_id
+  return Math.abs(Number(selected.latitude) - Number(result.latitude)) < 0.000001
+    && Math.abs(Number(selected.longitude) - Number(result.longitude)) < 0.000001
+}
+function isNearbyResult(result: EarthMapSearchResult) {
+  return nearbyPlaces.value.some(place => {
+    if (place.provider_id && result.provider_id) return place.provider_id === result.provider_id
+    return Math.abs(Number(place.latitude) - Number(result.latitude)) < 0.000001
+      && Math.abs(Number(place.longitude) - Number(result.longitude)) < 0.000001
+  })
+}
+function createAccuracyPolygon(latitude: number, longitude: number, radiusM: number) {
+  const coordinates: [number, number][] = []
+  const latScale = 1 / 111320
+  const lngScale = 1 / (111320 * Math.max(.01, Math.cos(latitude * Math.PI / 180)))
+  for (let index = 0; index <= 64; index++) {
+    const angle = index / 64 * Math.PI * 2
+    coordinates.push([longitude + Math.cos(angle) * radiusM * lngScale, latitude + Math.sin(angle) * radiusM * latScale])
+  }
+  return { type: 'Polygon', coordinates: [coordinates] }
+}
+async function initMapLibre(retry = 0) {
+  if (!mapLibreContainer.value || mapLibreInstance.value) return
+  if (!window.maplibregl) {
+    if (retry < 8) setTimeout(() => initMapLibre(retry + 1), 1000)
+    return
+  }
+  const map = new window.maplibregl.Map({ container: mapLibreContainer.value, style: createMapLibreStyle(), center: [realMapCenter.longitude, realMapCenter.latitude], zoom: realMapZoom.value, minZoom: 1, maxZoom: 19, attributionControl: true })
+  map.addControl(new window.maplibregl.NavigationControl({ showCompass: true }), 'top-right')
+  mapLibreInstance.value = map
+  map.on('load', () => { mapLibreReady.value = true; updateMapLibreLayers() })
+  map.on('zoom', () => { realMapZoom.value = map.getZoom(); realMapCenter.longitude = map.getCenter().lng; realMapCenter.latitude = map.getCenter().lat })
+  map.on('moveend', () => { realMapCenter.longitude = map.getCenter().lng; realMapCenter.latitude = map.getCenter().lat })
+  map.on('click', async (event: any) => {
+    if (mapPicking.value || event?.originalEvent?.target?.closest?.('.miya-map-marker')) return
+    mapPicking.value = true
+    try {
+      const result = await EarthAPI.reverseGeocodeWorldPlace(Number(event.lngLat.lat), Number(event.lngLat.lng))
+      mapSearchResult.value = result
+      mapSearchResults.value = []
+      showToast(result.success ? `已选中「${result.name}」` : '已选中这个坐标，可为它命名')
+    } catch { showToast('这个坐标暂时无法解析地址') } finally { mapPicking.value = false }
+  })
+}
+async function searchMapPlace() {
+  const query = mapSearch.value.trim()
+  if (!query || worldBusy.value) return
+  worldBusy.value = true
+  try {
+    const response = await EarthAPI.searchWorldPlaces(query, 6)
+    mapSearchResults.value = response.results
+    if (!response.results.length) { showToast('没有找到这个地点'); return }
+    selectMapSearchResult(response.results[0])
+    showToast(response.results.length > 1 ? `找到 ${response.results.length} 个候选地点，请选择` : `已定位到「${response.results[0].name}」`)
+  } catch (e: any) { showToast(e?.response?.data?.detail || '没有找到这个地点') } finally { worldBusy.value = false }
+}
+function selectMapSearchResult(result: EarthMapSearchResult) {
+  mapSearchResult.value = result
+  if (mapLibreInstance.value) mapLibreInstance.value.flyTo({ center: [result.longitude, result.latitude], zoom: Math.max(15, realMapZoom.value) })
+  else { realMapCenter.latitude = result.latitude; realMapCenter.longitude = result.longitude; realMapZoom.value = Math.max(15, realMapZoom.value) }
+}
+async function loadNearbyPlaces() {
+  if (nearbyBusy.value) return
+  nearbyBusy.value = true
+  nearbyError.value = ''
+  try {
+    let position = currentLocation.value
+    if (!position) {
+      position = await getGeolocation()
+      if (!position) throw new Error('无法获取当前位置，请允许浏览器定位权限')
+      applyLocation(position, true)
+    }
+    const response = await EarthAPI.nearbyWorldPlaces(position.latitude, position.longitude, nearbyRadius.value, 40)
+    nearbyPlaces.value = response.results
+    if (!response.results.length) nearbyError.value = '附近服务没有返回地点，可以扩大范围后再试'
+    showToast(response.results.length ? `找到附近 ${response.results.length} 个地点` : nearbyError.value)
+  } catch (e: any) {
+    nearbyError.value = e?.response?.data?.detail || e?.message || '附近地点查询失败'
+    showToast(nearbyError.value)
+  } finally {
+    nearbyBusy.value = false
+  }
+}
+function clearNearbyPlaces() {
+  nearbyPlaces.value = []
+  nearbyError.value = ''
+  if (mapSearchResult.value?.source === 'openstreetmap_overpass') mapSearchResult.value = null
+}
+function preparePlaceFromMapResult(result: EarthMapSearchResult) {
+  selectMapSearchResult(result)
+  Object.assign(placeForm, {
+    name: result.name || '所选地点', latitude: result.latitude.toFixed(7), longitude: result.longitude.toFixed(7), note: '', visited_at: '', place_key: '',
+    provider_id: result.provider_id || '', display_address: result.display_name || '', category: result.category || 'other',
+  })
+  showPlaceRecorder.value = true
+}
+function clampLatitude(latitude: number) { return Math.max(-85.05112878, Math.min(85.05112878, latitude)) }
+function projectMap(latitude: number, longitude: number, zoom = realMapZoom.value) {
+  const size = 256 * 2 ** zoom
+  const lat = clampLatitude(latitude) * Math.PI / 180
+  return { x: (longitude + 180) / 360 * size, y: (1 - Math.log(Math.tan(lat) + 1 / Math.cos(lat)) / Math.PI) / 2 * size }
+}
+function unprojectMap(x: number, y: number, zoom = realMapZoom.value) {
+  const size = 256 * 2 ** zoom
+  const longitude = x / size * 360 - 180
+  const latitude = 180 / Math.PI * Math.atan(Math.sinh(Math.PI * (1 - 2 * y / size)))
+  return { latitude, longitude }
+}
+const realMapTileZoom = computed(() => Math.max(1, Math.min(19, Math.round(realMapZoom.value))))
+const realMapTiles = computed(() => {
+  // XYZ 瓦片必须使用整数级别；MapLibre 仍保留小数缩放，保证定位和地图动画精度。
+  const tileZoom = realMapTileZoom.value
+  const centerPixel = projectMap(realMapCenter.latitude, realMapCenter.longitude, tileZoom)
+  const count = 2 ** tileZoom
+  const cx = Math.floor(centerPixel.x / 256)
+  const cy = Math.floor(centerPixel.y / 256)
+  const tiles: Array<{ key: string, x: number, y: number, src: string }> = []
+  for (let y = cy - 3; y <= cy + 3; y++) {
+    if (y < 0 || y >= count) continue
+    for (let x = cx - 4; x <= cx + 4; x++) {
+      const wrappedX = ((x % count) + count) % count
+      tiles.push({ key: `${tileZoom}/${x}/${y}`, x, y, src: REAL_MAP_TILE_URL.replace('{z}', String(tileZoom)).replace('{x}', String(wrappedX)).replace('{y}', String(y)) })
+    }
+  }
+  return tiles
+})
+function realMapWorldStyle(): Record<string, string> {
+  const tileCenter = projectMap(realMapCenter.latitude, realMapCenter.longitude, realMapTileZoom.value)
+  return { transform: `translate(${realMapPan.x - tileCenter.x}px, ${realMapPan.y - tileCenter.y}px)` }
+}
+function realMapMarkerStyle(latitude?: number | null, longitude?: number | null): Record<string, string> {
+  if (latitude == null || longitude == null) return { display: 'none' }
+  const point = projectMap(Number(latitude), Number(longitude), realMapTileZoom.value)
+  return { left: `${point.x}px`, top: `${point.y}px` }
+}
+function zoomWorldMap(delta: number) {
+  const nextZoom = Math.max(1, Math.min(19, realMapZoom.value + delta))
+  if (mapLibreInstance.value) mapLibreInstance.value.zoomTo(nextZoom)
+  else realMapZoom.value = nextZoom
+}
+async function focusRealPlace(place: EarthRealPlace) {
+  worldMapSelected.value = place
+  placeEditing.value = false
+  if (place.latitude != null && place.longitude != null) {
+    realMapCenter.latitude = Number(place.latitude); realMapCenter.longitude = Number(place.longitude); realMapZoom.value = Math.max(realMapZoom.value, 10)
+    if (mapLibreInstance.value) mapLibreInstance.value.flyTo({ center: [Number(place.longitude), Number(place.latitude)], zoom: Math.max(12, realMapZoom.value) })
+  }
+  placeDetailLoading.value = true
+  try {
+    const detail = await EarthAPI.getRealPlace(place.place_key)
+    worldMapSelected.value = detail
+    Object.assign(placeEditForm, { name: detail.name, subtitle: detail.subtitle || '', notes: detail.notes || '', category: detail.category || 'other', tags: (detail.tags || []).join(', '), favorite: !!detail.favorite })
+  } catch (e: any) { showToast(e?.response?.data?.detail || '地点详情读取失败') } finally { placeDetailLoading.value = false }
+}
+function closePlaceDetail() { worldMapSelected.value = null; placeEditing.value = false }
+function clearMapFilters() { mapSearch.value = ''; mapSearchResults.value = []; mapSearchResult.value = null; mapCountry.value = ''; mapAdmin1.value = ''; mapCity.value = ''; mapDistrict.value = '' }
+async function savePlaceDetail() {
+  if (!worldMapSelected.value || worldBusy.value) return
+  worldBusy.value = true
+  try {
+    const result = await EarthAPI.updateRealPlace(worldMapSelected.value.place_key, { ...placeEditForm, tags: placeEditForm.tags.split(/[,，]/).map(tag => tag.trim()).filter(Boolean) })
+    worldMapSelected.value = result.place
+    realPlaces.value = realPlaces.value.map(place => place.place_key === result.place.place_key ? result.place : place)
+    placeEditing.value = false
+    showToast('地点档案已保存')
+  } catch (e: any) { showToast(e?.response?.data?.detail || '地点档案保存失败') } finally { worldBusy.value = false }
+}
+async function togglePlaceFavorite() {
+  if (!worldMapSelected.value || worldBusy.value) return
+  const result = await EarthAPI.updateRealPlace(worldMapSelected.value.place_key, { favorite: !worldMapSelected.value.favorite })
+  worldMapSelected.value = result.place
+  realPlaces.value = realPlaces.value.map(place => place.place_key === result.place.place_key ? result.place : place)
+}
+async function recordAnotherVisit() {
+  const place = worldMapSelected.value
+  if (!place || worldBusy.value) return
+  worldBusy.value = true
+  try {
+    const result = await EarthAPI.recordPlaceVisit({ place_key: place.place_key, name: place.name, latitude: place.latitude, longitude: place.longitude, source: 'map_detail' })
+    realPlaces.value = [result.place, ...realPlaces.value.filter(item => item.place_key !== result.place.place_key)]
+    await focusRealPlace(result.place)
+    showToast(`已记录再次到访「${place.name}」`)
+  } catch (e: any) { showToast(e?.response?.data?.detail || '到访记录失败') } finally { worldBusy.value = false }
+}
+async function removeRealPlace() {
+  const place = worldMapSelected.value
+  if (!place || worldBusy.value || !window.confirm(`确定删除地点「${place.name}」及全部到访记录吗？`)) return
+  worldBusy.value = true
+  try {
+    await EarthAPI.deleteRealPlace(place.place_key)
+    realPlaces.value = realPlaces.value.filter(item => item.place_key !== place.place_key)
+    closePlaceDetail()
+    showToast('地点档案已删除；已上传的原始照片仍保留在本地存储中')
+  } catch (e: any) { showToast(e?.response?.data?.detail || '地点删除失败') } finally { worldBusy.value = false }
+}
+async function requestRealRoute() {
+  if (routeBusy.value) return
+  const coordinates = mapRoutePlaces.value.map(place => [Number(place.longitude), Number(place.latitude)] as [number, number])
+  if (coordinates.length < 2) { routeError.value = '至少需要两个带坐标的现实地点才能规划路线'; return }
+  routeBusy.value = true; routeError.value = ''; realRoute.value = null
+  try {
+    realRoute.value = await EarthAPI.worldRoute({ profile: routeProfile.value, coordinates })
+    showToast(`已按真实道路生成${routeProfileLabel.value}路线 · ${(realRoute.value.distance_m / 1000).toFixed(1)} km`)
+    updateMapLibreLayers()
+  } catch (e: any) {
+    routeError.value = e?.response?.data?.detail || '真实道路路线服务暂时不可用'
+  } finally { routeBusy.value = false }
+}
+async function onPickRealPlaceImage(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file || !worldMapSelected.value || worldBusy.value) return
+  worldBusy.value = true
+  try {
+    const result = await EarthAPI.uploadRealPlaceImage(worldMapSelected.value.place_key, file)
+    worldMapSelected.value = result.place
+    realPlaces.value = realPlaces.value.map(place => place.place_key === result.place.place_key ? result.place : place)
+    showToast('照片已收进这个地点的档案')
+  } catch (error: any) { showToast(error?.response?.data?.detail || '照片上传失败') } finally { worldBusy.value = false; (e.target as HTMLInputElement).value = '' }
+}
+function startWorldMapDrag(e: PointerEvent) {
+  worldMapDragging.value = true; worldMapDragOrigin.x = e.clientX; worldMapDragOrigin.y = e.clientY; worldMapDragOrigin.px = realMapPan.x; worldMapDragOrigin.py = realMapPan.y
+  ;(e.currentTarget as HTMLElement)?.setPointerCapture(e.pointerId)
+}
+function moveWorldMapDrag(e: PointerEvent) { if (worldMapDragging.value) { realMapPan.x = worldMapDragOrigin.px + e.clientX - worldMapDragOrigin.x; realMapPan.y = worldMapDragOrigin.py + e.clientY - worldMapDragOrigin.y } }
+function endWorldMapDrag() {
+  if (!worldMapDragging.value) return
+  const tileCenter = projectMap(realMapCenter.latitude, realMapCenter.longitude, realMapTileZoom.value)
+  const next = unprojectMap(tileCenter.x - realMapPan.x, tileCenter.y - realMapPan.y, realMapTileZoom.value)
+  realMapCenter.latitude = next.latitude; realMapCenter.longitude = next.longitude; realMapPan.x = 0; realMapPan.y = 0; worldMapDragging.value = false
+}
+function onWorldMapWheel(e: WheelEvent) { e.preventDefault(); zoomWorldMap(e.deltaY < 0 ? 1 : -1) }
+function resetWorldMap() { realMapZoom.value = 2; realMapCenter.latitude = 25; realMapCenter.longitude = 105; realMapPan.x = 0; realMapPan.y = 0; worldMapSelected.value = null; if (mapLibreInstance.value) mapLibreInstance.value.flyTo({ center: [105, 25], zoom: 2 }) }
+async function savePlaceVisit() {
+  if (!placeForm.name.trim() || worldBusy.value) return
+  worldBusy.value = true
+  try {
+    const latitude = placeForm.latitude ? Number(placeForm.latitude) : null
+    const longitude = placeForm.longitude ? Number(placeForm.longitude) : null
+    const usesCurrentLocation = Boolean(currentLocation.value && latitude != null && longitude != null && Math.abs(latitude - currentLocation.value.latitude) < 0.000001 && Math.abs(longitude - currentLocation.value.longitude) < 0.000001)
+    const result = await EarthAPI.recordPlaceVisit({ name: placeForm.name.trim(), latitude, longitude, accuracy_m: usesCurrentLocation ? currentLocation.value?.accuracy ?? null : null, note: placeForm.note.trim(), visited_at: placeForm.visited_at || undefined, place_key: placeForm.place_key || undefined, provider_id: placeForm.provider_id || undefined, display_address: placeForm.display_address || undefined, category: placeForm.category || 'other' })
+    realPlaces.value = [result.place, ...realPlaces.value.filter(item => item.place_key !== result.place.place_key)]
+    worldMapSelected.value = result.place; showPlaceRecorder.value = false
+    Object.assign(placeForm, { name: '', latitude: '', longitude: '', note: '', visited_at: '', place_key: '', provider_id: '', display_address: '', category: 'other' })
+    showToast(`已把「${result.place.name}」记入你的地球`)
+  } catch (e: any) { showToast(e?.response?.data?.detail || '地点记录失败') } finally { worldBusy.value = false }
+}
 // ── v17: 回忆卡池 / 每周纪行 / 周挑战 ──
 const memory = ref<EarthMemoryPool | null>(null)
 const memoryPullRecords = ref<EarthMemoryPullRecord[]>([])
@@ -113,9 +510,6 @@ function actLifeHub(key: string) {
 const loadError = ref('')
 const worldBusy = ref(false)
 const worldMessage = ref('')
-const worldCompanion = ref<{ speaker: string, text: string, tone: string, region: string } | null>(null)
-const worldChoiceBusy = ref(false)
-const worldChoiceDiscovery = ref<EarthWorldDiscovery | null>(null)
 const toast = ref('')
 const toastQueue = ref<string[]>([])
 let toastTimer: number | undefined
@@ -172,13 +566,6 @@ function wallpaperUrl(name: string): string {
   return name.startsWith('/api/') ? EarthAPI.imageUrl(name) : name
 }
 
-function worldRegionStyle(region: EarthWorldRegion): Record<string, string> {
-  const style: Record<string, string> = { '--world-color': region.color }
-  if (region.image_path)
-    style.backgroundImage = `linear-gradient(180deg, rgba(7,8,12,0.28), rgba(7,8,12,0.94)), url(${EarthAPI.imageUrl(region.image_path)})`
-  return style
-}
-
 const RARITY_COLORS: Record<string, string> = {
   common: '#9e9e9e', uncommon: '#4caf50', rare: '#29b6f6', epic: '#ab47bc', legendary: '#ffb300',
 }
@@ -224,7 +611,8 @@ const NAV_GROUPS = [
   { id: 'home', label: '指挥舱', en: 'COMMAND', target: 0, sections: [0] },
   { id: 'missions', label: '委托', en: 'MISSIONS', target: 1, sections: [1] },
   { id: 'archive', label: '档案', en: 'ARCHIVE', target: 2, sections: [2, 3, 4] },
-  { id: 'world', label: '世界', en: 'WORLD', target: 7, sections: [7, 8] },
+  { id: 'world', label: '世界', en: 'WORLD', target: 7, sections: [7] },
+  { id: 'shop', label: '商城', en: 'SHOP', target: 8, sections: [8] },
   { id: 'profile', label: '玩家', en: 'PROFILE', target: 5, sections: [5, 6] },
 ] as const
 const NAV_SUBNAV: Record<string, readonly { target: number, label: string, en: string }[]> = {
@@ -234,8 +622,7 @@ const NAV_SUBNAV: Record<string, readonly { target: number, label: string, en: s
     { target: 4, label: '剧情', en: 'CHRONICLE' },
   ],
   world: [
-    { target: 7, label: '区域探索', en: 'REGIONS' },
-    { target: 8, label: '商城', en: 'SHOP' },
+    { target: 7, label: '现实地图', en: 'REAL MAP' },
   ],
   profile: [
     { target: 5, label: '玩家档案', en: 'IDENTITY' },
@@ -256,9 +643,11 @@ function goTo(i: number) {
   }
   activeSection.value = target
   stageEl.value?.scrollTo({ top: 0 })
+  if (target === 7)
+    nextTick(() => { initMapLibre(); mapLibreInstance.value?.resize() })
 }
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape' && (drawerItem.value || drawerChar.value || drawerRegion.value || showProfileEdit.value)) {
+  if (e.key === 'Escape' && (drawerItem.value || drawerChar.value || showProfileEdit.value)) {
     closeDrawer()
     return
   }
@@ -369,8 +758,8 @@ async function loadAll() {
     weekly.value = wk
     rates.value = rt
     theme.value = { ...th, background: isLegacyBackground(th.background) ? '' : th.background }
-    worldRegions.value = world.regions || []
-    worldDiscoveries.value = world.discoveries || []
+    // 世界页只展示现实地图；旧版虚拟区域数据保留在后端以兼容历史档案，但不再注入玩家视图。
+    realPlaces.value = world.places || []
     worldStatus.value = world.status || null
     realContext.value = world.status?.real_context || null
     try { lifeHub.value = await EarthAPI.lifeHub() } catch { lifeHub.value = null; degradedModules.value.push('生活中枢') }
@@ -423,7 +812,6 @@ async function buyMiyaShopItem(item: EarthMiyaShop['items'][number]) {
       showToast('服务券已放入背包，想用的时候来找我，或点背包里的「使用」')
     }
     else if (result.interaction) {
-      worldCompanion.value = { speaker: '弥娅', text: result.interaction, tone: '专属互动', region: '弥娅商城' }
       worldMessage.value = `已兑换「${item.name}」 · 这段互动已经写入动态`
       showToast(`◆ 已消耗 ${item.cost} 弥娅币`)
     }
@@ -475,119 +863,135 @@ async function configureRealCity() {
   }
 }
 
-onMounted(loadAll)
+watch([realPlaces, realContext, currentLocation, locationTrail, filteredRealPlaces, nearbyPlaces, mapRoutePlaces, mapSearchResult, worldMapSelected, realRoute], () => updateMapLibreLayers(), { deep: true })
+watch(routeInputSignature, () => { realRoute.value = null; routeError.value = '' })
+onMounted(() => {
+  loadAll()
+  nextTick(() => setTimeout(() => initMapLibre(), 0))
+})
+onBeforeUnmount(() => {
+  stopLiveTracking(false)
+  clearMapLibreMarkers()
+  mapLibreInstance.value?.remove()
+  mapLibreInstance.value = null
+})
 
-// 获取浏览器定位坐标 (地理围栏区域探索需要真实坐标)
-function getGeolocation(): Promise<{ latitude: number, longitude: number } | null> {
+// 浏览器定位只在用户主动点击后开启；连续定位仅保存在当前页面会话。
+function positionToLocation(pos: GeolocationPosition): LiveLocation {
+  return {
+    latitude: pos.coords.latitude,
+    longitude: pos.coords.longitude,
+    accuracy: pos.coords.accuracy,
+    timestamp: pos.timestamp || Date.now(),
+    speed: pos.coords.speed,
+    heading: pos.coords.heading,
+    altitude: pos.coords.altitude,
+  }
+}
+function getGeolocation(): Promise<LiveLocation | null> {
   return new Promise((resolve) => {
     if (!navigator.geolocation) {
       resolve(null)
       return
     }
     navigator.geolocation.getCurrentPosition(
-      pos => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+      pos => resolve(positionToLocation(pos)),
       () => resolve(null),
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
+      // 不复用缓存定位；移动设备首次 GPS 锁定可能需要更长时间。
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
     )
   })
 }
 
-async function exploreRegion(region: EarthWorldRegion) {
+function applyLocation(position: LiveLocation, moveMap = false) {
+  currentLocation.value = position
+  locationError.value = ''
+  const previous = locationTrail.value.at(-1)
+  if (!previous || previous.timestamp !== position.timestamp)
+    locationTrail.value = [...locationTrail.value.slice(-499), { latitude: position.latitude, longitude: position.longitude, timestamp: position.timestamp }]
+  if (moveMap || followLiveLocation.value) {
+    realMapCenter.latitude = position.latitude
+    realMapCenter.longitude = position.longitude
+    realMapZoom.value = Math.max(realMapZoom.value, 16)
+    mapLibreInstance.value?.easeTo({ center: [position.longitude, position.latitude], zoom: Math.max(16, mapLibreInstance.value.getZoom()), duration: 500 })
+  }
+}
+
+function startLiveTracking() {
+  if (liveTracking.value || !navigator.geolocation) {
+    if (!navigator.geolocation) showToast('当前环境不支持浏览器定位')
+    return
+  }
+  locationError.value = ''
+  followLiveLocation.value = true
+  locationWatchId = navigator.geolocation.watchPosition(
+    (position) => {
+      const wasEmpty = !currentLocation.value
+      liveTracking.value = true
+      applyLocation(positionToLocation(position), wasEmpty)
+    },
+    (error) => {
+      liveTracking.value = false
+      locationWatchId = null
+      locationError.value = error.code === error.PERMISSION_DENIED ? '定位权限被拒绝' : error.code === error.TIMEOUT ? '定位请求超时' : '暂时无法更新位置'
+      showToast(locationError.value)
+    },
+    { enableHighAccuracy: true, timeout: 20000, maximumAge: 3000 },
+  )
+  liveTracking.value = true
+  showToast('弥娅地图监控已开启 · 位置仅保留在当前页面会话')
+}
+
+function stopLiveTracking(notify = true) {
+  if (locationWatchId != null && navigator.geolocation) navigator.geolocation.clearWatch(locationWatchId)
+  locationWatchId = null
+  liveTracking.value = false
+  followLiveLocation.value = false
+  if (notify) showToast('地图监控已停止 · 本次轨迹未写入地点历史')
+}
+
+function clearLocationSession() {
+  stopLiveTracking(false)
+  currentLocation.value = null
+  locationTrail.value = []
+  locationError.value = ''
+  clearNearbyPlaces()
+  showToast('本次定位与轨迹已从页面清除')
+}
+
+async function locateCurrentPosition() {
   if (worldBusy.value)
     return
   worldBusy.value = true
-  worldMessage.value = ''
   try {
-    // 区域启用地理围栏时先取真实坐标，缺失则直接给出提示，不打后端
-    let coords: { latitude: number, longitude: number } | undefined
-    if ((region.geofence_radius || 0) > 0) {
-      showToast('⌖ 正在获取定位…')
-      const pos = await getGeolocation()
-      if (!pos) {
-        worldMessage.value = `「${region.name}」是真实地点，需要开启浏览器定位并到达附近 ${region.geofence_radius} 米内才能探索哦`
-        showToast(worldMessage.value)
-        return
-      }
-      coords = pos
+    const pos = await getGeolocation()
+    if (!pos) {
+      showToast('无法获取当前位置，请允许浏览器定位权限')
+      return
     }
-    const res = await EarthAPI.exploreWorld(region.key, coords)
-    if (res.geofence?.enabled && res.geofence.distance_m != null)
-      showToast(`⌖ 距「${region.name}」${res.geofence.distance_m} 米 · 围栏内 ✓`)
-    if (res.discovery) {
-      worldMessage.value = `${res.discovery.title} · +${res.discovery.reward_currency} 弥娅币 · +${res.discovery.reward_exp} 经验`
-      worldCompanion.value = res.discovery.companion || null
-      worldChoiceDiscovery.value = res.discovery
-      showToast(`✦ 发现「${res.discovery.title}」`)
-    }
-    else {
-      worldMessage.value = res.message || `「${region.name}」已经探索完毕`
-      showToast(worldMessage.value)
-    }
-    await loadAll()
-    if (drawerRegion.value?.key === region.key)
-      drawerRegion.value = worldRegions.value.find(r => r.key === region.key) || region
-    await refreshAchievementsQuiet()
-  }
-  catch (e: any) {
-    worldMessage.value = e?.response?.data?.detail || '探索失败，请稍后再试'
-    showToast(worldMessage.value)
+    applyLocation(pos, true)
+    showToast(`已定位当前位置 · 误差约 ${Math.round(pos.accuracy)} 米`)
   }
   finally {
     worldBusy.value = false
   }
 }
 
-async function chooseWorldDiscovery(choice: 'continue' | 'record' | 'rest', target?: EarthWorldDiscovery) {
-  const discovery = target || worldChoiceDiscovery.value
-  if (!discovery?.id || worldChoiceBusy.value)
+async function useCurrentLocationForPlace() {
+  const pos = currentLocation.value || await getGeolocation()
+  if (!pos) {
+    showToast('无法获取当前位置，请允许浏览器定位权限')
     return
-  worldChoiceBusy.value = true
-  try {
-    const result = await EarthAPI.chooseWorldDiscovery(discovery.id, choice)
-    worldMessage.value = `${result.label} · 区域共鸣 Lv.${result.resonance?.level || 1}`
-    showToast(`已选择「${result.label}」· 获得共鸣`)
-    const chosen = { ...discovery, choice: { choice, chosen_at: new Date().toISOString() } }
-    if (worldChoiceDiscovery.value?.id === chosen.id)
-      worldChoiceDiscovery.value = chosen
-    pendingChoiceAnsweredId.value = chosen.id || null
-    await loadAll()
   }
-  catch (e: any) {
-    showToast(e?.response?.data?.detail || '同行选择失败')
-  }
-  finally {
-    worldChoiceBusy.value = false
-  }
-}
-
-// 「最近发现」里最新一条还未做同行选择的发现，也可补选
-const pendingChoiceAnsweredId = ref<number | null>(null)
-const pendingChoiceDiscovery = computed(() => {
-  const latest = worldDiscoveries.value[0]
-  if (latest && !latest.choice && latest.id && latest.id !== pendingChoiceAnsweredId.value)
-    return latest
-  return null
-})
-
-async function commissionRegion(region: EarthWorldRegion) {
-  if (worldBusy.value)
-    return
-  worldBusy.value = true
-  try {
-    const res = await EarthAPI.regionCommission(region.key)
-    worldMessage.value = res.created ? `已领取「${res.quest.title}」，委托已放入任务板` : `今天已经领取过「${res.quest.title}」`
-    showToast(res.created ? '✦ 区域专属委托已出现' : '这份区域委托还在任务板上')
-    await loadAll()
-    if (drawerRegion.value?.key === region.key)
-      drawerRegion.value = worldRegions.value.find(r => r.key === region.key) || region
-  }
-  catch (e: any) {
-    worldMessage.value = e?.response?.data?.detail || '领取区域委托失败'
-    showToast(worldMessage.value)
-  }
-  finally {
-    worldBusy.value = false
-  }
+  applyLocation(pos)
+  placeForm.latitude = pos.latitude.toFixed(7)
+  placeForm.longitude = pos.longitude.toFixed(7)
+  placeForm.provider_id = ''
+  placeForm.display_address = ''
+  placeForm.category = 'other'
+  if (!placeForm.name.trim())
+    placeForm.name = '当前位置'
+  showToast(`已填入高精度坐标 · 误差约 ${Math.round(pos.accuracy)} 米`)
 }
 
 async function refreshAchievementsQuiet() {
@@ -846,7 +1250,6 @@ function openProfileEdit() {
   })
   drawerItem.value = null
   drawerChar.value = null
-  drawerRegion.value = null
   showProfileEdit.value = true
 }
 async function saveProfile() {
@@ -1057,19 +1460,16 @@ async function submitComment() {
 // ── 档案抽屉 (物品/角色) ──
 const drawerItem = ref<EarthItem | null>(null)
 const drawerChar = ref<EarthCharacter | null>(null)
-const drawerRegion = ref<EarthWorldRegion | null>(null)
 const drawerExpanded = ref(false)
 function openItemDrawer(item: EarthItem) {
   drawerItem.value = item
   drawerChar.value = null
-  drawerRegion.value = null
   showProfileEdit.value = false
   drawerExpanded.value = false
 }
 function openCharDrawer(c: EarthCharacter) {
   drawerChar.value = c
   drawerItem.value = null
-  drawerRegion.value = null
   showProfileEdit.value = false
   drawerExpanded.value = false
   // 打开角色抽屉时拉取好感度变动日志
@@ -1080,17 +1480,9 @@ function openCharDrawer(c: EarthCharacter) {
     .catch(() => (charAffinityLogs.value = []))
     .finally(() => (charLogsBusy.value = false))
 }
-function openRegionDrawer(region: EarthWorldRegion) {
-  drawerRegion.value = region
-  drawerItem.value = null
-  drawerChar.value = null
-  showProfileEdit.value = false
-  drawerExpanded.value = false
-}
 function closeDrawer() {
   drawerItem.value = null
   drawerChar.value = null
-  drawerRegion.value = null
   showProfileEdit.value = false
   drawerExpanded.value = false
 }
@@ -1314,10 +1706,10 @@ function achievementShown(a: EarthAchievement) {
             <div class="pv-home-status-block pv-home-status-world">
               <div class="pv-home-status-label">WORLD SIGNAL</div>
               <div class="pv-world-signal-main">
-                <strong>{{ worldRegions.filter(r => r.discovered).length }}<small>/{{ worldRegions.length }}</small></strong>
-                <span>区域已同步</span>
+                <strong>{{ realPlaces.length }}</strong>
+                <span>现实地点已记录</span>
               </div>
-              <button type="button" class="pv-world-signal-link" @click="goTo(7)">展开世界图谱 <b>↗</b></button>
+              <button type="button" class="pv-world-signal-link" @click="goTo(7)">打开现实地图 <b>↗</b></button>
             </div>
           </div>
 
@@ -1930,16 +2322,16 @@ function achievementShown(a: EarthAchievement) {
         </div>
       </section>
 
-      <!-- ═══ 8 单人世界地图 / 区域探索 ═══ -->
+      <!-- ═══ 8 现实世界地图 ═══ -->
       <section v-show="activeSection === 7" class="pv-section pv-world">
         <div class="pv-world-wrap">
           <div class="pv-world-head">
             <div>
               <p class="pv-story-en">WORLD MAP</p>
-              <h2>你的地球，正在展开</h2>
-              <p>每个区域都对应现实生活的一种侧面。探索不是打卡，而是把今天认真走过的路留下坐标。</p>
+              <h2>现实世界地图</h2>
+              <p>这里展示实时地图数据、现实天气和你亲自记录过的地点。弥娅不再创建虚拟区域。</p>
             </div>
-            <div class="pv-world-count">{{ worldDiscoveries.length }} / {{ worldRegions.reduce((sum, r) => sum + r.event_total, 0) }} 发现</div>
+            <div class="pv-world-count">{{ realPlaces.length }} 个现实地点</div>
           </div>
           <div v-if="worldStatus" class="pv-world-atmosphere">
             <span>{{ worldStatus.period_icon }} {{ worldStatus.period }}</span>
@@ -1951,51 +2343,104 @@ function achievementShown(a: EarthAchievement) {
             <button class="pv-btn-ghost pv-world-refresh" :disabled="worldBusy" @click="configureRealCity">⌖ 设置城市</button>
             <button class="pv-btn-ghost pv-world-refresh" :disabled="worldBusy" @click="refreshRealContext">↻ 刷新现实</button>
           </div>
-          <div class="pv-world-grid">
-            <article v-for="region in worldRegions" :key="region.key" class="pv-world-region" :class="{ 'has-photo': !!region.image_path, locked: (player?.level || 1) < region.level_req }" :style="worldRegionStyle(region)" role="button" tabindex="0" :aria-label="`查看区域 ${region.name}`" @click="openRegionDrawer(region)" @keydown.enter.self.prevent="openRegionDrawer(region)" @keydown.space.self.prevent="openRegionDrawer(region)">
-              <div class="pv-world-region-top">
-                <span class="pv-world-icon">{{ region.icon }}</span>
-                <div class="pv-world-region-top-actions"><span class="pv-world-level">Lv.{{ region.level_req }}+</span><span class="pv-world-state" :class="{ complete: region.discovery_total >= region.event_total, locked: (player?.level || 1) < region.level_req }">{{ (player?.level || 1) < region.level_req ? 'LOCKED' : region.discovery_total >= region.event_total ? 'COMPLETE' : 'AVAILABLE' }}</span></div>
+          <div class="pv-real-map-shell">
+            <div class="pv-real-map-toolbar">
+              <span class="pv-real-map-label">REALITY ATLAS · {{ realPlaces.length }} 个地点</span>
+              <div class="pv-real-map-actions">
+                <button class="pv-btn-ghost" type="button" @click="zoomWorldMap(.2)">＋</button>
+                <button class="pv-btn-ghost" type="button" @click="zoomWorldMap(-.2)">−</button>
+                <button class="pv-btn-ghost" type="button" @click="resetWorldMap">⌖ 重置</button>
+                <button class="pv-btn-ghost" type="button" :disabled="worldBusy" @click="locateCurrentPosition">⌖ 定位当前位置</button>
+                <button class="pv-btn-primary" type="button" @click="showPlaceRecorder = true">＋ 记录去过的地方</button>
               </div>
-              <h3>{{ region.name }}</h3>
-              <span class="pv-world-subtitle">{{ region.subtitle }}</span>
-              <div class="pv-world-region-desc"><Markdown v-if="region.description" :source="region.description" /></div>
-              <div class="pv-world-progress"><span :style="{ width: `${region.exploration_percent}%` }" /></div>
-              <div class="pv-world-meta"><span>{{ region.discovery_total }} / {{ region.event_total }} 个发现</span><span>{{ region.exploration_percent }}%</span></div>
-              <button class="pv-btn-primary pv-world-explore" :disabled="worldBusy || (player?.level || 1) < region.level_req" @click.stop="exploreRegion(region)">
-                {{ (player?.level || 1) < region.level_req ? `Lv.${region.level_req} 解锁` : region.discovery_total >= region.event_total ? '再次回望' : '探索区域' }}
+            </div>
+            <div class="pv-map-capability-note" role="status">
+              <div class="pv-map-capability-head"><strong>地图能力状态</strong><span>{{ mapEngineLabel }}</span></div>
+              <div class="pv-map-capability-grid">
+                <span class="ready">✓ 地点搜索与现实坐标记录</span>
+                <span class="ready">✓ 实时地图瓦片与现实天气上下文</span>
+                <span :class="mapVectorStyleEnabled ? 'ready' : 'pending'">{{ mapVectorStyleEnabled ? '✓ MapTiler 道路、建筑与 POI 矢量样式' : '可选配置 · MapTiler 矢量道路、建筑与 POI' }}</span>
+                <span class="ready">✓ OSRM 真实道路路线（服务可配置）</span>
+              </div>
+              <p>黄色虚线是按到访时间连接的回顾轨迹；青色实线只有在真实道路服务返回后才显示，代表可用的{{ routeProfileLabel }}路线。</p>
+            </div>
+            <div class="pv-map-live-controls" aria-label="弥娅地图监控与附近地点">
+              <div class="pv-map-live-actions">
+                <button v-if="!liveTracking" class="pv-btn-primary" type="button" @click="startLiveTracking">⌖ 开启弥娅地图监控</button>
+                <button v-else class="pv-btn-ghost pv-btn-live-active" type="button" @click="stopLiveTracking">■ 停止监控</button>
+                <button class="pv-btn-ghost" type="button" :disabled="!currentLocation && !locationTrail.length && !nearbyPlaces.length" @click="clearLocationSession">清除本次定位</button>
+                <span class="pv-map-live-status" :class="{ active: liveTracking }"><i />{{ liveLocationStatus }}</span>
+              </div>
+              <div class="pv-map-nearby-actions">
+                <label>附近地点
+                  <select v-model.number="nearbyRadius" aria-label="附近地点查询半径">
+                    <option :value="500">500 米</option><option :value="1500">1.5 公里</option><option :value="3000">3 公里</option><option :value="5000">5 公里</option>
+                  </select>
+                </label>
+                <button class="pv-btn-ghost" type="button" :disabled="nearbyBusy" @click="loadNearbyPlaces">{{ nearbyBusy ? '查询中…' : '⌕ 查询附近地点' }}</button>
+                <button v-if="nearbyPlaces.length" class="pv-btn-ghost" type="button" @click="clearNearbyPlaces">清除附近</button>
+              </div>
+              <div v-if="currentLocation" class="pv-map-live-metrics">
+                <span>精度 ±{{ Math.round(currentLocation.accuracy) }} 米</span><span>速度 {{ liveSpeedLabel }}</span><span>方向 {{ liveHeadingLabel }}</span><span>更新于 {{ formatDate(new Date(currentLocation.timestamp).toISOString()) }}</span>
+              </div>
+              <div v-if="locationError || nearbyError" class="pv-map-live-error">{{ locationError || nearbyError }}</div>
+            </div>
+            <div class="pv-real-map-filters">
+              <input v-model="mapSearch" type="search" placeholder="搜索国家、城市、小区或地点" aria-label="搜索地图地点" @keyup.enter="searchMapPlace" /><button class="pv-btn-primary" type="button" :disabled="worldBusy || !mapSearch.trim()" @click="searchMapPlace">搜索地图</button>
+              <select v-model="mapCountry" aria-label="筛选国家"><option value="">所有国家</option><option v-for="value in mapCountries" :key="value" :value="value">{{ value }}</option></select>
+              <select v-model="mapAdmin1" aria-label="筛选省州"><option value="">所有省州</option><option v-for="value in mapAdmin1Options" :key="value" :value="value">{{ value }}</option></select>
+              <select v-model="mapCity" aria-label="筛选城市"><option value="">所有城市</option><option v-for="value in mapCityOptions" :key="value" :value="value">{{ value }}</option></select>
+              <select v-model="mapDistrict" aria-label="筛选区县"><option value="">所有区县</option><option v-for="value in mapDistrictOptions" :key="value" :value="value">{{ value }}</option></select>
+              <button class="pv-btn-ghost" type="button" @click="clearMapFilters">清除筛选</button>
+            </div>
+            <div v-if="mapSearchResults.length" class="pv-map-search-results" aria-label="地点搜索结果">
+              <button v-for="result in mapSearchResults" :key="`${result.provider_id}-${result.latitude}-${result.longitude}`" type="button" :class="{ active: isMapResultSelected(result) }" @click="selectMapSearchResult(result)">
+                <strong>{{ result.name }}</strong><span>{{ result.display_name }}</span>
               </button>
-              <button class="pv-btn-ghost pv-world-commission" @click.stop="openRegionDrawer(region)">查看区域档案</button>
-            </article>
+            </div>
+            <div v-if="mapSearchResult" class="pv-map-selection">
+              <div><strong>{{ mapSearchResult.name }}</strong><span>{{ mapSearchResult.display_name || `${mapSearchResult.latitude.toFixed(6)}, ${mapSearchResult.longitude.toFixed(6)}` }}</span></div>
+              <button class="pv-btn-primary" type="button" @click="preparePlaceFromMapResult(mapSearchResult)">＋ 记录此地点</button>
+              <button class="pv-btn-ghost" type="button" @click="mapSearchResult = null; mapSearchResults = []">取消选点</button>
+            </div>
+            <div class="pv-real-route-controls">
+              <label>真实道路路线
+                <select v-model="routeProfile" aria-label="路线出行方式" @change="realRoute = null; routeError = ''">
+                  <option value="driving">驾车</option><option value="walking">步行</option><option value="cycling">骑行</option>
+                </select>
+              </label>
+              <button class="pv-btn-primary" type="button" :disabled="routeBusy || mapRoutePlaces.length < 2" @click="requestRealRoute">{{ routeBusy ? '规划中…' : `按 ${mapRoutePlaces.length} 个地点规划` }}</button>
+              <button v-if="realRoute" class="pv-btn-ghost" type="button" @click="realRoute = null; routeError = ''">清除路线</button>
+              <span v-if="realRoute">{{ (realRoute.distance_m / 1000).toFixed(1) }} km · 约 {{ Math.max(1, Math.round(realRoute.duration_s / 60)) }} 分钟 · OSRM</span>
+              <span v-else-if="routeError" class="pv-route-error">{{ routeError }}</span>
+              <small v-else>按当前筛选后的地点及到访顺序规划；公开服务可能只支持驾车，步行/骑行需配置对应路由服务。</small>
+            </div>
+            <div ref="mapLibreContainer" class="pv-real-map pv-maplibre-container" :class="{ 'maplibre-hidden': !mapLibreReady }" aria-label="真实世界地图"></div>
+            <div v-if="!mapLibreReady" ref="realMapViewport" class="pv-real-map" :class="{ dragging: worldMapDragging }" @pointerdown="startWorldMapDrag" @pointermove="moveWorldMapDrag" @pointerup="endWorldMapDrag" @pointercancel="endWorldMapDrag" @wheel="onWorldMapWheel">
+              <div class="pv-real-map-viewport" :style="realMapWorldStyle()">
+                <img v-for="tile in realMapTiles" :key="tile.key" class="pv-real-map-tile" :src="tile.src" alt="" draggable="false" :style="{ left: `${tile.x * 256}px`, top: `${tile.y * 256}px` }" />
+                <svg v-if="mapRoutePlaces.length > 1" class="pv-real-map-route" :style="{ width: `${256 * 2 ** realMapTileZoom}px`, height: `${256 * 2 ** realMapTileZoom}px` }" aria-hidden="true"><polyline v-if="!realRoute" :points="mapRoutePath" /><polyline v-else class="pv-real-map-route-real" :points="realRoutePath" /></svg>
+                <div v-for="place in filteredRealPlaces" :key="place.place_key" v-show="place.latitude != null && place.longitude != null" class="pv-real-map-pin" :class="{ 'is-selected': worldMapSelected?.place_key === place.place_key }" :style="realMapMarkerStyle(place.latitude, place.longitude)" role="button" tabindex="0" :aria-label="`查看到访地点 ${place.name}`" @pointerdown.stop @click.stop="focusRealPlace(place)" @keydown.enter.prevent.stop="focusRealPlace(place)">
+                  <span class="pv-real-map-pin-dot" /><span class="pv-real-map-pin-label">{{ place.name }}</span>
+                </div>
+                <div v-for="place in nearbyPlaces" :key="`nearby-${place.provider_id}-${place.latitude}-${place.longitude}`" v-show="place.latitude != null && place.longitude != null" class="pv-real-map-pin pv-real-map-pin-nearby" :class="{ 'is-selected': isMapResultSelected(place) }" :style="realMapMarkerStyle(place.latitude, place.longitude)" role="button" tabindex="0" :aria-label="`附近地点 ${place.name}`" @pointerdown.stop @click.stop="selectMapSearchResult(place)" @keydown.enter.prevent.stop="selectMapSearchResult(place)">
+                  <span class="pv-real-map-pin-dot" /><span class="pv-real-map-pin-label">{{ place.name }}</span>
+                </div>
+                <div v-if="mapSearchResult && !isNearbyResult(mapSearchResult)" class="pv-real-map-pin pv-real-map-pin-search" :class="{ 'is-selected': isMapResultSelected(mapSearchResult) }" :style="realMapMarkerStyle(mapSearchResult.latitude, mapSearchResult.longitude)" role="button" tabindex="0" :aria-label="`搜索结果 ${mapSearchResult.name}`" @pointerdown.stop @click.stop="preparePlaceFromMapResult(mapSearchResult)" @keydown.enter.prevent.stop="preparePlaceFromMapResult(mapSearchResult)">
+                  <span class="pv-real-map-pin-dot" /><span class="pv-real-map-pin-label">{{ mapSearchResult.name }}</span>
+                </div>
+                <div v-if="currentLocation || (realContext?.latitude != null && realContext?.longitude != null)" class="pv-real-map-current" :style="realMapMarkerStyle(currentLocation?.latitude ?? realContext?.latitude, currentLocation?.longitude ?? realContext?.longitude)" aria-label="当前位置"><span>⌖</span></div>
+              </div>
+              <div class="pv-real-map-caption">点击地图选择地点 · 拖动查看世界 · 滚轮缩放 · © OpenStreetMap contributors</div>
+            </div>
+            <aside class="pv-real-map-side" aria-label="地图地点与现实数据"><div class="pv-real-map-side-head"><strong>地点档案</strong><span>{{ filteredRealPlaces.length }} 个</span></div><button v-for="place in filteredRealPlaces" :key="`side-${place.place_key}`" class="pv-real-map-place-row" :class="{ 'is-selected': worldMapSelected?.place_key === place.place_key }" type="button" @click="focusRealPlace(place)"><span class="pv-real-map-place-dot" /><span><b>{{ place.name }}</b><small>{{ [place.city, place.district, place.neighborhood].filter(Boolean).join(' · ') || '坐标已记录' }}</small></span><em>{{ place.visit_count }} 次</em></button><div v-if="!filteredRealPlaces.length" class="pv-empty">还没有符合条件的现实地点</div><div v-if="nearbyPlaces.length" class="pv-real-map-nearby-list"><div class="pv-real-map-side-head"><strong>附近地点</strong><span>{{ nearbyPlaces.length }} 个</span></div><button v-for="place in nearbyPlaces" :key="`nearby-side-${place.provider_id}-${place.latitude}-${place.longitude}`" class="pv-real-map-place-row pv-real-map-nearby-row" :class="{ 'is-selected': isMapResultSelected(place) }" type="button" @click="selectMapSearchResult(place)"><span class="pv-real-map-place-dot" /><span><b>{{ place.name }}</b><small>{{ place.category || '地点' }} · {{ place.distance_m != null ? `${Math.round(place.distance_m)} 米` : '附近' }}</small></span><em>查看</em></button></div><div class="pv-real-map-side-story"><strong>现实上下文</strong><span class="pv-real-context-line">{{ realContext?.source_status === 'ok' ? `${realContext.city} · ${realContext.weather} · ${realContext.temperature ?? '--'}°C` : '天气尚未同步' }}</span><small v-if="realContext?.last_synced_at">同步于 {{ formatDate(realContext.last_synced_at) }}</small><small v-if="currentLocation">当前位置误差约 {{ Math.round(currentLocation.accuracy) }} 米</small></div><div class="pv-real-map-side-story"><strong>附近与旅途回忆</strong><button v-for="story in stories.slice(0, 3)" :key="story.id" type="button" @click="goTo(4)"><span>{{ story.title }}</span><small>{{ story.event_type || '生活剧情' }}</small></button></div></aside>
+            <div v-if="showPlaceRecorder" class="pv-real-place-form">
+              <div class="pv-real-place-form-head"><strong>把去过的地方交给弥娅</strong><button class="pv-btn-ghost" type="button" @click="showPlaceRecorder = false">关闭</button></div>
+              <div class="pv-real-place-fields"><input v-model="placeForm.name" placeholder="地点名称，如 杭州西湖" /><input v-model="placeForm.latitude" inputmode="decimal" placeholder="纬度（可选）" /><input v-model="placeForm.longitude" inputmode="decimal" placeholder="经度（可选）" /><input v-model="placeForm.visited_at" type="date" aria-label="到访日期（可选）" /><input v-model="placeForm.note" class="wide" placeholder="想留给未来的备注（可选）" /></div>
+              <div class="pv-real-place-form-actions"><button class="pv-btn-ghost" type="button" :disabled="worldBusy" @click="useCurrentLocationForPlace">⌖ 使用当前位置</button><button class="pv-btn-primary" type="button" :disabled="!placeForm.name.trim() || worldBusy" @click="savePlaceVisit">保存到我的地球</button></div>
+            </div>
           </div>
           <div v-if="worldMessage" class="pv-world-message">✦ {{ worldMessage }}</div>
-          <div v-if="worldCompanion" class="pv-world-companion">
-            <div class="pv-world-companion-mark">❦</div>
-            <div><span class="pv-world-companion-label">{{ worldCompanion.speaker }} · {{ worldCompanion.tone }}</span><p>{{ worldCompanion.text }}</p></div>
-          </div>
-          <div v-if="worldChoiceDiscovery && !worldChoiceDiscovery.choice" class="pv-world-choice">
-            <div class="pv-world-choice-title">弥娅想和你一起决定接下来怎么走</div>
-            <div class="pv-world-choice-buttons">
-              <button class="pv-btn-ghost" :disabled="worldChoiceBusy" @click="chooseWorldDiscovery('continue')">→ 继续前进</button>
-              <button class="pv-btn-ghost" :disabled="worldChoiceBusy" @click="chooseWorldDiscovery('record')">✎ 记录此刻</button>
-              <button class="pv-btn-ghost" :disabled="worldChoiceBusy" @click="chooseWorldDiscovery('rest')">☾ 先休息</button>
-            </div>
-          </div>
-          <div v-if="worldDiscoveries.length" class="pv-world-log">
-            <div class="pv-world-log-head"><span>最近发现</span><span>弥娅已为你存档</span></div>
-            <div v-for="discovery in worldDiscoveries.slice(0, 5)" :key="`${discovery.region_key}-${discovery.event_key}`" class="pv-world-log-item">
-              <span class="pv-world-log-mark">◇</span><span class="pv-world-log-title">{{ discovery.title }}</span><span class="pv-world-log-reward">+{{ discovery.reward_currency }} ◆ · +{{ discovery.reward_exp }} EXP</span>
-            </div>
-            <!-- 最新一条发现还没做同行选择时，可在归档里补选 -->
-            <div v-if="pendingChoiceDiscovery" class="pv-world-log-choice">
-              <span class="pv-world-log-choice-label">「{{ pendingChoiceDiscovery.title }}」还欠弥娅一个同行决定:</span>
-              <div class="pv-world-choice-buttons">
-                <button class="pv-btn-ghost" :disabled="worldChoiceBusy" @click="chooseWorldDiscovery('continue', pendingChoiceDiscovery)">→ 继续前进</button>
-                <button class="pv-btn-ghost" :disabled="worldChoiceBusy" @click="chooseWorldDiscovery('record', pendingChoiceDiscovery)">✎ 记录此刻</button>
-                <button class="pv-btn-ghost" :disabled="worldChoiceBusy" @click="chooseWorldDiscovery('rest', pendingChoiceDiscovery)">☾ 先休息</button>
-              </div>
-            </div>
-          </div>
         </div>
       </section>
 
@@ -2096,6 +2541,54 @@ function achievementShown(a: EarthAchievement) {
 
     </main>
 
+    <!-- 现实地点完整档案抽屉 -->
+    <Transition name="drawer">
+      <div v-if="worldMapSelected" class="pv-drawer-mask pv-place-drawer-mask" @click.self="closePlaceDetail">
+        <aside class="pv-drawer pv-place-drawer" aria-label="地点详情">
+          <div class="pv-drawer-head">
+            <span class="pv-drawer-head-label">REAL PLACE / 地点档案</span>
+            <div class="pv-place-head-actions">
+              <button class="pv-place-favorite" type="button" :aria-label="worldMapSelected.favorite ? '取消收藏' : '收藏地点'" @click="togglePlaceFavorite">{{ worldMapSelected.favorite ? '★' : '☆' }}</button>
+              <button class="pv-drawer-close" @click="closePlaceDetail">✕</button>
+            </div>
+          </div>
+          <div v-if="placeDetailLoading" class="pv-empty pv-place-loading">地点档案加载中…</div>
+          <div v-else class="pv-drawer-body pv-place-drawer-body">
+            <template v-if="!placeEditing">
+              <div class="pv-place-title-row"><div><div class="pv-drawer-title">{{ worldMapSelected.name }}</div><div v-if="worldMapSelected.subtitle" class="pv-place-subtitle">{{ worldMapSelected.subtitle }}</div></div><span class="pv-place-category">{{ worldMapSelected.category || 'other' }}</span></div>
+              <p class="pv-place-address">⌖ {{ worldMapSelected.display_address || [worldMapSelected.country, worldMapSelected.admin1, worldMapSelected.city, worldMapSelected.district, worldMapSelected.neighborhood].filter(Boolean).join(' · ') || '地址尚未补全' }}</p>
+              <div v-if="worldMapSelected.tags?.length" class="pv-chips"><span v-for="tag in worldMapSelected.tags" :key="tag" class="pv-chip"># {{ tag }}</span></div>
+              <div class="pv-place-stats"><span><b>{{ worldMapSelected.visit_count }}</b> 次到访</span><span><b>{{ worldMapSelected.photos?.length || (worldMapSelected.image_path ? 1 : 0) }}</b> 张照片</span><span v-if="worldMapSelected.accuracy_m"><b>±{{ Math.round(worldMapSelected.accuracy_m) }}</b> 米</span></div>
+              <div class="pv-place-actions"><button class="pv-btn-primary" type="button" :disabled="worldBusy" @click="recordAnotherVisit">✓ 再次到访</button><button class="pv-btn-ghost" type="button" @click="placeEditing = true">编辑档案</button><label class="pv-btn-ghost pv-real-place-upload">＋ 添加照片<input type="file" accept="image/*" hidden @change="onPickRealPlaceImage" /></label></div>
+              <div class="pv-drawer-section">≣ 地点备注</div>
+              <p class="pv-drawer-brief">{{ worldMapSelected.notes || '这里还没有留下备注。' }}</p>
+            </template>
+            <template v-else>
+              <div class="pv-drawer-section">编辑地点档案</div>
+              <label>地点名称</label><input v-model="placeEditForm.name" class="pv-drawer-input" />
+              <label>副标题</label><input v-model="placeEditForm.subtitle" class="pv-drawer-input" placeholder="例如：常去的咖啡馆" />
+              <label>地点类别</label><input v-model="placeEditForm.category" class="pv-drawer-input" placeholder="cafe / park / home…" />
+              <label>标签 <small>用逗号分隔</small></label><input v-model="placeEditForm.tags" class="pv-drawer-input" placeholder="喜欢, 安静, 回忆" />
+              <label>备注</label><textarea v-model="placeEditForm.notes" class="pv-md-editor" placeholder="关于这个地点的故事……" />
+              <label class="pv-place-check"><input v-model="placeEditForm.favorite" type="checkbox" />收藏这个地点</label>
+              <div class="pv-modal-actions"><button class="pv-btn-ghost" @click="placeEditing = false">取消</button><button class="pv-btn-primary" :disabled="worldBusy || !placeEditForm.name.trim()" @click="savePlaceDetail">保存</button></div>
+            </template>
+
+            <div class="pv-drawer-section">▧ 地点相册</div>
+            <div v-if="worldMapSelected.photos?.length" class="pv-place-gallery"><img v-for="photo in worldMapSelected.photos" :key="photo.id || photo.image_path" :src="EarthAPI.imageUrl(photo.image_path)" :alt="photo.caption || `${worldMapSelected.name}的照片`" /></div>
+            <p v-else class="pv-empty">还没有照片，下一次经过时留下一张吧。</p>
+
+            <div class="pv-drawer-section">◷ 到访时间线</div>
+            <div v-if="worldMapSelected.visits?.length" class="pv-place-visits"><div v-for="visit in worldMapSelected.visits" :key="visit.id" class="pv-place-visit"><span class="pv-place-visit-dot" /><div><strong>{{ formatDate(visit.visited_at) }}</strong><p>{{ visit.note || '留下了一次到访记录' }}</p><small v-if="visit.accuracy_m">定位精度约 {{ Math.round(visit.accuracy_m) }} 米</small></div></div></div>
+            <p v-else class="pv-empty">暂无逐次到访记录。</p>
+
+            <div class="pv-place-coordinates"><span>{{ Number(worldMapSelected.latitude || 0).toFixed(6) }}, {{ Number(worldMapSelected.longitude || 0).toFixed(6) }}</span><small>{{ worldMapSelected.provider_id ? `OpenStreetMap · ${worldMapSelected.provider_id}` : '本地地点档案' }}</small></div>
+            <button class="pv-place-delete" type="button" :disabled="worldBusy" @click="removeRealPlace">删除地点档案</button>
+          </div>
+        </aside>
+      </div>
+    </Transition>
+
     <!-- 加载遮罩 -->
     <div v-if="loading" class="pv-loading">加载中…</div>
 
@@ -2106,12 +2599,12 @@ function achievementShown(a: EarthAchievement) {
       <button class="pv-btn-accept" @click="loadAll">点击重试</button>
     </div>
 
-    <!-- 档案侧边栏 (玩家/区域/物品/角色) -->
+    <!-- 档案侧边栏 (玩家/物品/角色) -->
     <Transition name="drawer">
-      <div v-if="drawerItem || drawerChar || drawerRegion || showProfileEdit" class="pv-drawer-mask" @click.self="closeDrawer">
+      <div v-if="drawerItem || drawerChar || showProfileEdit" class="pv-drawer-mask" @click.self="closeDrawer">
         <aside class="pv-drawer">
           <div class="pv-drawer-head">
-            <span class="pv-drawer-head-label">{{ showProfileEdit ? '玩家档案' : drawerRegion ? '区域档案' : '档案' }}</span>
+            <span class="pv-drawer-head-label">{{ showProfileEdit ? '玩家档案' : '档案' }}</span>
             <button class="pv-drawer-close" @click="closeDrawer">✕</button>
           </div>
 
@@ -2182,26 +2675,6 @@ function achievementShown(a: EarthAchievement) {
                 <Markdown :source="drawerChar.markdown || '_还没有详细档案，去后台用 Markdown 写一份吧～_'" />
               </div>
               <button v-if="drawerExpanded" class="pv-btn-ghost" @click="drawerExpanded = false">收起详情</button>
-            </div>
-          </template>
-
-          <template v-else-if="drawerRegion">
-            <div class="pv-drawer-cover pv-drawer-cover-region" :style="worldRegionStyle(drawerRegion)">
-              <span class="pv-region-drawer-icon">{{ drawerRegion.icon }}</span>
-              <span class="pv-drawer-region-state" :class="{ locked: (player?.level || 1) < drawerRegion.level_req, complete: drawerRegion.discovery_total >= drawerRegion.event_total }">{{ (player?.level || 1) < drawerRegion.level_req ? 'LOCKED' : drawerRegion.discovery_total >= drawerRegion.event_total ? 'COMPLETE' : 'AVAILABLE' }}</span>
-            </div>
-            <div class="pv-drawer-body">
-              <div class="pv-drawer-title">{{ drawerRegion.name }}</div>
-              <div class="pv-drawer-sub"><span>{{ drawerRegion.subtitle }}</span><span>Lv.{{ drawerRegion.level_req }}+</span></div>
-              <div class="pv-drawer-section">◇ 区域同步</div>
-              <div class="pv-drawer-brief pv-region-drawer-description"><Markdown v-if="drawerRegion.description" :source="drawerRegion.description" /><span v-else>这个区域还没有更多记录。</span></div>
-              <div class="pv-region-drawer-progress"><div><span>探索进度</span><b>{{ drawerRegion.discovery_total }} / {{ drawerRegion.event_total }}</b></div><i><em :style="{ width: `${drawerRegion.exploration_percent}%` }" /></i></div>
-              <div class="pv-world-resonance pv-region-drawer-resonance"><div><span>区域共鸣 · Lv.{{ drawerRegion.resonance_level || 1 }}</span><span>{{ drawerRegion.resonance_xp || 0 }} / {{ drawerRegion.resonance_next_xp || 40 }}</span></div><div class="pv-world-resonance-bar"><span :style="{ width: `${Math.min(100, Math.round((drawerRegion.resonance_xp || 0) / Math.max(1, drawerRegion.resonance_next_xp || 40) * 100))}%` }" /></div></div>
-              <div v-if="drawerRegion.condition_events?.length" class="pv-world-conditions pv-region-drawer-conditions"><span v-for="event in drawerRegion.condition_events" :key="event.title" :class="{ available: event.available }">{{ event.available ? '✦' : '◇' }} {{ event.available ? event.title : event.condition_label }}</span></div>
-              <div class="pv-region-drawer-actions">
-                <button class="pv-btn-primary" :disabled="worldBusy || (player?.level || 1) < drawerRegion.level_req" @click="exploreRegion(drawerRegion)">{{ (player?.level || 1) < drawerRegion.level_req ? `Lv.${drawerRegion.level_req} 解锁` : '探索区域' }}</button>
-                <button class="pv-btn-ghost" :disabled="worldBusy || (player?.level || 1) < drawerRegion.level_req" @click="commissionRegion(drawerRegion)">领取区域委托</button>
-              </div>
             </div>
           </template>
 
@@ -5584,5 +6057,173 @@ function achievementShown(a: EarthAchievement) {
   .pv-world-grid { grid-template-columns: 1fr; grid-auto-rows: auto; }
   .pv-world-region { min-height: 290px; height: auto; }
 }
+
+.pv-real-map-shell { display: grid; grid-template-columns: minmax(0, 1fr) 270px; margin: 1.2rem 0 1.5rem; border: 1px solid rgba(120, 207, 209, .22); background: rgba(5, 14, 22, .62); }
+.pv-real-map-toolbar, .pv-real-map-filters, .pv-real-route-controls, .pv-real-place-form { grid-column: 1 / -1; }
+.pv-real-map-toolbar { display: flex; align-items: center; justify-content: space-between; gap: .8rem; padding: .8rem .9rem; border-bottom: 1px solid rgba(120, 207, 209, .15); }
+.pv-real-map-label { color: var(--earth-accent-light); font-size: .68rem; letter-spacing: .14em; }
+.pv-real-map-actions { display: flex; gap: .45rem; flex-wrap: wrap; justify-content: flex-end; }
+.pv-map-capability-note { grid-column: 1 / -1; padding: .7rem .9rem .75rem; border-bottom: 1px solid rgba(120, 207, 209, .12); background: rgba(120, 207, 209, .035); }
+.pv-map-capability-head { display: flex; align-items: center; justify-content: space-between; gap: .8rem; margin-bottom: .45rem; color: var(--earth-accent-light); font-size: .72rem; }
+.pv-map-capability-head span { color: var(--miya-text-dim); font-size: .62rem; }
+.pv-map-capability-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .3rem .8rem; color: var(--miya-text-muted); font-size: .64rem; }
+.pv-map-capability-grid span { min-width: 0; }
+.pv-map-capability-grid .ready { color: #9de8d9; }
+.pv-map-capability-grid .pending { color: #e8c983; }
+.pv-map-capability-note p { margin: .5rem 0 0; color: var(--miya-text-dim); font-size: .61rem; line-height: 1.55; }
+.pv-map-live-controls { grid-column: 1 / -1; display: flex; flex-direction: column; gap: .55rem; padding: .7rem .9rem; border-bottom: 1px solid rgba(120, 207, 209, .12); background: rgba(255, 202, 112, .035); }
+.pv-map-live-actions, .pv-map-nearby-actions, .pv-map-live-metrics { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.pv-map-nearby-actions label { display: inline-flex; align-items: center; gap: .4rem; color: var(--miya-text-muted); font-size: .66rem; }
+.pv-map-nearby-actions select { padding: .46rem .5rem; border: 1px solid rgba(120, 207, 209, .2); background: rgba(5, 14, 22, .9); color: var(--miya-text-strong); font: inherit; font-size: .66rem; }
+.pv-map-live-status { display: inline-flex; align-items: center; gap: .35rem; color: var(--miya-text-dim); font-size: .64rem; }
+.pv-map-live-status i { width: 7px; height: 7px; border-radius: 50%; background: #7d8b91; }
+.pv-map-live-status.active { color: #ffd37d; }
+.pv-map-live-status.active i { background: #ffb300; box-shadow: 0 0 0 4px rgba(255, 179, 0, .16), 0 0 10px #ffb300; animation: miya-map-live-blink 1.3s ease-in-out infinite; }
+.pv-btn-live-active { color: #ffd37d; border-color: rgba(255, 211, 125, .4); }
+.pv-map-live-metrics { color: var(--miya-text-dim); font-size: .61rem; }
+.pv-map-live-metrics span + span { padding-left: .5rem; border-left: 1px solid var(--miya-line-soft); }
+.pv-map-live-error { color: #ffb2a7; font-size: .64rem; }
+.pv-real-map { position: relative; height: min(52vw, 440px); min-height: 280px; overflow: hidden; cursor: grab; touch-action: none; background: radial-gradient(circle at 50% 44%, rgba(26, 91, 97, .4), rgba(3, 12, 20, .95) 72%); }
+.pv-maplibre-container { cursor: default; }
+.pv-maplibre-container.maplibre-hidden { display: none; }
+.pv-maplibre-container :deep(.maplibregl-canvas) { outline: none; }
+.pv-maplibre-container :deep(.maplibregl-ctrl-group) { overflow: hidden; border: 1px solid rgba(23, 50, 64, .7); background: rgba(5, 18, 29, .9); }
+.pv-maplibre-container :deep(.maplibregl-ctrl button) { filter: invert(1) hue-rotate(145deg); }
+.pv-maplibre-container :deep(.maplibregl-ctrl-attrib) { color: #496a73; background: rgba(5, 18, 29, .84); }
+.miya-map-marker { width: 18px; height: 18px; padding: 0; border: 2px solid #d9fffb; border-radius: 50% 50% 50% 0; background: #4fc3c9; box-shadow: 0 0 0 4px rgba(79, 195, 201, .22), 0 0 16px rgba(162, 245, 238, .8); transform: rotate(-45deg); cursor: pointer; }
+.miya-map-marker-region { width: 21px; height: 21px; border-radius: 50%; border-color: #ffe2a3; background: #c9ac67; box-shadow: 0 0 0 4px rgba(201, 172, 103, .2), 0 0 16px rgba(255, 211, 125, .75); }
+.miya-map-marker-current { width: 15px; height: 15px; border-radius: 50%; border-color: #fff0bd; background: #ffb300; box-shadow: 0 0 0 5px rgba(255, 179, 0, .24), 0 0 18px #ffb300; }
+.miya-map-marker-search { width: 18px; height: 18px; border-radius: 50%; border-color: #ffffff; background: #e46b9b; box-shadow: 0 0 0 5px rgba(228, 107, 155, .22), 0 0 18px rgba(255, 200, 225, .9); }
+.miya-map-marker-nearby { background: #8d7cff; border-color: #f0edff; box-shadow: 0 0 0 4px rgba(141, 124, 255, .24), 0 0 16px rgba(182, 173, 255, .86); }
+.miya-map-marker.is-selected { z-index: 5; transform: rotate(-45deg) scale(1.42); animation: miya-map-marker-pulse 1.5s ease-in-out infinite; }
+.miya-map-marker.is-selected::after { content: ''; position: absolute; inset: -9px; border: 1px solid currentColor; border-radius: 50%; opacity: .75; transform: rotate(45deg); }
+.pv-real-map.dragging { cursor: grabbing; }
+.pv-real-map-viewport { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform-origin: center; transition: transform .16s ease-out; }
+.pv-real-map-tile { position: absolute; width: 256px; height: 256px; max-width: none; user-select: none; pointer-events: none; }
+.pv-real-map-pin, .pv-real-map-current { position: absolute; transform: translate(-50%, -50%); }
+.pv-real-map-pin { z-index: 3; color: #d9fffb; cursor: pointer; }
+.pv-real-map-pin-nearby { z-index: 4; color: #ded9ff; }
+.pv-real-map-pin-search { z-index: 5; color: #ffd8e8; }
+.pv-real-map-pin-dot { display: block; width: 13px; height: 13px; border: 2px solid #d9fffb; border-radius: 50%; background: #4fc3c9; box-shadow: 0 0 0 5px rgba(79, 195, 201, .2), 0 0 18px rgba(162, 245, 238, .75); }
+.pv-real-map-pin-nearby .pv-real-map-pin-dot { border-color: #f0edff; background: #8d7cff; box-shadow: 0 0 0 5px rgba(141, 124, 255, .22), 0 0 16px rgba(182, 173, 255, .86); }
+.pv-real-map-pin-search .pv-real-map-pin-dot { border-color: #fff; background: #e46b9b; box-shadow: 0 0 0 5px rgba(228, 107, 155, .22), 0 0 18px rgba(255, 200, 225, .9); }
+.pv-real-map-pin-label { position: absolute; left: 50%; top: 20px; transform: translateX(-50%); width: max-content; max-width: 160px; padding: .18rem .35rem; background: rgba(3, 12, 20, .84); color: #d9fffb; font-size: .62rem; white-space: nowrap; pointer-events: none; }
+.pv-real-map-pin.is-selected { z-index: 6; }
+.pv-real-map-pin.is-selected .pv-real-map-pin-dot { width: 17px; height: 17px; margin: -2px; animation: miya-map-pin-pulse 1.5s ease-in-out infinite; }
+.pv-real-map-pin.is-selected .pv-real-map-pin-label { color: #fff; background: rgba(13, 30, 40, .96); outline: 1px solid rgba(162, 245, 238, .55); box-shadow: 0 0 18px rgba(162, 245, 238, .28); }
+.pv-real-map-region-pin { position: absolute; z-index: 3; transform: translate(-50%, -50%); display: grid; place-items: center; color: #ffd37d; cursor: pointer; text-shadow: 0 0 10px rgba(255, 179, 0, .65); }
+.pv-real-map-region-pin span { font-size: 1.25rem; }
+.pv-real-map-region-pin small { position: absolute; top: 21px; width: max-content; color: #ffe2a3; font-size: .58rem; }
+.pv-real-map-route { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.pv-real-map-route polyline { fill: none; stroke: #ffca70; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 9 8; vector-effect: non-scaling-stroke; opacity: .9; }
+.pv-real-map-route .pv-real-map-route-real { stroke: #4dd7e8; stroke-width: 5; stroke-dasharray: none; opacity: .96; }
+.pv-real-map-current { z-index: 2; color: #ffd37d; font-size: 1.25rem; text-shadow: 0 0 12px #ffb300; }
+.pv-real-map-caption { position: absolute; left: .8rem; bottom: .65rem; color: rgba(217, 255, 251, .55); font-size: .62rem; pointer-events: none; }
+.pv-real-place-detail { display: flex; align-items: baseline; gap: .7rem; flex-wrap: wrap; padding: .65rem .9rem; border-top: 1px solid rgba(120, 207, 209, .15); color: var(--miya-text-muted); font-size: .68rem; }
+.pv-real-place-detail strong { color: var(--earth-accent-light); font-size: .82rem; }
+.pv-real-place-detail small { width: 100%; color: var(--miya-text-dim); }
+.pv-real-place-photo { width: 100%; max-height: 180px; object-fit: cover; border: 1px solid rgba(120, 207, 209, .18); }
+.pv-real-place-upload { position: relative; overflow: hidden; }
+.pv-real-place-memories { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; width: 100%; }
+.pv-real-place-memories strong { margin-right: .25rem; color: var(--earth-accent-light); font-size: .68rem; }
+.pv-real-place-memories button { padding: .2rem .35rem; border: 1px solid rgba(120, 207, 209, .2); background: rgba(120, 207, 209, .06); color: var(--miya-text-muted); font: inherit; font-size: .62rem; cursor: pointer; }
+.pv-real-place-form { padding: .8rem .9rem .95rem; border-top: 1px solid rgba(120, 207, 209, .15); }
+.pv-real-place-form-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: .7rem; color: var(--earth-accent-light); font-size: .82rem; }
+.pv-real-place-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .5rem; margin-bottom: .65rem; }
+.pv-real-place-fields input { min-width: 0; padding: .55rem .6rem; border: 1px solid rgba(120, 207, 209, .2); background: rgba(255, 255, 255, .045); color: var(--miya-text-strong); font: inherit; font-size: .72rem; }
+.pv-real-place-fields input.wide { grid-column: 1 / -1; }
+.pv-real-map-filters { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; padding: .65rem .9rem; border-bottom: 1px solid rgba(120, 207, 209, .12); }
+.pv-real-map-filters input { flex: 1 1 220px; min-width: 160px; padding: .55rem .6rem; border: 1px solid rgba(120, 207, 209, .2); background: rgba(255, 255, 255, .045); color: var(--miya-text-strong); font: inherit; font-size: .72rem; }
+.pv-real-map-filters select { min-width: 100px; padding: .55rem .45rem; border: 1px solid rgba(120, 207, 209, .2); background: rgba(5, 14, 22, .9); color: var(--miya-text-strong); font: inherit; font-size: .68rem; }
+.pv-map-search-results { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1px; padding: 1px; border-bottom: 1px solid rgba(120, 207, 209, .14); background: rgba(120, 207, 209, .12); }
+.pv-map-search-results button { min-width: 0; padding: .58rem .7rem; border: 0; background: rgba(5, 14, 22, .96); color: var(--miya-text-muted); text-align: left; cursor: pointer; }
+.pv-map-search-results button:hover, .pv-map-search-results button.active { background: rgba(120, 207, 209, .13); }
+.pv-map-search-results strong, .pv-map-search-results span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-map-search-results strong { color: var(--miya-text-strong); font-size: .7rem; }
+.pv-map-search-results span { margin-top: .15rem; color: var(--miya-text-dim); font-size: .57rem; }
+.pv-map-selection { grid-column: 1 / -1; display: flex; align-items: center; gap: .55rem; padding: .62rem .9rem; border-bottom: 1px solid rgba(120, 207, 209, .16); background: linear-gradient(90deg, rgba(228, 107, 155, .09), rgba(120, 207, 209, .04)); }
+.pv-map-selection > div { min-width: 0; flex: 1; }
+.pv-map-selection strong, .pv-map-selection span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-map-selection strong { color: var(--earth-accent-light); font-size: .74rem; }
+.pv-map-selection span { margin-top: .14rem; color: var(--miya-text-dim); font-size: .59rem; }
+.pv-real-route-controls { display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; padding: .6rem .9rem; border-bottom: 1px solid rgba(120, 207, 209, .12); color: var(--miya-text-muted); font-size: .68rem; }
+.pv-real-route-controls label { display: flex; align-items: center; gap: .45rem; color: var(--miya-text-strong); }
+.pv-real-route-controls select { padding: .48rem .55rem; border: 1px solid rgba(120, 207, 209, .2); background: rgba(5, 14, 22, .9); color: var(--miya-text-strong); font: inherit; }
+.pv-real-route-controls small { color: var(--miya-text-dim); }
+.pv-route-error { color: #ffb2a7; }
+.pv-real-map-side { min-height: 280px; max-height: 440px; overflow-y: auto; border-left: 1px solid rgba(120, 207, 209, .15); }
+.pv-real-map-side-head { display: flex; justify-content: space-between; padding: .8rem .75rem .55rem; color: var(--earth-accent-light); font-size: .78rem; }
+.pv-real-map-side-head span { color: var(--miya-text-dim); font-size: .64rem; }
+.pv-real-map-place-row { display: flex; align-items: center; gap: .5rem; width: 100%; padding: .55rem .75rem; border: 0; border-top: 1px solid rgba(255, 255, 255, .06); background: transparent; color: var(--miya-text-muted); text-align: left; font: inherit; cursor: pointer; }
+.pv-real-map-place-row:hover { background: rgba(120, 207, 209, .1); }
+.pv-real-map-place-row.is-selected { background: rgba(120, 207, 209, .16); box-shadow: inset 3px 0 0 var(--earth-accent-light); }
+.pv-real-map-place-row.is-selected b { color: var(--earth-accent-light); }
+.pv-real-map-place-row > span:not(.pv-real-map-place-dot) { min-width: 0; flex: 1; }
+.pv-real-map-place-row b, .pv-real-map-place-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-real-map-place-row b { color: var(--miya-text-strong); font-size: .72rem; }
+.pv-real-map-place-row small { margin-top: .15rem; color: var(--miya-text-dim); font-size: .6rem; }
+.pv-real-map-place-row em { color: var(--earth-accent-light); font-size: .6rem; font-style: normal; }
+.pv-real-map-place-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #4fc3c9; box-shadow: 0 0 8px rgba(162, 245, 238, .75); }
+.pv-real-map-side-story { margin-top: .5rem; padding: .65rem .75rem; border-top: 1px solid rgba(120, 207, 209, .15); }
+.pv-real-map-side-story > strong { display: block; margin-bottom: .4rem; color: var(--earth-accent-light); font-size: .7rem; }
+.pv-real-map-side-story button { display: block; width: 100%; padding: .4rem 0; border: 0; background: transparent; color: var(--miya-text-muted); text-align: left; font: inherit; cursor: pointer; }
+.pv-real-map-side-story button:hover span { color: var(--earth-accent-light); }
+.pv-real-map-side-story span, .pv-real-map-side-story small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .pv-map-capability-grid { grid-template-columns: 1fr; }
+  .pv-map-capability-head { align-items: flex-start; flex-direction: column; gap: .2rem; }
+}
+.pv-real-map-side-story span { font-size: .66rem; }
+.pv-real-map-side-story small { margin-top: .1rem; color: var(--miya-text-dim); font-size: .58rem; }
+.pv-real-map-nearby-list { border-top: 1px solid rgba(120, 207, 209, .15); }
+.pv-real-map-nearby-list .pv-real-map-side-head { padding-top: .65rem; }
+.pv-real-map-nearby-row .pv-real-map-place-dot { background: #8d7cff; box-shadow: 0 0 8px rgba(182, 173, 255, .86); }
+
+@keyframes miya-map-marker-pulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.35); }
+}
+@keyframes miya-map-pin-pulse {
+  0%, 100% { box-shadow: 0 0 0 5px rgba(79, 195, 201, .2), 0 0 18px rgba(162, 245, 238, .75); }
+  50% { box-shadow: 0 0 0 10px rgba(162, 245, 238, .08), 0 0 28px rgba(162, 245, 238, .98); }
+}
+@keyframes miya-map-live-blink {
+  0%, 100% { opacity: .65; }
+  50% { opacity: 1; }
+}
+.pv-real-place-region-actions { display: flex; gap: .45rem; width: 100%; }
+.pv-place-drawer-mask { z-index: 940; backdrop-filter: blur(2px); }
+.pv-place-drawer { width: 470px; border-left-color: rgba(120, 207, 209, .34); background: linear-gradient(160deg, #101a22, #0a1119 68%); }
+.pv-place-drawer .pv-drawer-head-label, .pv-place-drawer .pv-drawer-section { color: var(--earth-accent-light); }
+.pv-place-head-actions { display: flex; align-items: center; gap: .45rem; }
+.pv-place-favorite { width: 30px; height: 30px; padding: 0; border: 1px solid rgba(255, 211, 125, .3); border-radius: 50%; background: rgba(255, 211, 125, .08); color: #ffd37d; font-size: 1rem; cursor: pointer; }
+.pv-place-loading { padding: 2rem 1rem; }
+.pv-place-drawer-body { gap: .65rem; }
+.pv-place-drawer-body > label { margin-top: .2rem; color: var(--miya-text-muted); font-size: .68rem; }
+.pv-place-drawer-body .pv-md-editor { width: 100%; box-sizing: border-box; padding: .55rem .6rem; border: 1px solid var(--miya-line); background: rgba(255, 255, 255, .05); color: var(--miya-text); outline: none; }
+.pv-place-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: .8rem; }
+.pv-place-subtitle { margin-top: .18rem; color: var(--miya-text-dim); font-size: .68rem; }
+.pv-place-category { flex: 0 0 auto; padding: .2rem .45rem; border: 1px solid rgba(120, 207, 209, .25); color: var(--earth-accent-light); font-size: .58rem; letter-spacing: .06em; }
+.pv-place-address { margin: 0; color: var(--miya-text-muted); font-size: .7rem; line-height: 1.55; }
+.pv-place-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .35rem; margin-top: .25rem; }
+.pv-place-stats span { padding: .55rem; border: 1px solid rgba(120, 207, 209, .14); background: rgba(120, 207, 209, .05); color: var(--miya-text-dim); font-size: .6rem; text-align: center; }
+.pv-place-stats b { display: block; margin-bottom: .1rem; color: var(--earth-accent-light); font-size: .86rem; }
+.pv-place-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+.pv-place-check { display: flex; align-items: center; gap: .45rem; }
+.pv-place-gallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .35rem; }
+.pv-place-gallery img { width: 100%; aspect-ratio: 1; object-fit: cover; border: 1px solid rgba(120, 207, 209, .18); }
+.pv-place-visits { position: relative; display: flex; flex-direction: column; gap: .2rem; }
+.pv-place-visit { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: .55rem; padding: .42rem 0; }
+.pv-place-visit-dot { width: 8px; height: 8px; margin-top: .25rem; border-radius: 50%; background: var(--earth-accent); box-shadow: 0 0 8px rgba(162, 245, 238, .6); }
+.pv-place-visit strong { color: var(--miya-text-strong); font-size: .68rem; }
+.pv-place-visit p { margin: .15rem 0 0; color: var(--miya-text-muted); font-size: .66rem; }
+.pv-place-visit small { color: var(--miya-text-dim); font-size: .56rem; }
+.pv-place-coordinates { display: flex; justify-content: space-between; gap: .5rem; margin-top: .5rem; padding: .5rem 0; border-top: 1px solid rgba(255, 255, 255, .06); color: var(--miya-text-dim); font: .58rem/1.4 'JetBrains Mono', monospace; }
+.pv-place-delete { align-self: flex-start; margin-top: .35rem; padding: .35rem .55rem; border: 1px solid rgba(255, 107, 107, .25); background: rgba(255, 107, 107, .05); color: #ffaaa2; font: inherit; font-size: .62rem; cursor: pointer; }
+@media (max-width: 700px) { .pv-real-map-toolbar { align-items: flex-start; flex-direction: column; } .pv-real-map-actions { width: 100%; justify-content: flex-start; } .pv-real-place-fields { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 700px) { .pv-real-map-shell { grid-template-columns: 1fr; } .pv-real-map-side { min-height: 0; max-height: 280px; border-left: 0; border-top: 1px solid rgba(120, 207, 209, .15); } }
+@media (max-width: 560px) { .pv-map-selection { align-items: stretch; flex-direction: column; } .pv-place-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); } .pv-place-coordinates { flex-direction: column; } .pv-map-live-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .35rem; } .pv-map-live-metrics span + span { padding-left: 0; border-left: 0; } }
+@media (max-width: 430px) { .pv-real-place-fields { grid-template-columns: 1fr; } .pv-real-place-fields input.wide { grid-column: auto; } }
 
 </style>

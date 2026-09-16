@@ -541,6 +541,81 @@ def test_currency_ledger_records_all_channels():
     assert abs(player["earth_currency"] - 66.5) < 0.01
 
 
+def test_real_places_keep_same_name_locations_separate_and_merge_nearby_visits():
+    """同名异地不能串档；明确 provider 或近邻坐标仍应累计为同一地点。"""
+    store, _ = _build_store()
+
+    east = store.record_real_place_visit(
+        "星光咖啡", latitude=31.2304, longitude=121.4737,
+        provider_id="node-1001", display_address="上海市黄浦区", source="map_search",
+    )
+    west = store.record_real_place_visit(
+        "星光咖啡", latitude=30.5728, longitude=104.0668,
+        provider_id="node-2002", display_address="成都市锦江区", source="map_search",
+    )
+    again = store.record_real_place_visit(
+        "星光咖啡", latitude=31.23041, longitude=121.47371,
+        provider_id="node-1001", display_address="上海市黄浦区", note="第二次来",
+    )
+
+    assert east["place_key"] != west["place_key"]
+    assert again["place_key"] == east["place_key"]
+    assert again["visit_count"] == 2
+    detail = store.get_real_place(east["place_key"])
+    assert detail is not None
+    assert len(detail["visits"]) == 2
+    assert detail["visits"][0]["note"] == "第二次来"
+
+
+def test_real_place_detail_edit_gallery_and_delete():
+    """地点档案支持标签/收藏编辑、多照片和结构化删除。"""
+    store, _ = _build_store()
+    place = store.record_real_place_visit(
+        "河畔公园", latitude=30.1, longitude=120.2,
+        display_address="测试市河畔路", provider_id="way-3003",
+    )
+
+    updated = store.update_real_place(place["place_key"], {
+        "subtitle": "傍晚散步的地方", "category": "park",
+        "tags": ["散步", "安静", "散步"], "favorite": True,
+    })
+    assert updated["subtitle"] == "傍晚散步的地方"
+    assert updated["tags"] == ["散步", "安静"]
+    assert updated["favorite"] is True
+    revisit = store.record_real_place_visit("河畔公园", place_key=place["place_key"], latitude=30.1, longitude=120.2)
+    assert revisit["category"] == "park"
+
+    store.update_real_place_image(place["place_key"], "/api/earth/images/a.jpg")
+    detail = store.update_real_place_image(place["place_key"], "/api/earth/images/b.jpg")
+    assert len(detail["photos"]) == 2
+    assert detail["image_path"].endswith("b.jpg")
+
+    assert store.delete_real_place(place["place_key"]) is True
+    assert store.get_real_place(place["place_key"]) is None
+    assert store.delete_real_place(place["place_key"]) is False
+
+
+def test_nearby_place_normalization_includes_distance_and_live_metadata():
+    """附近 POI 应带距离、类别和可核验的外部字段，且不写入地点档案。"""
+    from core.earth_online_store import EarthOnlineStore
+
+    result = EarthOnlineStore._normalize_nearby_result({
+        "type": "node", "id": 9988, "lat": 31.2305, "lon": 121.4738,
+        "tags": {
+            "name": "测试咖啡馆", "amenity": "cafe", "opening_hours": "08:00-20:00",
+            "phone": "12345", "website": "https://example.test", "addr:city": "上海市",
+        },
+    }, 31.2304, 121.4737)
+
+    assert result is not None
+    assert result["provider_id"] == "node-9988"
+    assert result["category"] == "cafe"
+    assert result["category_group"] == "amenity"
+    assert 0 < result["distance_m"] < 30
+    assert result["opening_hours"] == "08:00-20:00"
+    assert result["source"] == "openstreetmap_overpass"
+
+
 def test_energy_regen_applies_elapsed_hours():
     """体力按小时懒恢复；时间戳推进保留零头"""
     import sqlite3

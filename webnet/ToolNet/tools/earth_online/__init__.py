@@ -38,19 +38,20 @@ class EarthOnlineWorld(_EarthBase):
     def config(self) -> Dict[str, Any]:
         return {
             "name": "earth_world",
-            "description": "查看佳的单人地球online 世界地图、区域解锁条件与探索进度",
+            "description": "查看佳的现实世界地图与已记录地点",
             "parameters": {"type": "object", "properties": {}, "required": []},
         }
 
     async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
         try:
             store = self._store()
-            level = store.get_player().get("level", 1)
-            regions = store.list_world_regions()
-            lines = ["【地球online 世界地图】"]
-            for region in regions:
-                status = f"Lv.{region['level_req']} 解锁" if level < region["level_req"] else f"探索 {region['discovery_total']}/{region['event_total']}"
-                lines.append(f"{region['icon']} {region['name']} · {region['subtitle']} · {status}")
+            places = store.list_real_places(limit=20)
+            if not places:
+                return "现实地图里还没有记录地点～"
+            lines = ["【现实世界地图】"]
+            for place in places:
+                coords = f"({place['latitude']:.6f}, {place['longitude']:.6f})" if place.get("latitude") is not None and place.get("longitude") is not None else "暂无坐标"
+                lines.append(f"◇ {place['name']} · 到访 {place['visit_count']} 次 · {coords}")
             return "\n".join(lines)
         except Exception as e:
             return f"读取世界地图失败: {e}"
@@ -63,7 +64,7 @@ class EarthOnlineExplore(_EarthBase):
     def config(self) -> Dict[str, Any]:
         return {
             "name": "earth_explore",
-            "description": "探索一个世界地图区域，触发只属于佳的世界发现并领取弥娅币与经验奖励；区域可能绑定真实地理围栏，玩家在附近时应携带当前坐标 latitude/longitude 一起探索",
+            "description": "旧版虚拟区域探索已停用；请使用现实地图记录地点",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -76,29 +77,7 @@ class EarthOnlineExplore(_EarthBase):
         }
 
     async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
-        try:
-            latitude = args.get("latitude")
-            longitude = args.get("longitude")
-            result = self._store().explore_world_region(
-                str(args.get("region_key", "")),
-                latitude=float(latitude) if latitude is not None else None,
-                longitude=float(longitude) if longitude is not None else None,
-            )
-            if not result.get("success"):
-                return result.get("message", "探索失败")
-            discovery = result.get("discovery")
-            if not discovery:
-                return result.get("message", "这个区域已经探索完毕啦～")
-            geo = result.get("geofence") or {}
-            geo_note = f"\n(真实定位: 距离围栏中心 {geo.get('distance_m')} 米)" if geo.get("distance_m") is not None else ""
-            return (
-                f"在「{result['region']['name']}」发现【{discovery['title']}】\n"
-                f"{discovery['content']}\n"
-                f"奖励: +{discovery['reward_currency']} 弥娅币 · +{discovery['reward_exp']} 经验"
-                f"{geo_note}"
-            )
-        except Exception as e:
-            return f"探索区域失败: {e}"
+        return "虚拟区域探索已停用；请使用现实地图记录地点或查询实时现实上下文。"
 
 
 class EarthOnlineWorldStatus(_EarthBase):
@@ -163,7 +142,7 @@ class EarthOnlineRegionCommission(_EarthBase):
     def config(self) -> Dict[str, Any]:
         return {
             "name": "earth_region_commission",
-            "description": "为指定世界区域生成今天唯一的专属委托，自动带上当前天气和时间氛围",
+            "description": "旧版虚拟区域委托已停用",
             "parameters": {
                 "type": "object",
                 "properties": {"region_key": {"type": "string", "description": "区域 key，例如 miya_garden、night_sea"}},
@@ -172,15 +151,7 @@ class EarthOnlineRegionCommission(_EarthBase):
         }
 
     async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
-        try:
-            result = self._store().create_region_commission(str(args.get("region_key", "")))
-            if not result.get("success"):
-                return result.get("message", "生成委托失败")
-            quest = result["quest"]
-            return (f"区域委托{'已生成' if result.get('created') else '已经在任务板上'}: 「{quest['title']}」\n"
-                    f"{quest['description']}\n奖励 +{quest['reward_currency']} 弥娅币 · +{quest['reward_exp']} 经验")
-        except Exception as e:
-            return f"生成区域委托失败: {e}"
+        return "虚拟区域委托已停用；可以直接创建普通现实任务。"
 
 
 class EarthOnlineSummary(_EarthBase):
@@ -539,7 +510,7 @@ class EarthOnlineAddStory(_EarthBase):
     def config(self) -> Dict[str, Any]:
         return {
             "name": "earth_add_story",
-            "description": "记录一段人生剧情，把生活事件剧情化",
+            "description": "记录一段人生剧情，把生活事件剧情化；当佳说去过某个地方时，填写 location_name 可同步现实地图",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -549,6 +520,9 @@ class EarthOnlineAddStory(_EarthBase):
                     "character_id": {"type": "integer", "description": "关联角色ID（可选）"},
                     "item_id": {"type": "integer", "description": "关联物品ID（可选）"},
                     "image_path": {"type": "string", "description": "关联照片路径（可选）"},
+                    "location_name": {"type": "string", "description": "现实地点名称（可选，会自动地理编码）"},
+                    "latitude": {"type": "number", "description": "地点纬度（可选）"},
+                    "longitude": {"type": "number", "description": "地点经度（可选）"},
                     "fields": {"type": "object", "description": "自定义字段对象（可选）"},
                 },
                 "required": ["title"],
@@ -567,6 +541,13 @@ class EarthOnlineAddStory(_EarthBase):
                 image_path=args.get("image_path", ""),
                 fields=fields if isinstance(fields, dict) else None,
             )
+            if args.get("location_name"):
+                place = self._store().record_real_place_visit(
+                    str(args["location_name"]), latitude=args.get("latitude"), longitude=args.get("longitude"),
+                    note=str(args.get("content", ""))[:240] or str(args.get("title", "")), source="conversation",
+                )
+                if args.get("image_path") and place:
+                    self._store().update_real_place_image(place["place_key"], str(args["image_path"]))
             return f"剧情已记录: 「{s['title']}」"
         except Exception as e:
             return f"记录剧情失败: {e}"

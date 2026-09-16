@@ -518,6 +518,9 @@ class EarthOnlineTools:
         character_id: Optional[int] = None,
         item_id: Optional[int] = None,
         image_path: str = "",
+        location_name: str = "",
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
         fields: Optional[Dict[str, Any]] = None,
     ) -> str:
         """记录一段人生剧情 (character_id/item_id 关联图鉴与背包, image_path 绑定照片)"""
@@ -529,6 +532,13 @@ class EarthOnlineTools:
                 image_path=image_path,
                 fields=fields if isinstance(fields, dict) else None,
             )
+            if location_name:
+                place = self._get_store().record_real_place_visit(
+                    location_name, latitude=latitude, longitude=longitude,
+                    note=content[:240] if content else title, source="conversation",
+                )
+                if image_path and place:
+                    self._get_store().update_real_place_image(place["place_key"], image_path)
             return self._msg(("story", "added"), "剧情已记录: 「{title}」", title=s["title"])
         except Exception as e:
             return f"记录剧情失败: {e}"
@@ -618,42 +628,22 @@ class EarthOnlineTools:
     # ── 世界探索 ────────────────────────────────────
 
     async def earth_world(self) -> str:
-        """查看单人世界地图与区域探索进度"""
+        """查看现实世界地图中的已记录地点"""
         try:
-            regions = self._get_store().list_world_regions()
-            if not regions:
-                return "世界地图还是空白的呢～"
-            lines = ["【地球online 世界地图】"]
-            for r in regions:
-                lock = f"Lv.{r['level_req']} 解锁" if self._get_store().get_player().get("level", 1) < r["level_req"] else f"探索 {r['discovery_total']}/{r['event_total']}"
-                lines.append(f"{r['icon']} {r['name']} · {r['subtitle']} · {lock}")
+            places = self._get_store().list_real_places(limit=20)
+            if not places:
+                return "现实地图里还没有记录地点～"
+            lines = ["【现实世界地图】"]
+            for place in places:
+                coords = f"({place['latitude']:.6f}, {place['longitude']:.6f})" if place.get("latitude") is not None and place.get("longitude") is not None else "暂无坐标"
+                lines.append(f"◇ {place['name']} · 到访 {place['visit_count']} 次 · {coords}")
             return "\n".join(lines)
         except Exception as e:
             return f"读取世界地图失败: {e}"
 
     async def earth_explore(self, region_key: str, latitude: Optional[float] = None, longitude: Optional[float] = None) -> str:
-        """探索指定区域，发现一条只属于佳的世界事件 (区域绑定真实地理围栏时, 玩家在附近需带 latitude/longitude 才能探索)"""
-        try:
-            result = self._get_store().explore_world_region(
-                region_key,
-                latitude=float(latitude) if latitude is not None else None,
-                longitude=float(longitude) if longitude is not None else None,
-            )
-            if not result.get("success"):
-                return result.get("message", "探索失败")
-            discovery = result.get("discovery")
-            if not discovery:
-                return result.get("message", "这个区域已经探索完毕啦～")
-            geo = result.get("geofence") or {}
-            geo_note = f"\n(真实定位: 距离围栏中心 {geo.get('distance_m')} 米)" if geo.get("distance_m") is not None else ""
-            return (
-                f"在「{result['region']['name']}」发现【{discovery['title']}】\n"
-                f"{discovery['content']}\n"
-                f"奖励: +{discovery['reward_currency']} 弥娅币 · +{discovery['reward_exp']} 经验"
-                f"{geo_note}"
-            )
-        except Exception as e:
-            return f"探索区域失败: {e}"
+        """旧版虚拟区域探索已停用。"""
+        return "虚拟区域探索已停用；请使用现实地图记录地点或查询实时现实上下文。"
 
     async def earth_world_status(self) -> str:
         """查看当前地球online 的时间、天气与限时活动"""
@@ -692,16 +682,8 @@ class EarthOnlineTools:
             return f"刷新现实天气失败: {e}"
 
     async def earth_region_commission(self, region_key: str) -> str:
-        """为指定区域生成今天唯一的专属委托"""
-        try:
-            result = self._get_store().create_region_commission(region_key)
-            if not result.get("success"):
-                return result.get("message", "生成委托失败")
-            quest = result["quest"]
-            return (f"区域委托{'已生成' if result.get('created') else '已经在任务板上'}: 「{quest['title']}」\n"
-                    f"{quest['description']}\n奖励 +{quest['reward_currency']} 弥娅币 · +{quest['reward_exp']} 经验")
-        except Exception as e:
-            return f"生成区域委托失败: {e}"
+        """旧版虚拟区域委托已停用。"""
+        return "虚拟区域委托已停用；可以直接创建普通现实任务。"
 
     # ── 奖励发放 ────────────────────────────────────
 
@@ -2033,7 +2015,7 @@ EARTH_TOOLS_SCHEMA: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "earth_add_story",
-            "description": "记录一段人生剧情（生活事件剧情化，可关联角色/物品/照片）",
+            "description": "记录一段人生剧情（生活事件剧情化，可关联角色/物品/照片；当佳说去过某个地方时，同时填写 location_name，把地点自动记入现实地图）",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2043,6 +2025,9 @@ EARTH_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                     "character_id": {"type": "integer", "description": "关联角色ID（可选）"},
                     "item_id": {"type": "integer", "description": "关联物品ID（可选）"},
                     "image_path": {"type": "string", "description": "关联照片路径（可选）"},
+                    "location_name": {"type": "string", "description": "现实地点名称（可选，如杭州西湖；会自动地理编码并记入地图）"},
+                    "latitude": {"type": "number", "description": "地点纬度（可选）"},
+                    "longitude": {"type": "number", "description": "地点经度（可选）"},
                     "fields": {"type": "object", "description": "自定义字段对象（可选）"},
                 },
                 "required": ["title"],
@@ -2123,7 +2108,7 @@ EARTH_TOOLS_SCHEMA: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "earth_world",
-            "description": "查看佳的单人地球online 世界地图、区域解锁条件与探索进度",
+            "description": "查看佳的现实世界地图与已记录地点",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -2131,7 +2116,7 @@ EARTH_TOOLS_SCHEMA: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "earth_explore",
-            "description": "探索一个世界地图区域，触发一次只属于佳的随机发现并领取弥娅币与经验奖励；区域可能绑定真实地理围栏，玩家在附近时应携带当前坐标 latitude/longitude 一起探索",
+            "description": "旧版虚拟区域探索已停用；请使用现实地图记录地点",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2175,7 +2160,7 @@ EARTH_TOOLS_SCHEMA: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "earth_region_commission",
-            "description": "为指定世界区域生成今天唯一的专属委托，自动带上当前天气和时间氛围",
+            "description": "旧版虚拟区域委托已停用",
             "parameters": {
                 "type": "object",
                 "properties": {"region_key": {"type": "string", "description": "区域 key，例如 miya_garden、night_sea"}},
