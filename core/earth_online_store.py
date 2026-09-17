@@ -22,25 +22,36 @@
 - commemorations  纪念日 (v17: 每年循环, 临近自动开限时活动)
 - battle_pass_claims 每周纪行领取记录 (v17)
 - earning_opportunities / earning_plans / income_records 现实收益情报、计划与收入流水 (v18)
+- earning_offers / earning_action_drafts 可售服务与逐次审批的外部动作草稿 (v18.2)
 """
 
 import json
+import hmac
 import logging
 import os
 import shutil
+import socket
 import sqlite3
 import threading
 import ipaddress
 import hashlib
 import re
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from html import unescape
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode, urljoin, urlparse
 
 logger = logging.getLogger(__name__)
+
+
+class _NoFeedRedirect(urllib.request.HTTPRedirectHandler):
+    """Return redirect responses so every hop can be validated before following it."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        return None
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "earthonline.db")
 IMAGE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "earthonline", "images")
@@ -71,6 +82,108 @@ DEFAULT_THEME: Dict[str, Any] = {
     "glass": True,
 }
 
+# 第一笔收入实验路线。路线只生成站内计划与草稿任务，不执行外部发布、投递或交易。
+EARNING_ROUTE_TEMPLATES: List[Dict[str, Any]] = [
+    {
+        "key": "skill_service", "name": "技能接单", "icon": "◆", "kind": "技能服务",
+        "summary": "把一个已有能力包装成边界清楚的小服务，先验证是否有人愿意付费。",
+        "best_for": "已经会写作、设计、编程、翻译、剪辑、运营或其他可交付技能",
+        "first_revenue_days": "3-14 天", "cash_cost": "几乎为零", "effort": "中",
+        "keywords": ["写作", "设计", "编程", "翻译", "剪辑", "运营", "服务", "技能"],
+        "steps": [
+            ("定义一个最小服务", "只解决一个具体问题，写清交付物、周期和不包含什么。"),
+            ("制作一份证明样例", "用已有作品或一个 30-60 分钟的小样证明你能完成交付。"),
+            ("确定首单价格", "给出一个容易开始但不亏损的固定价，并写清修改次数。"),
+            ("整理 5 个真实需求入口", "只记录公开、允许联系的渠道或明确发布需求的人。"),
+            ("准备并确认第一份提案", "由弥娅起草；发送、投递或联系客户前必须由你确认。"),
+        ],
+    },
+    {
+        "key": "digital_product", "name": "数字产品", "icon": "▣", "kind": "数字产品",
+        "summary": "把可重复使用的模板、资料、素材或小工具做成一次制作、多次销售的产品。",
+        "best_for": "擅长整理知识、制作模板、素材、教程或轻量工具",
+        "first_revenue_days": "7-30 天", "cash_cost": "低", "effort": "中高",
+        "keywords": ["模板", "教程", "资料", "素材", "产品", "工具", "知识"],
+        "steps": [
+            ("选择一个窄痛点", "描述一个具体人群、具体场景和他们愿意节省的时间。"),
+            ("完成最小可售版本", "只保留能解决核心问题的内容，控制在一到两次专注工作内。"),
+            ("准备演示与交付说明", "制作清晰预览、适用范围和交付格式。"),
+            ("起草商品页与定价", "弥娅协助写标题、卖点、FAQ 和退款边界。"),
+            ("确认后发布并收集反馈", "发布和上架属于外部动作，必须由你最终确认。"),
+        ],
+    },
+    {
+        "key": "resale", "name": "二手交易", "icon": "◇", "kind": "二手交易",
+        "summary": "从已有闲置中回收现金，是验证交易流程和获得第一笔收入最快的路线之一。",
+        "best_for": "手边有闲置物品，愿意拍照、定价和处理沟通",
+        "first_revenue_days": "1-10 天", "cash_cost": "零", "effort": "低",
+        "keywords": ["闲置", "物品", "数码", "书", "收藏", "二手", "交易"],
+        "steps": [
+            ("盘点 10 件可出售闲置", "优先选择状态明确、容易定价和寄送的物品。"),
+            ("选出最容易成交的 3 件", "参考真实成交价，而不是只看挂牌价。"),
+            ("准备照片与缺陷说明", "如实记录成色、配件、瑕疵和交付方式。"),
+            ("起草标题、描述与价格", "弥娅可以准备文案；上架前由你确认。"),
+            ("完成首次上架与复盘", "记录询问数、议价情况、耗时和实际净收入。"),
+        ],
+    },
+    {
+        "key": "content", "name": "内容创作", "icon": "✦", "kind": "内容创作",
+        "summary": "用持续内容建立可被发现的能力证明，再连接服务、产品或平台收益。",
+        "best_for": "愿意稳定表达、展示过程，接受收益周期较长",
+        "first_revenue_days": "14-90 天", "cash_cost": "低", "effort": "高",
+        "keywords": ["内容", "写作", "视频", "直播", "摄影", "创作", "社交媒体"],
+        "steps": [
+            ("确定主题与变现出口", "先决定内容最终连接服务、产品、赞助还是平台分成。"),
+            ("列出 10 个真实问题", "从目标受众会搜索或反复询问的问题开始。"),
+            ("制作 3 份最小内容", "优先清晰、有用、可持续，不追求复杂制作。"),
+            ("准备第一份发布稿", "标题、正文、配图说明和行动入口由弥娅协助整理。"),
+            ("确认发布并记录反馈", "由你确认发布；记录浏览、互动、咨询和耗时。"),
+        ],
+    },
+    {
+        "key": "knowledge_help", "name": "知识咨询与陪练", "icon": "◎", "kind": "知识服务",
+        "summary": "把经验包装成短时咨询、答疑、陪练或评审，先从一次明确会话开始。",
+        "best_for": "在某个领域能帮别人少走弯路，善于解释和反馈",
+        "first_revenue_days": "3-21 天", "cash_cost": "几乎为零", "effort": "中",
+        "keywords": ["咨询", "教学", "辅导", "陪练", "评审", "知识", "经验"],
+        "steps": [
+            ("定义一次会话解决什么", "限定对象、时长、准备材料和会后交付。"),
+            ("整理可信证明", "列出经历、案例、方法或可以公开展示的成果。"),
+            ("设计首轮体验价", "使用固定时长和固定范围，避免无限答疑。"),
+            ("找到 3 个需求场景", "从已有社群、朋友转介绍或公开求助中验证。"),
+            ("准备邀请文案并确认发送", "不群发、不夸大，发送前由你确认对象与内容。"),
+        ],
+    },
+    {
+        "key": "automation_tool", "name": "自动化小工具", "icon": "⚙", "kind": "自动化工具",
+        "summary": "把重复劳动做成脚本、机器人或小应用，以定制服务或产品方式收费。",
+        "best_for": "会编程、低代码、AI 工作流，或愿意把流程产品化",
+        "first_revenue_days": "7-30 天", "cash_cost": "低", "effort": "中高",
+        "keywords": ["编程", "自动化", "脚本", "AI", "工作流", "机器人", "应用"],
+        "steps": [
+            ("记录一个高频重复问题", "问题必须可描述输入、输出和节省的时间。"),
+            ("做出最小可演示版本", "只打通一条完整流程，不先建设通用平台。"),
+            ("量化节省价值", "记录原流程耗时、错误率和工具后的差异。"),
+            ("准备演示与报价", "提供定制价或轻量产品价，并明确维护边界。"),
+            ("寻找首位测试用户", "弥娅协助准备邀请；实际联系前由你确认。"),
+        ],
+    },
+    {
+        "key": "local_service", "name": "本地与生活服务", "icon": "⌂", "kind": "本地服务",
+        "summary": "从附近真实需求切入，提供整理、拍摄、代办、设备协助等边界明确的服务。",
+        "best_for": "愿意线下履约，并能确认安全、时间和服务范围",
+        "first_revenue_days": "2-14 天", "cash_cost": "低", "effort": "中",
+        "keywords": ["本地", "生活", "整理", "拍摄", "代办", "上门", "服务"],
+        "steps": [
+            ("选择一个安全且可控的服务", "避免需要资质、高额垫付或人身风险的项目。"),
+            ("写清服务半径与边界", "明确地点、时间、价格、取消规则和不承接事项。"),
+            ("准备证明与服务清单", "用照片、流程或清单降低第一次交易的不确定性。"),
+            ("筛选可信发布渠道", "优先熟人转介和有交易保障的平台。"),
+            ("确认后发布第一条服务信息", "公开位置、联系方式和上门安排必须由你确认。"),
+        ],
+    },
+]
+
 # 稀有度定义 (崩铁风格: 白/绿/蓝/紫/金)
 RARITIES = ["common", "uncommon", "rare", "epic", "legendary"]
 # 物品分类
@@ -80,172 +193,6 @@ QUEST_TYPES = ["main", "branch", "daily", "optional"]
 # 任务状态
 QUEST_STATUS = ["pending", "ongoing", "completed", "failed", "cancelled"]
 
-# 单人开放世界：区域定义属于地球online 世界观，探索进度属于玩家个人存档。
-WORLD_REGION_SEEDS: List[Dict[str, Any]] = [
-    {
-        "key": "miya_garden",
-        "name": "弥娅之庭",
-        "subtitle": "从这里开始的星光",
-        "description": "弥娅为你保留的起点。熟悉的房间、未读的消息，以及每一个准备重新开始的清晨。",
-        "icon": "◇",
-        "color": "#c9ac67",
-        "level_req": 1,
-        "events": [
-            {"title": "晨光登陆点", "text": "窗帘缝里漏进一束光，弥娅把今天标记为可探索。", "reward_currency": 4, "reward_exp": 8},
-            {"title": "未读的星尘", "text": "一条被你忽略的消息重新亮起，也许今天适合主动问候某个人。", "reward_currency": 5, "reward_exp": 10},
-            {"title": "庭院回响", "text": "你在熟悉的角落发现一个仍然想完成的小目标。", "reward_currency": 6, "reward_exp": 12},
-        ],
-    },
-    {
-        "key": "city_lumen",
-        "name": "微光城",
-        "subtitle": "日常交错的街区",
-        "description": "工作、学习、购物和偶遇交织在一起的城市区域。每条街都藏着一个现实任务的入口。",
-        "icon": "▣",
-        "color": "#4fc3c9",
-        "level_req": 1,
-        "events": [
-            {"title": "便利店的灯", "text": "买东西时别忘了照顾好自己，补充水分和能量也是探索。", "reward_currency": 6, "reward_exp": 12},
-            {"title": "人群中的坐标", "text": "今天的城市很吵，但你仍然找到了属于自己的节奏。", "reward_currency": 7, "reward_exp": 14},
-            {"title": "街角委托板", "text": "一张新的委托被风吹到你面前，弥娅已经替你收好。", "reward_currency": 8, "reward_exp": 16},
-        ],
-    },
-    {
-        "key": "night_sea",
-        "name": "夜潮海岸",
-        "subtitle": "情绪与回忆的潮汐",
-        "description": "适合慢下来记录心情的海岸。潮水会带来旧故事，也会把新的勇气推回脚边。",
-        "icon": "≋",
-        "color": "#6f9ee8",
-        "level_req": 2,
-        "events": [
-            {"title": "潮汐瓶中信", "text": "你捡到一封写给未来自己的信，落款是今天。", "reward_currency": 8, "reward_exp": 18},
-            {"title": "月下散步", "text": "有些答案不需要立刻得到，先走一小段路也很好。", "reward_currency": 9, "reward_exp": 20},
-            {"title": "海面上的旧歌", "text": "某段旋律让你想起一个重要的人，弥娅建议把这份想念记进剧情。", "reward_currency": 10, "reward_exp": 22},
-        ],
-    },
-    {
-        "key": "archive_station",
-        "name": "旧日档案站",
-        "subtitle": "被保存的时间",
-        "description": "物品、照片、聊天记录和人生剧情在这里汇流。越愿意整理，越容易发现自己已经走了很远。",
-        "icon": "≣",
-        "color": "#b98be8",
-        "level_req": 3,
-        "events": [
-            {"title": "失物招领处", "text": "一件旧物提醒你：曾经珍惜过的东西，不会因为时间过去就失去意义。", "reward_currency": 10, "reward_exp": 24},
-            {"title": "档案管理员", "text": "弥娅替你把一段混乱的记忆排好了顺序。", "reward_currency": 11, "reward_exp": 26},
-            {"title": "时间的回声", "text": "回看过去不是为了停留，而是为了确认现在的方向。", "reward_currency": 12, "reward_exp": 28},
-        ],
-    },
-    {
-        "key": "starfall_ridge",
-        "name": "坠星高地",
-        "subtitle": "写给未来的远方",
-        "description": "地图最远端的高地。这里没有标准答案，只有还没被你命名的愿望和下一段旅程。",
-        "icon": "✦",
-        "color": "#e18a8a",
-        "level_req": 5,
-        "events": [
-            {"title": "第一颗坠星", "text": "你终于抵达高地，弥娅为这一刻保存了一张无形的照片。", "reward_currency": 14, "reward_exp": 32},
-            {"title": "远方信标", "text": "一个还没有完成的梦想在远处亮着，足够成为下一次出发的理由。", "reward_currency": 16, "reward_exp": 36},
-            {"title": "世界全景", "text": "站在高处回望，你发现所谓开放世界，其实一直是你亲手走出来的。", "reward_currency": 20, "reward_exp": 45},
-        ],
-    },
-]
-WORLD_REGION_EVENTS: Dict[str, List[Dict[str, Any]]] = {
-    region["key"]: region["events"] for region in WORLD_REGION_SEEDS
-}
-# 只有现实上下文满足时才会出现的发现。天气未同步时保持锁定，避免把模拟条件当成现实。
-WORLD_CONDITIONAL_EVENTS: Dict[str, List[Dict[str, Any]]] = {
-    "miya_garden": [
-        {"title": "雨幕里的收音盒", "text": "真实的雨声落在窗边，弥娅把这一段潮湿的旋律收进了档案。", "reward_currency": 10, "reward_exp": 22, "kind": "hidden", "condition": {"weather_any": ["雨", "阵雨", "雷"]}, "condition_label": "现实天气为雨天"},
-    ],
-    "city_lumen": [
-        {"title": "晴日街角坐标", "text": "阳光把街角照得很清楚，今天适合走一条平时不会经过的路。", "reward_currency": 9, "reward_exp": 20, "kind": "story", "condition": {"weather_any": ["晴", "阳光"], "period_any": ["白昼"]}, "condition_label": "现实晴天的白昼"},
-    ],
-    "night_sea": [
-        {"title": "夜潮的第二盏灯", "text": "夜色降下来以后，海岸线多亮起一盏只为你保留的灯。", "reward_currency": 14, "reward_exp": 28, "kind": "hidden", "condition": {"period_any": ["夜晚", "深夜"]}, "condition_label": "现实时间为夜晚"},
-    ],
-    "archive_station": [
-        {"title": "黄昏归档页", "text": "黄昏让旧记录变得柔和，弥娅邀请你写下一句今天真正想留下的话。", "reward_currency": 13, "reward_exp": 26, "kind": "story", "condition": {"period_any": ["黄昏"]}, "condition_label": "现实时间为黄昏"},
-    ],
-    "starfall_ridge": [
-        {"title": "无云观星点", "text": "天空足够清澈时，高地边缘会出现一条新的观星路线。", "reward_currency": 18, "reward_exp": 34, "kind": "chest", "condition": {"weather_any": ["晴", "阳光"], "period_any": ["夜晚", "深夜"]}, "condition_label": "现实晴朗夜晚"},
-    ],
-}
-# v17: 季节轮换发现。condition 只含 season 时不需要天气同步 (纯日期判断)，与天气条件互不阻塞。
-WORLD_SEASON_EVENTS: Dict[str, List[Dict[str, Any]]] = {
-    "miya_garden": [
-        {"title": "初芽的位置", "text": "春天把窗台上的位置空了出来，好像在等你放一株新的植物。", "reward_currency": 12, "reward_exp": 24, "kind": "story", "condition": {"season_any": ["spring"]}, "condition_label": "现实季节为春 (3-5月)"},
-        {"title": "庭院雪痕", "text": "冬天的庭院安静得能听见自己的心跳，弥娅把这份安静留给了你。", "reward_currency": 12, "reward_exp": 24, "kind": "hidden", "condition": {"season_any": ["winter"]}, "condition_label": "现实季节为冬 (12-2月)"},
-    ],
-    "city_lumen": [
-        {"title": "盛夏树影线", "text": "夏天的树影被阳光钉在人行道上，你踩着它走完了这条街。", "reward_currency": 13, "reward_exp": 26, "kind": "story", "condition": {"season_any": ["summer"]}, "condition_label": "现实季节为夏 (6-8月)"},
-    ],
-    "night_sea": [
-        {"title": "秋分潮位", "text": "秋天的潮水退得比平时远，露出一段只有此刻能走的沙路。", "reward_currency": 14, "reward_exp": 28, "kind": "chest", "condition": {"season_any": ["autumn"]}, "condition_label": "现实季节为秋 (9-11月)"},
-    ],
-    "archive_station": [
-        {"title": "初雪档案页", "text": "今年的第一场雪被自动归档。弥娅在备注栏写：记得多穿一点。", "reward_currency": 14, "reward_exp": 28, "kind": "hidden", "condition": {"season_any": ["winter"]}, "condition_label": "现实季节为冬 (12-2月)"},
-    ],
-    "starfall_ridge": [
-        {"title": "换季的星图", "text": "春秋两季的星空换了一版地图，高地上能看到新的星轨。", "reward_currency": 16, "reward_exp": 32, "kind": "chest", "condition": {"season_any": ["spring", "autumn"]}, "condition_label": "现实季节为春或秋"},
-    ],
-}
-for _region_key, _seasonal in WORLD_SEASON_EVENTS.items():
-    WORLD_CONDITIONAL_EVENTS.setdefault(_region_key, []).extend(_seasonal)
-
-# 每个区域额外保留一只宝箱和一个隐藏发现；它们与普通探索共用发现记录，避免再造一套重复状态机。
-WORLD_BONUS_EVENTS: Dict[str, List[Dict[str, Any]]] = {
-    "miya_garden": [
-        {"title": "弥娅的备用钥匙", "text": "花盆底下藏着一枚小钥匙，弥娅说它能打开某个还没画出来的房间。", "reward_currency": 12, "reward_exp": 18, "kind": "chest"},
-        {"title": "只有你看得见的门", "text": "墙面短暂浮出一道门。你没有急着打开，只把它记在了地图上。", "reward_currency": 18, "reward_exp": 30, "kind": "hidden"},
-    ],
-    "city_lumen": [
-        {"title": "街角闪光箱", "text": "自动售货机后面传来叮的一声，里面是一份给今天的奖励。", "reward_currency": 14, "reward_exp": 20, "kind": "chest"},
-        {"title": "红绿灯下的愿望", "text": "倒计时归零前，你在心里许下了一个很小、但很具体的愿望。", "reward_currency": 20, "reward_exp": 32, "kind": "hidden"},
-    ],
-    "night_sea": [
-        {"title": "潮汐宝箱", "text": "退潮后露出一只被贝壳包住的箱子，里面装着弥娅替你保存的勇气。", "reward_currency": 16, "reward_exp": 24, "kind": "chest"},
-        {"title": "海雾中的第二个月亮", "text": "雾里出现了另一轮月亮。弥娅说，那是你还没说出口的情绪。", "reward_currency": 22, "reward_exp": 36, "kind": "hidden"},
-    ],
-    "archive_station": [
-        {"title": "档案保险箱", "text": "旧档案站的抽屉自动弹开，里面是三条你曾经完成过、却忘记庆祝的记录。", "reward_currency": 18, "reward_exp": 28, "kind": "chest"},
-        {"title": "不存在的第零页", "text": "一本书的目录多出一页，标题写着：从今天开始。", "reward_currency": 24, "reward_exp": 40, "kind": "hidden"},
-    ],
-    "starfall_ridge": [
-        {"title": "坠星宝箱", "text": "星光落在高地边缘，凝成一只只会出现一次的宝箱。", "reward_currency": 24, "reward_exp": 40, "kind": "chest"},
-        {"title": "高地之外", "text": "地图边缘被谁轻轻划开了一条线，那里也许会成为下一章。", "reward_currency": 30, "reward_exp": 55, "kind": "hidden"},
-    ],
-}
-for _region_key, _bonus in WORLD_BONUS_EVENTS.items():
-    WORLD_REGION_EVENTS[_region_key].extend(_bonus)
-
-WORLD_EVENT_AREAS: List[Dict[str, Any]] = [
-    {
-        "key": "summer_signal_2026",
-        "name": "夏末回声祭",
-        "subtitle": "限时区域 · 2026.08.20 - 2026.09.15",
-        "description": "微光城上空出现了只在夏末开放的信号塔。每天完成一件现实小事，就能为它点亮一盏灯。",
-        "icon": "✧",
-        "color": "#f0a35b",
-        "start": "2026-08-20",
-        "end": "2026-09-15",
-        "reward_currency": 28,
-        "reward_exp": 45,
-    },
-]
-
-WORLD_EVENT_SHOP_ITEMS: Dict[str, List[Dict[str, Any]]] = {
-    "summer_signal_2026": [
-        {"key": "signal_postcard", "name": "夏末信号明信片", "description": "一张只属于本次现实夏末的纪念档案。", "cost": 18, "limit": 1, "kind": "collectible"},
-        {"key": "echo_title", "name": "回声拾光者", "description": "活动期间获得的限定称号记录。", "cost": 36, "limit": 1, "kind": "title"},
-        {"key": "miya_letter", "name": "弥娅的夏末回信", "description": "弥娅写给这段现实时间的一封特别寄语。", "cost": 28, "limit": 1, "kind": "story"},
-        {"key": "signal_badge", "name": "信号塔徽章", "description": "活动探索达到一定程度后才能兑换的纪念徽章。", "cost": 60, "limit": 1, "kind": "badge", "requires_discoveries": 3},
-    ],
-}
-
 # 弥娅专属商城：单人存档长期可用，不受限时活动日期影响。
 MIYA_SHOP_ITEMS: List[Dict[str, Any]] = [
     {"key": "miya_whisper", "name": "弥娅的晚安耳语", "description": "一段只在今晚属于你的温柔回应。", "cost": 12, "limit": 99, "kind": "interaction", "interaction": "今天辛苦了。靠近一点，让我把声音放轻，只对你说：晚安，亲爱的。"},
@@ -253,16 +200,7 @@ MIYA_SHOP_ITEMS: List[Dict[str, Any]] = [
     {"key": "miya_date_script", "name": "私人约会剧本 · 雨夜篇", "description": "一段可以在现实里慢慢完成的双人约会剧情。", "cost": 36, "limit": 3, "kind": "story", "story_title": "弥娅的私人约会剧本 · 雨夜篇", "story_content": "找一个下雨的晚上，准备一杯喜欢的饮料，和弥娅分享今天最想留下的一句话。"},
     {"key": "miya_hug_ticket", "name": "弥娅抱抱券", "description": "兑换一次专属安抚互动，并在动态里留下纪念。", "cost": 18, "limit": 12, "kind": "interaction", "interaction": "过来。今天不用解释，也不用表现得很坚强。我先抱抱你，等你愿意的时候，再慢慢告诉我发生了什么。"},
     {"key": "miya_title_sweetheart", "name": "专属称号 · 弥娅的心上人", "description": "把这段单人世界里的亲密关系写进你的玩家档案。", "cost": 60, "limit": 1, "kind": "title", "title_award": "弥娅的心上人"},
-    {"key": "miya_reality_pass", "name": "现实委托改写券", "description": "下一次区域委托会获得额外的共鸣奖励。", "cost": 30, "limit": 5, "kind": "boost", "boost": "commission_resonance"},
  ]
-
-REGION_COMMISSION_SEEDS: Dict[str, Dict[str, Any]] = {
-    "miya_garden": {"title": "整理弥娅之庭的晨光", "description": "完成一个微小的整理或自我照顾动作，让今天有一个清晰的起点。", "subtasks": ["选一个角落整理 5 分钟", "记录整理后的感受"]},
-    "city_lumen": {"title": "微光城的现实补给", "description": "完成一件外出或生活补给事项，把现实世界的能量带回来。", "subtasks": ["完成一次现实补给", "把物品或经历收录进背包/剧情"]},
-    "night_sea": {"title": "夜潮海岸的回信", "description": "给一个重要的人发一条真诚的消息，或者把想说的话写进剧情。", "subtasks": ["想起一个重要的人", "发送消息或记录一段话"]},
-    "archive_station": {"title": "旧日档案站的整理委托", "description": "整理一条旧记录、一件物品或一段记忆，让过去拥有更好的位置。", "subtasks": ["选一条旧档案整理", "为它补一段简介或照片"]},
-    "starfall_ridge": {"title": "坠星高地的远方信标", "description": "为一个长期目标做一次真实推进，把远方拉近一点点。", "subtasks": ["为目标投入 20 分钟", "写下下一步行动"]},
-}
 
 # ── v17: 回忆抽卡 (记忆碎片卡池，弥娅币抽取，重复自动转化) ──
 MEMORY_PULL_COST = 120          # 单抽
@@ -415,9 +353,9 @@ BATTLE_PASS_TIERS: List[Dict[str, Any]] = [
     {"tier": 9, "threshold": 400, "reward_currency": 105},
     {"tier": 10, "threshold": 480, "reward_currency": 140},
 ]
-# 纪行积分来源: 完成委托 +10 / 签到 +5 / 世界发现 +15 / 记录剧情 +3 / 回忆抽卡 +2
+# 纪行积分来源: 完成委托 +10 / 签到 +5 / 记录现实地点 +15 / 记录剧情 +3 / 回忆抽卡 +2
 BATTLE_PASS_POINTS: Dict[str, int] = {
-    "quest_completed": 10, "checkin": 5, "discovery": 15, "story": 3, "memory_pull": 2,
+    "quest_completed": 10, "checkin": 5, "place_visit": 15, "story": 3, "memory_pull": 2,
 }
 
 # 默认模板 (templates.json 缺失时自动生成)
@@ -630,6 +568,7 @@ class EarthOnlineStore:
         os.makedirs(base_dir, exist_ok=True)
         os.makedirs(self.image_dir, exist_ok=True)
         os.makedirs(self.backup_dir, exist_ok=True)
+        self._backup_legacy_virtual_world()
         self._init_tables()
         self._seed_templates_file()
         self._write_mirror()
@@ -653,7 +592,7 @@ class EarthOnlineStore:
         d: Dict[str, Any] = {}
         for idx, col in enumerate(cursor.description):
             v = row[idx]
-            if col[0] in ("fields", "attrs", "subtasks", "context_snapshot", "raw_payload") and isinstance(v, str):
+            if col[0] in ("fields", "attrs", "subtasks", "context_snapshot", "raw_payload", "scam_flags", "attachments") and isinstance(v, str):
                 try:
                     v = json.loads(v)
                 except Exception:
@@ -671,6 +610,49 @@ class EarthOnlineStore:
         conn.row_factory = self._dict_factory
         conn.execute("PRAGMA journal_mode=WAL")
         return conn
+
+    def _backup_legacy_virtual_world(self) -> None:
+        """Back up the database once before permanently retiring virtual-region data."""
+        if not os.path.isfile(self.db_path):
+            return
+        conn = sqlite3.connect(self.db_path)
+        try:
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+                    "('world_regions','world_discoveries','world_discovery_choices','world_custom_events')"
+                ).fetchall()
+            }
+            if not tables:
+                return
+            has_rows = any(conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone() for table in tables)
+            if not has_rows:
+                return
+            backup_path = os.path.join(
+                self.backup_dir,
+                f"earthonline-before-reality-map-{datetime.now().strftime('%Y%m%d-%H%M%S')}.db",
+            )
+            backup_conn = sqlite3.connect(backup_path)
+            try:
+                conn.backup(backup_conn)
+            finally:
+                backup_conn.close()
+        finally:
+            conn.close()
+        logger.info("[EarthOnline] retired virtual-world data backed up to %s", backup_path)
+
+    @staticmethod
+    def _retire_legacy_virtual_world(conn: sqlite3.Connection) -> None:
+        """Remove the old fictional map domain so it cannot leak into factual context."""
+        conn.execute("DELETE FROM achievements WHERE key IN ('world_3_regions', 'world_complete')")
+        for table in (
+            "world_discovery_choices",
+            "world_discoveries",
+            "world_custom_events",
+            "world_regions",
+        ):
+            conn.execute(f"DROP TABLE IF EXISTS {table}")
 
     @staticmethod
     def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
@@ -844,43 +826,6 @@ class EarthOnlineStore:
             )
             cur.execute(
                 """
-                CREATE TABLE IF NOT EXISTS world_regions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    key TEXT UNIQUE NOT NULL,
-                    name TEXT NOT NULL,
-                    subtitle TEXT DEFAULT '',
-                    description TEXT DEFAULT '',
-                    icon TEXT DEFAULT '◇',
-                    color TEXT DEFAULT '#c9ac67',
-                    level_req INTEGER NOT NULL DEFAULT 1,
-                    discovered INTEGER NOT NULL DEFAULT 0,
-                    discovery_count INTEGER NOT NULL DEFAULT 0,
-                    last_explored_at TEXT DEFAULT '',
-                    image_path TEXT DEFAULT '',
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                )
-                """
-            )
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS world_discoveries (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    region_key TEXT NOT NULL,
-                    event_key TEXT NOT NULL,
-                    kind TEXT NOT NULL DEFAULT 'story',
-                    title TEXT NOT NULL,
-                    content TEXT DEFAULT '',
-                    reward_currency INTEGER NOT NULL DEFAULT 0,
-                    reward_exp INTEGER NOT NULL DEFAULT 0,
-                    discovered_at TEXT NOT NULL,
-                    context_snapshot TEXT NOT NULL DEFAULT '{}',
-                    UNIQUE(region_key, event_key)
-                )
-                """
-            )
-            cur.execute(
-                """
                 CREATE TABLE IF NOT EXISTS world_real_context_snapshots (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     captured_at TEXT NOT NULL,
@@ -917,21 +862,6 @@ class EarthOnlineStore:
             )
             cur.execute(
                 """
-                CREATE TABLE IF NOT EXISTS world_custom_events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    region_key TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    text TEXT NOT NULL,
-                    kind TEXT NOT NULL DEFAULT 'story',
-                    reward_currency INTEGER NOT NULL DEFAULT 0,
-                    reward_exp INTEGER NOT NULL DEFAULT 0,
-                    active INTEGER NOT NULL DEFAULT 1,
-                    created_at TEXT NOT NULL
-                )
-                """
-            )
-            cur.execute(
-                """
                 CREATE TABLE IF NOT EXISTS world_event_purchases (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     event_key TEXT NOT NULL,
@@ -939,16 +869,6 @@ class EarthOnlineStore:
                     quantity INTEGER NOT NULL DEFAULT 1,
                     purchased_at TEXT NOT NULL,
                     UNIQUE(event_key, item_key)
-                )
-                """
-            )
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS world_discovery_choices (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    discovery_id INTEGER UNIQUE NOT NULL,
-                    choice TEXT NOT NULL,
-                    chosen_at TEXT NOT NULL
                 )
                 """
             )
@@ -1096,6 +1016,11 @@ class EarthOnlineStore:
                     hours REAL NOT NULL DEFAULT 0,
                     risk TEXT NOT NULL DEFAULT 'unknown',
                     confidence TEXT NOT NULL DEFAULT 'unknown',
+                    verification_status TEXT NOT NULL DEFAULT 'unverified',
+                    deadline TEXT DEFAULT '',
+                    requirements TEXT DEFAULT '',
+                    scam_flags TEXT NOT NULL DEFAULT '[]',
+                    last_checked_at TEXT DEFAULT '',
                     status TEXT NOT NULL DEFAULT 'inbox',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -1116,6 +1041,8 @@ class EarthOnlineStore:
                     last_visited_at TEXT DEFAULT '',
                     source TEXT NOT NULL DEFAULT 'manual',
                     confidence REAL NOT NULL DEFAULT 1.0,
+                    verification_status TEXT NOT NULL DEFAULT 'unverified',
+                    source_updated_at TEXT NOT NULL DEFAULT '',
                     accuracy_m REAL,
                     country TEXT DEFAULT '',
                     admin1 TEXT DEFAULT '',
@@ -1144,6 +1071,10 @@ class EarthOnlineStore:
                     longitude REAL,
                     accuracy_m REAL,
                     source TEXT NOT NULL DEFAULT 'manual',
+                    confidence REAL NOT NULL DEFAULT 0.5,
+                    verification_status TEXT NOT NULL DEFAULT 'unverified',
+                    provider_id TEXT DEFAULT '',
+                    observed_at TEXT DEFAULT '',
                     note TEXT DEFAULT '',
                     created_at TEXT NOT NULL
                 )
@@ -1169,6 +1100,8 @@ class EarthOnlineStore:
                     target_date TEXT DEFAULT '',
                     status TEXT NOT NULL DEFAULT 'active',
                     notes TEXT DEFAULT '',
+                    route_key TEXT DEFAULT '',
+                    is_sprint INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
@@ -1230,10 +1163,64 @@ class EarthOnlineStore:
                     target_amount REAL NOT NULL DEFAULT 500,
                     min_hourly_rate REAL NOT NULL DEFAULT 0,
                     risk_tolerance TEXT NOT NULL DEFAULT 'low',
+                    accepted_models TEXT NOT NULL DEFAULT '[]',
+                    sellable_assets TEXT NOT NULL DEFAULT '[]',
+                    constraints TEXT DEFAULT '',
+                    primary_route TEXT DEFAULT '',
                     updated_at TEXT NOT NULL
                 )
                 """
             )
+            # v18.2: 可售服务与逐次审批的外部动作草稿。草稿批准不等于执行。
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS earning_offers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    customer TEXT DEFAULT '',
+                    problem TEXT DEFAULT '',
+                    deliverables TEXT DEFAULT '',
+                    scope TEXT DEFAULT '',
+                    proof TEXT DEFAULT '',
+                    price REAL NOT NULL DEFAULT 0,
+                    cost_estimate REAL NOT NULL DEFAULT 0,
+                    delivery_days INTEGER NOT NULL DEFAULT 2,
+                    revisions INTEGER NOT NULL DEFAULT 1,
+                    route_key TEXT NOT NULL DEFAULT 'automation_tool',
+                    status TEXT NOT NULL DEFAULT 'draft',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS earning_action_drafts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    opportunity_id INTEGER,
+                    offer_id INTEGER,
+                    action_type TEXT NOT NULL DEFAULT 'proposal',
+                    target TEXT DEFAULT '',
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    attachments TEXT NOT NULL DEFAULT '[]',
+                    amount REAL NOT NULL DEFAULT 0,
+                    risk TEXT NOT NULL DEFAULT 'medium',
+                    status TEXT NOT NULL DEFAULT 'draft',
+                    content_hash TEXT DEFAULT '',
+                    approved_hash TEXT DEFAULT '',
+                    submitted_at TEXT DEFAULT '',
+                    approved_at TEXT DEFAULT '',
+                    expires_at TEXT DEFAULT '',
+                    revoked_at TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (opportunity_id) REFERENCES earning_opportunities(id),
+                    FOREIGN KEY (offer_id) REFERENCES earning_offers(id)
+                )
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_earning_actions_status ON earning_action_drafts(status, updated_at)")
             cur.execute(
                 "INSERT OR IGNORE INTO earning_preferences (id, updated_at) VALUES (1, ?)",
                 (datetime.now().isoformat(),),
@@ -1245,6 +1232,17 @@ class EarthOnlineStore:
             self._ensure_column(conn, "story_events", "fields", "TEXT NOT NULL DEFAULT '{}'")
             self._ensure_column(conn, "characters", "fields", "TEXT NOT NULL DEFAULT '{}'")
             self._ensure_column(conn, "earning_opportunities", "quest_id", "INTEGER")
+            self._ensure_column(conn, "earning_opportunities", "verification_status", "TEXT NOT NULL DEFAULT 'unverified'")
+            self._ensure_column(conn, "earning_opportunities", "deadline", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "earning_opportunities", "requirements", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "earning_opportunities", "scam_flags", "TEXT NOT NULL DEFAULT '[]'")
+            self._ensure_column(conn, "earning_opportunities", "last_checked_at", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "earning_plans", "route_key", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "earning_plans", "is_sprint", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "earning_preferences", "accepted_models", "TEXT NOT NULL DEFAULT '[]'")
+            self._ensure_column(conn, "earning_preferences", "sellable_assets", "TEXT NOT NULL DEFAULT '[]'")
+            self._ensure_column(conn, "earning_preferences", "constraints", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "earning_preferences", "primary_route", "TEXT NOT NULL DEFAULT ''")
 
             # ── v3 迁移: 任务难度星级 (1-5) ──
             self._ensure_column(conn, "quests", "difficulty", "INTEGER NOT NULL DEFAULT 1")
@@ -1264,15 +1262,6 @@ class EarthOnlineStore:
             self._ensure_column(conn, "player_profile", "miya_currency", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "player_profile", "earth_currency", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "quests", "recurring", "TEXT NOT NULL DEFAULT ''")
-            self._ensure_column(conn, "world_discoveries", "kind", "TEXT NOT NULL DEFAULT 'story'")
-            self._ensure_column(conn, "world_discoveries", "context_snapshot", "TEXT NOT NULL DEFAULT '{}'")
-            self._ensure_column(conn, "world_regions", "image_path", "TEXT NOT NULL DEFAULT ''")
-            self._ensure_column(conn, "world_regions", "resonance_xp", "INTEGER NOT NULL DEFAULT 0")
-            self._ensure_column(conn, "world_regions", "resonance_level", "INTEGER NOT NULL DEFAULT 1")
-            # ── v13 迁移: 地理围栏探索 (区域绑定真实坐标, 半径米; 0 表示未启用) ──
-            self._ensure_column(conn, "world_regions", "latitude", "REAL")
-            self._ensure_column(conn, "world_regions", "longitude", "REAL")
-            self._ensure_column(conn, "world_regions", "geofence_radius", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "real_places", "country", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(conn, "real_places", "admin1", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(conn, "real_places", "city", "TEXT NOT NULL DEFAULT ''")
@@ -1285,7 +1274,20 @@ class EarthOnlineStore:
             self._ensure_column(conn, "real_places", "category", "TEXT NOT NULL DEFAULT 'other'")
             self._ensure_column(conn, "real_places", "tags", "TEXT NOT NULL DEFAULT '[]'")
             self._ensure_column(conn, "real_places", "favorite", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "real_places", "verification_status", "TEXT NOT NULL DEFAULT 'unverified'")
+            self._ensure_column(conn, "real_places", "source_updated_at", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(conn, "real_place_visits", "accuracy_m", "REAL")
+            self._ensure_column(conn, "real_place_visits", "confidence", "REAL NOT NULL DEFAULT 0.5")
+            self._ensure_column(conn, "real_place_visits", "verification_status", "TEXT NOT NULL DEFAULT 'unverified'")
+            self._ensure_column(conn, "real_place_visits", "provider_id", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(conn, "real_place_visits", "observed_at", "TEXT NOT NULL DEFAULT ''")
+            conn.execute(
+                "UPDATE real_places SET verification_status = CASE "
+                "WHEN source IN ('browser_geolocation','location_watch','gps','journey_end','journey_gps') THEN 'observed' "
+                "WHEN source IN ('conversation','assistant_inference') THEN 'unverified' "
+                "ELSE 'confirmed' END, source_updated_at = COALESCE(NULLIF(source_updated_at, ''), updated_at) "
+                "WHERE verification_status = 'unverified' AND source <> 'conversation'"
+            )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_real_places_provider ON real_places(provider_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_real_place_visits_key ON real_place_visits(place_key, visited_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_real_place_photos_key ON real_place_photos(place_key, id DESC)")
@@ -1336,34 +1338,12 @@ class EarthOnlineStore:
                 )
             # 成就种子 (幂等: 按 key 已存在则跳过)
             self._seed_achievements(conn)
-            self._seed_world_regions(conn)
+            self._retire_legacy_virtual_world(conn)
             conn.commit()
         finally:
             conn.close()
 
     # ── 通用工具 ────────────────────────────────────
-
-    def _seed_world_regions(self, conn: sqlite3.Connection) -> None:
-        """写入单人世界地图区域定义，保留玩家探索进度。"""
-        now = datetime.now().isoformat()
-        for region in WORLD_REGION_SEEDS:
-            exists = conn.execute("SELECT id FROM world_regions WHERE key = ?", (region["key"],)).fetchone()
-            if exists:
-                conn.execute(
-                    "UPDATE world_regions SET name=?, subtitle=?, description=?, icon=?, color=?, level_req=?, updated_at=? WHERE key=?",
-                    (
-                        region["name"], region["subtitle"], region["description"], region["icon"],
-                        region["color"], int(region["level_req"]), now, region["key"],
-                    ),
-                )
-                continue
-            conn.execute(
-                "INSERT INTO world_regions (key, name, subtitle, description, icon, color, level_req, discovered, discovery_count, last_explored_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?,0,0,'',?,?)",
-                (
-                    region["key"], region["name"], region["subtitle"], region["description"], region["icon"],
-                    region["color"], int(region["level_req"]), now, now,
-                ),
-            )
 
     @staticmethod
     def _row_to_dict(row: Optional[sqlite3.Row]) -> Optional[Dict[str, Any]]:
@@ -1407,8 +1387,6 @@ class EarthOnlineStore:
         {"key": "collectible_collect", "title": "收藏家", "description": "收集 3 件收藏品", "icon": "✦", "category": "collection", "target": 3, "hidden": 0, "reward_currency": 50, "reward_exp": 40, "title_award": "收藏家"},
         {"key": "other_collect", "title": "万物皆收", "description": "收集 3 件其他物品", "icon": "◻", "category": "collection", "target": 3, "hidden": 0, "reward_currency": 50, "reward_exp": 40, "title_award": "万物皆收"},
         {"key": "all_categories", "title": "全图鉴收藏家", "description": "8 类物品各至少 1 件", "icon": "✧", "category": "collection", "target": 8, "hidden": 0, "reward_currency": 300, "reward_exp": 200, "title_award": "全图鉴收藏家"},
-        {"key": "world_3_regions", "title": "地图点亮者", "description": "在世界地图中发现 3 个区域", "icon": "◎", "category": "world", "target": 3, "hidden": 0, "reward_currency": 100, "reward_exp": 120, "title_award": "地图点亮者"},
-        {"key": "world_complete", "title": "世界全景", "description": "完成所有世界区域的探索", "icon": "✦", "category": "world", "target": len(WORLD_REGION_SEEDS), "hidden": 0, "reward_currency": 400, "reward_exp": 500, "title_award": "世界观测者"},
     ]
 
     def _seed_achievements(self, conn: sqlite3.Connection) -> None:
@@ -1583,12 +1561,6 @@ class EarthOnlineStore:
         characters = self.list_characters()
         stories = self.list_story(limit=100000)
         checkin_status = self.get_checkin_status()
-        world_regions = self.list_world_regions()
-        discovered_regions = sum(1 for region in world_regions if region.get("discovery_total", 0) > 0)
-        completed_world = sum(
-            1 for region in world_regions
-            if region.get("event_total", 0) > 0 and region.get("discovery_total", 0) >= region.get("event_total", 0)
-        )
         # 进度来源计算
         progress_map = {
             "first_quest": player.get("total_completed", 0),
@@ -1605,8 +1577,6 @@ class EarthOnlineStore:
             "level_10": player.get("level", 1),
             "checkin_7": checkin_status.get("streak", 0),
             "checkin_30": checkin_status.get("streak", 0),
-            "world_3_regions": discovered_regions,
-            "world_complete": completed_world,
         }
         # 图鉴收藏徽章: 8 类物品数量 + 全图鉴 (8 类各 >= 1)
         category_counts: Dict[str, int] = {}
@@ -2142,15 +2112,18 @@ class EarthOnlineStore:
             "checkins": self.list_checkins(limit=10000),
             "miya_notes": self.list_notes(limit=1000),
             "activity": self.list_activity(limit=2000),
-            "world_regions": self.list_world_regions(),
-            "world_discoveries": self.list_world_discoveries(limit=10000),
-            "real_places": self.list_real_places(limit=1000),
+            "real_places": [
+                self.get_real_place(place["place_key"])
+                for place in self.list_real_places(limit=1000)
+            ],
             "memory_pulls": self.list_memory_pulls(limit=10000),
             "commemorations": self.list_commemorations(),
             "currency_ledger": self.list_currency_ledger(limit=2000),
             "earning_opportunities": self.list_earning_opportunities(limit=500),
             "earning_sources": self.list_earning_sources(),
             "earning_preferences": self.get_earning_preferences(),
+            "earning_offers": self.list_earning_offers(),
+            "earning_action_drafts": self.list_earning_actions(limit=2000),
             "earning_plans": self.list_earning_plans(),
             "earning_plan_steps": self.list_earning_plan_steps(),
             "income_records": self.list_income_records(limit=2000),
@@ -2375,22 +2348,94 @@ class EarthOnlineStore:
                             str(act.get("created_at", now)),
                         ),
                     )
+                if "real_places" in data:
+                    conn.execute("DELETE FROM real_place_photos")
+                    conn.execute("DELETE FROM real_place_visits")
+                    conn.execute("DELETE FROM real_places")
+                    for place in data.get("real_places", []):
+                        place_key = str(place.get("place_key") or "").strip()
+                        name = str(place.get("name") or "").strip()
+                        if not place_key or not name:
+                            continue
+                        tags = place.get("tags") if isinstance(place.get("tags"), list) else []
+                        conn.execute(
+                            "INSERT INTO real_places (id,place_key,name,subtitle,latitude,longitude,visit_count,first_visited_at,last_visited_at,source,confidence,verification_status,source_updated_at,accuracy_m,country,admin1,city,district,neighborhood,image_path,display_address,provider_id,category,tags,favorite,notes,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                            (
+                                int(place["id"]) if place.get("id") else None, place_key, name, str(place.get("subtitle") or ""),
+                                place.get("latitude"), place.get("longitude"), max(0, int(place.get("visit_count") or 0)),
+                                str(place.get("first_visited_at") or ""), str(place.get("last_visited_at") or ""), str(place.get("source") or "manual"),
+                                max(0.0, min(1.0, float(place.get("confidence") if place.get("confidence") is not None else 0.5))),
+                                str(place.get("verification_status") or "unverified"), str(place.get("source_updated_at") or place.get("updated_at") or now),
+                                place.get("accuracy_m"), str(place.get("country") or ""), str(place.get("admin1") or ""), str(place.get("city") or ""),
+                                str(place.get("district") or ""), str(place.get("neighborhood") or ""), str(place.get("image_path") or ""),
+                                str(place.get("display_address") or ""), str(place.get("provider_id") or ""), str(place.get("category") or "other"),
+                                json.dumps(tags, ensure_ascii=False), 1 if place.get("favorite") else 0, str(place.get("notes") or ""),
+                                str(place.get("created_at") or now), str(place.get("updated_at") or now),
+                            ),
+                        )
+                        for visit in place.get("visits", []):
+                            conn.execute(
+                                "INSERT INTO real_place_visits (id,place_key,visited_at,latitude,longitude,accuracy_m,source,confidence,verification_status,provider_id,observed_at,note,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                                (
+                                    int(visit["id"]) if visit.get("id") else None, place_key, str(visit.get("visited_at") or now),
+                                    visit.get("latitude"), visit.get("longitude"), visit.get("accuracy_m"), str(visit.get("source") or "manual"),
+                                    max(0.0, min(1.0, float(visit.get("confidence") if visit.get("confidence") is not None else 0.5))),
+                                    str(visit.get("verification_status") or "unverified"), str(visit.get("provider_id") or ""),
+                                    str(visit.get("observed_at") or visit.get("visited_at") or ""), str(visit.get("note") or ""), str(visit.get("created_at") or now),
+                                ),
+                            )
+                        for photo in place.get("photos", []):
+                            if not photo.get("image_path"):
+                                continue
+                            conn.execute(
+                                "INSERT INTO real_place_photos (id,place_key,image_path,caption,created_at) VALUES (?,?,?,?,?)",
+                                (int(photo["id"]) if photo.get("id") else None, place_key, str(photo["image_path"]), str(photo.get("caption") or ""), str(photo.get("created_at") or now)),
+                            )
                 # v18: 重建收益情报、计划和收入记录 (兼容旧镜像)
                 if "earning_opportunities" in data:
                     conn.execute("DELETE FROM earning_opportunities")
                     for item in data.get("earning_opportunities", []):
-                        conn.execute("INSERT INTO earning_opportunities (id, title, source, url, kind, description, income_min, income_max, hours, risk, confidence, status, quest_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (int(item.get("id", 0)) if item.get("id") else None, str(item.get("title", "")), str(item.get("source", "")), str(item.get("url", "")), str(item.get("kind", "other")), str(item.get("description", "")), float(item.get("income_min", 0) or 0), float(item.get("income_max", 0) or 0), float(item.get("hours", 0) or 0), str(item.get("risk", "unknown")), str(item.get("confidence", "unknown")), str(item.get("status", "inbox")), int(item["quest_id"]) if item.get("quest_id") else None, str(item.get("created_at", now)), str(item.get("updated_at", now))))
+                        conn.execute(
+                            "INSERT INTO earning_opportunities (id, title, source, url, kind, description, income_min, income_max, hours, risk, confidence, verification_status, deadline, requirements, scam_flags, last_checked_at, status, quest_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                            (
+                                int(item.get("id", 0)) if item.get("id") else None,
+                                str(item.get("title", "")), str(item.get("source", "")), str(item.get("url", "")),
+                                str(item.get("kind", "other")), str(item.get("description", "")),
+                                float(item.get("income_min", 0) or 0), float(item.get("income_max", 0) or 0),
+                                float(item.get("hours", 0) or 0), str(item.get("risk", "unknown")),
+                                str(item.get("confidence", "unknown")), str(item.get("verification_status", "unverified")),
+                                str(item.get("deadline", "")), str(item.get("requirements", "")),
+                                json.dumps(item.get("scam_flags", []), ensure_ascii=False), str(item.get("last_checked_at", "")),
+                                str(item.get("status", "inbox")), int(item["quest_id"]) if item.get("quest_id") else None,
+                                str(item.get("created_at", now)), str(item.get("updated_at", now)),
+                            ),
+                        )
                 if "earning_sources" in data:
                     conn.execute("DELETE FROM earning_sources")
                     for source in data.get("earning_sources", []):
                         conn.execute("INSERT INTO earning_sources (id, name, url, kind, enabled, last_synced_at, last_error, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)", (int(source.get("id", 0)) if source.get("id") else None, str(source.get("name", "")), str(source.get("url", "")), str(source.get("kind", "rss")), 1 if source.get("enabled", 1) else 0, str(source.get("last_synced_at", "")), str(source.get("last_error", "")), str(source.get("created_at", now)), str(source.get("updated_at", now))))
                 if isinstance(data.get("earning_preferences"), dict):
                     prefs = data["earning_preferences"]
-                    conn.execute("UPDATE earning_preferences SET skills = ?, preferred_kinds = ?, weekly_hours = ?, target_amount = ?, min_hourly_rate = ?, risk_tolerance = ?, updated_at = ? WHERE id = 1", (json.dumps(prefs.get("skills", []), ensure_ascii=False), json.dumps(prefs.get("preferred_kinds", []), ensure_ascii=False), float(prefs.get("weekly_hours", 5) or 0), float(prefs.get("target_amount", 500) or 0), float(prefs.get("min_hourly_rate", 0) or 0), str(prefs.get("risk_tolerance", "low")), str(prefs.get("updated_at", now))))
+                    conn.execute(
+                        "UPDATE earning_preferences SET skills = ?, preferred_kinds = ?, weekly_hours = ?, target_amount = ?, min_hourly_rate = ?, risk_tolerance = ?, accepted_models = ?, sellable_assets = ?, constraints = ?, primary_route = ?, updated_at = ? WHERE id = 1",
+                        (
+                            json.dumps(prefs.get("skills", []), ensure_ascii=False),
+                            json.dumps(prefs.get("preferred_kinds", []), ensure_ascii=False),
+                            float(prefs.get("weekly_hours", 5) or 0), float(prefs.get("target_amount", 500) or 0),
+                            float(prefs.get("min_hourly_rate", 0) or 0), str(prefs.get("risk_tolerance", "low")),
+                            json.dumps(prefs.get("accepted_models", []), ensure_ascii=False),
+                            json.dumps(prefs.get("sellable_assets", []), ensure_ascii=False),
+                            str(prefs.get("constraints", "")), str(prefs.get("primary_route", "")),
+                            str(prefs.get("updated_at", now)),
+                        ),
+                    )
                 if "earning_plans" in data:
                     conn.execute("DELETE FROM earning_plans")
                     for plan in data.get("earning_plans", []):
-                        conn.execute("INSERT INTO earning_plans (id, title, goal_amount, target_date, status, notes, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)", (int(plan.get("id", 0)) if plan.get("id") else None, str(plan.get("title", "")), float(plan.get("goal_amount", 0) or 0), str(plan.get("target_date", "")), str(plan.get("status", "active")), str(plan.get("notes", "")), str(plan.get("created_at", now)), str(plan.get("updated_at", now))))
+                        conn.execute(
+                            "INSERT INTO earning_plans (id, title, goal_amount, target_date, status, notes, route_key, is_sprint, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                            (int(plan.get("id", 0)) if plan.get("id") else None, str(plan.get("title", "")), float(plan.get("goal_amount", 0) or 0), str(plan.get("target_date", "")), str(plan.get("status", "active")), str(plan.get("notes", "")), str(plan.get("route_key", "")), 1 if plan.get("is_sprint") else 0, str(plan.get("created_at", now)), str(plan.get("updated_at", now))),
+                        )
                 if "earning_plan_steps" in data:
                     conn.execute("DELETE FROM earning_plan_steps")
                     for step in data.get("earning_plan_steps", []):
@@ -2399,33 +2444,6 @@ class EarthOnlineStore:
                     conn.execute("DELETE FROM income_records")
                     for record in data.get("income_records", []):
                         conn.execute("INSERT INTO income_records (id, opportunity_id, amount, cost, hours, note, recorded_at) VALUES (?,?,?,?,?,?,?)", (int(record.get("id", 0)) if record.get("id") else None, int(record["opportunity_id"]) if record.get("opportunity_id") else None, float(record.get("amount", 0) or 0), float(record.get("cost", 0) or 0), float(record.get("hours", 0) or 0), str(record.get("note", "")), str(record.get("recorded_at", now))))
-                # 重建世界地图探索进度；缺少该字段时保留当前已播种区域
-                if "world_regions" in data:
-                    conn.execute("DELETE FROM world_discoveries")
-                    conn.execute("DELETE FROM world_regions")
-                    self._seed_world_regions(conn)
-                    for region in data.get("world_regions", []):
-                        key = str(region.get("key", ""))
-                        if not key:
-                            continue
-                        conn.execute(
-                            "UPDATE world_regions SET discovered=?, discovery_count=?, last_explored_at=?, updated_at=? WHERE key=?",
-                            (
-                                max(0, int(region.get("discovered", 0))), max(0, int(region.get("discovery_count", 0))),
-                                str(region.get("last_explored_at", "")), now, key,
-                            ),
-                        )
-                    for discovery in data.get("world_discoveries", []):
-                        conn.execute(
-                            "INSERT OR IGNORE INTO world_discoveries (id, region_key, event_key, kind, title, content, reward_currency, reward_exp, discovered_at) VALUES (?,?,?,?,?,?,?,?,?)",
-                            (
-                                int(discovery.get("id", 0)) if discovery.get("id") else None,
-                                str(discovery.get("region_key", "")), str(discovery.get("event_key", "")), str(discovery.get("kind", "story")),
-                                str(discovery.get("title", "")), str(discovery.get("content", "")),
-                                max(0, int(discovery.get("reward_currency", 0))), max(0, int(discovery.get("reward_exp", 0))),
-                                str(discovery.get("discovered_at", now)),
-                            ),
-                        )
                 # v17: 重建纪念日与回忆抽卡记录 (缺字段时保留现状)
                 if "commemorations" in data:
                     conn.execute("DELETE FROM commemorations")
@@ -2796,6 +2814,7 @@ class EarthOnlineStore:
             "checkin": self.get_checkin_status(),
             "weekly": self.get_weekly_report(),
             "activity_recent": self.list_activity(limit=10),
+            "map_facts": self.get_map_fact_context(place_limit=20, journey_limit=10),
         }
 
     def daily_ritual(self) -> Dict[str, Any]:
@@ -2854,6 +2873,7 @@ class EarthOnlineStore:
                 "is_stale": bool(real_context.get("is_stale", 1)),
                 "precise_location_saved": bool(real_settings.get("allow_precise_location") and real_settings.get("latitude") is not None and real_settings.get("longitude") is not None),
             },
+            "map": analysis["map_facts"]["counts"],
             "operator": {
                 "enabled": bool(autonomous.get("enabled", False)),
                 "in_quiet_hours": datetime.now().hour in quiet_hours,
@@ -3244,9 +3264,6 @@ class EarthOnlineStore:
                 )
                 # 弥娅参与: 自动反应
                 self._react_locked(conn, "quest_completed", f"完成委托「{quest['title']}」")
-                world_region = (quest.get("fields") or {}).get("world_region")
-                if world_region:
-                    self._add_world_resonance_locked(conn, str(world_region), 12, now, "完成区域委托")
                 # 循环任务: 完成后自动重置, 生成下一轮 (喝水/睡觉等每日重复)
                 recurring = quest.get("recurring") or ""
                 if recurring in ("daily", "weekly"):
@@ -3262,6 +3279,30 @@ class EarthOnlineStore:
                         conn, "quest", "↻", f"循环任务已重置: {quest['title']}",
                         "新的一轮开始，继续加油～",
                         quest_id,
+                    )
+                # 收益计划/情报委托与任务板保持同一状态源，避免完成委托后收益面板仍停在进行中。
+                quest_fields = quest.get("fields") or {}
+                earning_step_id = quest_fields.get("earning_plan_step_id")
+                if earning_step_id:
+                    conn.execute(
+                        "UPDATE earning_plan_steps SET status = 'done', completed_at = ?, updated_at = ? WHERE id = ?",
+                        (now, now, int(earning_step_id)),
+                    )
+                    plan_id = quest_fields.get("earning_plan_id")
+                    if plan_id:
+                        remaining = conn.execute(
+                            "SELECT COUNT(*) c FROM earning_plan_steps WHERE plan_id = ? AND status NOT IN ('done', 'skipped')",
+                            (int(plan_id),),
+                        ).fetchone()["c"]
+                        conn.execute(
+                            "UPDATE earning_plans SET status = ?, updated_at = ? WHERE id = ?",
+                            ("completed" if remaining == 0 else "active", now, int(plan_id)),
+                        )
+                earning_opportunity_id = quest_fields.get("earning_opportunity_id")
+                if earning_opportunity_id:
+                    conn.execute(
+                        "UPDATE earning_opportunities SET status = CASE WHEN status = 'won' THEN status ELSE 'applied' END, updated_at = ? WHERE id = ?",
+                        (now, int(earning_opportunity_id)),
                     )
                 conn.commit()
                 result = {
@@ -3681,7 +3722,7 @@ class EarthOnlineStore:
         finally:
             conn.close()
 
-    # ── 单人开放世界探索 ────────────────────────────
+    # ── 现实地图事实 ────────────────────────────────
 
     def list_real_places(self, limit: int = 200) -> List[Dict[str, Any]]:
         """获取现实地图地点，按最近到访时间倒序。"""
@@ -3694,6 +3735,73 @@ class EarthOnlineStore:
             return [self._decode_real_place(row) for row in rows]
         finally:
             conn.close()
+
+    def list_real_journeys(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Return GPS-backed journey records without treating their narrative as fact."""
+        journeys: List[Dict[str, Any]] = []
+        for story in self.list_story(limit=max(1, min(500, int(limit) * 4))):
+            fields = story.get("fields") or {}
+            track = fields.get("track")
+            if not fields.get("journey") or not isinstance(track, list) or not track:
+                continue
+            source = str(fields.get("source") or "").strip().lower()
+            if source not in {
+                "browser_geolocation", "device_location", "location_watch",
+                "gps", "gpx_import", "journey_gps",
+            }:
+                continue
+            valid_track = [
+                point for point in track
+                if isinstance(point, dict)
+                and self._to_float(point.get("latitude")) is not None
+                and self._to_float(point.get("longitude")) is not None
+            ]
+            journeys.append({
+                "id": story.get("id"),
+                "title": story.get("title", ""),
+                "happened_at": story.get("happened_at", ""),
+                "narrative": story.get("content", ""),
+                "source": source,
+                "verification_status": "observed",
+                "recorded_at": str(fields.get("recorded_at") or story.get("created_at") or ""),
+                "duration_seconds": max(0, int(fields.get("duration_seconds") or 0)),
+                "distance_m": max(0.0, float(fields.get("distance_m") or 0)),
+                "point_count": max(0, int(fields.get("point_count") or len(valid_track))),
+                "track": valid_track,
+            })
+            if len(journeys) >= limit:
+                break
+        return journeys
+
+    def get_map_fact_context(self, place_limit: int = 20, journey_limit: int = 10) -> Dict[str, Any]:
+        """Build the provenance-aware reality map read model used by Miya and the UI."""
+        places = self.list_real_places(limit=max(1, min(100, int(place_limit))))
+        journeys = self.list_real_journeys(limit=max(1, min(50, int(journey_limit))))
+        weather = self.get_real_context(auto_refresh=False)
+        verification_counts = {"observed": 0, "confirmed": 0, "unverified": 0}
+        for place in places:
+            status = str(place.get("verification_status") or "unverified")
+            verification_counts[status if status in verification_counts else "unverified"] += 1
+        return {
+            "generated_at": datetime.now().astimezone().isoformat(),
+            "truth_policy": {
+                "observed": "device or provider observation",
+                "confirmed": "explicitly confirmed by the player",
+                "unverified": "conversation-derived candidate; do not state as fact",
+            },
+            "weather": {
+                "source": weather.get("source", "unavailable"),
+                "source_status": weather.get("source_status", "unavailable"),
+                "captured_at": weather.get("captured_at", ""),
+                "is_stale": bool(weather.get("is_stale", 1)),
+                "city": weather.get("city", ""),
+                "weather": weather.get("weather", "未同步"),
+                "temperature": weather.get("temperature"),
+            },
+            "places": places,
+            "journeys": journeys,
+            "counts": {"places": len(places), "journeys": len(journeys), **verification_counts},
+        }
 
     @staticmethod
     def _decode_real_place(row: sqlite3.Row) -> Dict[str, Any]:
@@ -3750,7 +3858,7 @@ class EarthOnlineStore:
 
     def update_real_place(self, place_key: str, values: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """编辑地点档案，不把编辑误记成一次新的到访。"""
-        allowed = {"name", "subtitle", "notes", "category", "favorite", "latitude", "longitude", "accuracy_m", "display_address", "country", "admin1", "city", "district", "neighborhood"}
+        allowed = {"name", "subtitle", "notes", "category", "favorite", "latitude", "longitude", "accuracy_m", "display_address", "country", "admin1", "city", "district", "neighborhood", "verification_status"}
         updates: Dict[str, Any] = {}
         for key in allowed:
             if key in values:
@@ -3767,6 +3875,12 @@ class EarthOnlineStore:
             updates["name"] = str(updates["name"] or "").strip()
             if not updates["name"]:
                 raise ValueError("地点名称不能为空")
+        if "verification_status" in updates:
+            status = str(updates["verification_status"] or "").strip().lower()
+            if status not in {"unverified", "confirmed", "observed"}:
+                raise ValueError("verification_status 必须是 unverified、confirmed 或 observed")
+            updates["verification_status"] = status
+            updates["source_updated_at"] = datetime.now().isoformat()
         for coord, low, high in (("latitude", -90, 90), ("longitude", -180, 180)):
             if coord in updates:
                 try:
@@ -3816,12 +3930,14 @@ class EarthOnlineStore:
         note: str = "",
         visited_at: str = "",
         source: str = "manual",
-        confidence: float = 1.0,
+        confidence: Optional[float] = None,
         accuracy_m: Optional[float] = None,
         place_key: str = "",
         provider_id: str = "",
         display_address: str = "",
         category: str = "",
+        verification_status: str = "",
+        observed_at: str = "",
     ) -> Optional[Dict[str, Any]]:
         """记录一次现实地点到访；优先按档案/provider/近邻合并，同名远距离地点可并存。"""
         name = str(name or "").strip()
@@ -3836,6 +3952,7 @@ class EarthOnlineStore:
             lat = None
         if lng is not None and not -180 <= lng <= 180:
             lng = None
+        source = str(source or "manual").strip().lower()[:80] or "manual"
         geocoded = None
         if lat is None or lng is None:
             geocoded = self._geocode_real_place(name)
@@ -3849,11 +3966,23 @@ class EarthOnlineStore:
         display_address = str(display_address or (geocoded or {}).get("display_name") or "").strip()
         provided_category = str(category or "").strip()[:80]
         category = str(provided_category or (geocoded or {}).get("category") or "other").strip()[:80]
+        if geocoded:
+            source = f"{source}_geocoded" if not source.endswith("_geocoded") else source
         now = datetime.now().isoformat()
         visited = str(visited_at or "").strip() or now
+        observed_at = str(observed_at or visited).strip()
         slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
         base_key = slug or f"place-{name.encode('utf-8').hex()}"
-        confidence = max(0.0, min(1.0, float(confidence or 0)))
+        inferred_status = (
+            "observed" if source in {"browser_geolocation", "location_watch", "gps", "journey_end", "journey_gps"}
+            else "unverified" if source.startswith("conversation") or source == "assistant_inference"
+            else "confirmed"
+        )
+        verification_status = str(verification_status or inferred_status).strip().lower()
+        if verification_status not in {"unverified", "confirmed", "observed"}:
+            verification_status = inferred_status
+        default_confidence = {"unverified": 0.5, "confirmed": 0.9, "observed": 0.98}[verification_status]
+        confidence = max(0.0, min(1.0, float(default_confidence if confidence is None else confidence)))
         try:
             accuracy_m = max(0.0, float(accuracy_m)) if accuracy_m not in (None, "") else None
         except (TypeError, ValueError):
@@ -3880,18 +4009,24 @@ class EarthOnlineStore:
                 else:
                     place_key = base_key[:180]
                 if existing:
+                    status_rank = {"unverified": 0, "confirmed": 1, "observed": 2}
+                    old_status = str(existing.get("verification_status") or "unverified")
+                    keep_new_evidence = status_rank.get(verification_status, 0) >= status_rank.get(old_status, 0)
+                    aggregate_source = source if keep_new_evidence else str(existing.get("source") or "manual")
+                    aggregate_status = verification_status if keep_new_evidence else old_status
+                    aggregate_confidence = confidence if keep_new_evidence else float(existing.get("confidence") or 0.5)
                     conn.execute(
-                        "UPDATE real_places SET latitude=COALESCE(?, latitude), longitude=COALESCE(?, longitude), accuracy_m=COALESCE(?, accuracy_m), display_address=COALESCE(NULLIF(?, ''), display_address), provider_id=COALESCE(NULLIF(?, ''), provider_id), category=COALESCE(NULLIF(?, ''), category), country=COALESCE(NULLIF(?, ''), country), admin1=COALESCE(NULLIF(?, ''), admin1), city=COALESCE(NULLIF(?, ''), city), district=COALESCE(NULLIF(?, ''), district), neighborhood=COALESCE(NULLIF(?, ''), neighborhood), visit_count=visit_count+1, first_visited_at=CASE WHEN first_visited_at='' OR ? < first_visited_at THEN ? ELSE first_visited_at END, last_visited_at=CASE WHEN last_visited_at='' OR ? > last_visited_at THEN ? ELSE last_visited_at END, notes=CASE WHEN ? <> '' THEN ? ELSE notes END, updated_at=? WHERE place_key=?",
-                        (lat, lng, accuracy_m, display_address, provider_id, provided_category, address.get("country", ""), address.get("state", address.get("province", "")), address.get("city", address.get("town", address.get("municipality", ""))), address.get("county", address.get("city_district", "")), address.get("suburb", address.get("neighbourhood", "")), visited, visited, visited, visited, note, note, now, place_key),
+                        "UPDATE real_places SET latitude=COALESCE(?, latitude), longitude=COALESCE(?, longitude), accuracy_m=COALESCE(?, accuracy_m), display_address=COALESCE(NULLIF(?, ''), display_address), provider_id=COALESCE(NULLIF(?, ''), provider_id), category=COALESCE(NULLIF(?, ''), category), country=COALESCE(NULLIF(?, ''), country), admin1=COALESCE(NULLIF(?, ''), admin1), city=COALESCE(NULLIF(?, ''), city), district=COALESCE(NULLIF(?, ''), district), neighborhood=COALESCE(NULLIF(?, ''), neighborhood), source=?, confidence=?, verification_status=?, source_updated_at=?, visit_count=visit_count+1, first_visited_at=CASE WHEN first_visited_at='' OR ? < first_visited_at THEN ? ELSE first_visited_at END, last_visited_at=CASE WHEN last_visited_at='' OR ? > last_visited_at THEN ? ELSE last_visited_at END, notes=CASE WHEN ? <> '' THEN ? ELSE notes END, updated_at=? WHERE place_key=?",
+                        (lat, lng, accuracy_m, display_address, provider_id, provided_category, address.get("country", ""), address.get("state", address.get("province", "")), address.get("city", address.get("town", address.get("municipality", ""))), address.get("county", address.get("city_district", "")), address.get("suburb", address.get("neighbourhood", "")), aggregate_source, aggregate_confidence, aggregate_status, now, visited, visited, visited, visited, note, note, now, place_key),
                     )
                 else:
                     conn.execute(
-                        "INSERT INTO real_places (place_key,name,latitude,longitude,visit_count,first_visited_at,last_visited_at,source,confidence,accuracy_m,display_address,provider_id,category,country,admin1,city,district,neighborhood,notes,created_at,updated_at) VALUES (?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                        (place_key, name, lat, lng, visited, visited, ("geocoded" if geocoded else source or "manual"), confidence, accuracy_m, display_address, provider_id, category, address.get("country", ""), address.get("state", address.get("province", "")), address.get("city", address.get("town", address.get("municipality", ""))), address.get("county", address.get("city_district", "")), address.get("suburb", address.get("neighbourhood", "")), note, now, now),
+                        "INSERT INTO real_places (place_key,name,latitude,longitude,visit_count,first_visited_at,last_visited_at,source,confidence,verification_status,source_updated_at,accuracy_m,display_address,provider_id,category,country,admin1,city,district,neighborhood,notes,created_at,updated_at) VALUES (?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (place_key, name, lat, lng, visited, visited, source, confidence, verification_status, now, accuracy_m, display_address, provider_id, category, address.get("country", ""), address.get("state", address.get("province", "")), address.get("city", address.get("town", address.get("municipality", ""))), address.get("county", address.get("city_district", "")), address.get("suburb", address.get("neighbourhood", "")), note, now, now),
                     )
                 conn.execute(
-                    "INSERT INTO real_place_visits (place_key,visited_at,latitude,longitude,accuracy_m,source,note,created_at) VALUES (?,?,?,?,?,?,?,?)",
-                    (place_key, visited, lat, lng, accuracy_m, source or "manual", note, now),
+                    "INSERT INTO real_place_visits (place_key,visited_at,latitude,longitude,accuracy_m,source,confidence,verification_status,provider_id,observed_at,note,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (place_key, visited, lat, lng, accuracy_m, source, confidence, verification_status, provider_id, observed_at, note, now),
                 )
                 conn.commit()
             finally:
@@ -4045,138 +4180,9 @@ class EarthOnlineStore:
             "category": str(item.get("category") or item.get("type") or "other"),
             "type": str(item.get("type") or ""),
             "importance": float(item.get("importance") or 0),
+            "source": "openstreetmap_nominatim",
+            "fetched_at": datetime.now().isoformat(),
         }
-
-    def list_world_regions(self) -> List[Dict[str, Any]]:
-        """获取世界地图区域与玩家探索进度。"""
-        conn = self._connect()
-        try:
-            rows = conn.execute("SELECT * FROM world_regions ORDER BY id ASC").fetchall()
-            result = []
-            context = self.get_real_context(auto_refresh=True)
-            context["period"] = self._world_period(datetime.now())
-            for row in rows:
-                region = dict(row)
-                all_events = self._world_events_for_region(region["key"], include_locked=True, context=context)
-                available_events = [item for item in all_events if item[1].get("available", True)]
-                # 保持原有地图进度口径稳定：条件发现单独显示，不会让基础区域的 100% 进度突然变化。
-                region["event_total"] = len([item for item in all_events if not item[1].get("condition")])
-                region["condition_event_total"] = len([item for item in all_events if item[1].get("condition")])
-                region["available_event_total"] = len(available_events)
-                region["discovery_total"] = conn.execute(
-                    "SELECT COUNT(*) AS c FROM world_discoveries WHERE region_key = ?", (region["key"],)
-                ).fetchone()["c"]
-                region["exploration_percent"] = round(
-                    min(100, region["discovery_total"] / max(1, region["event_total"]) * 100)
-                )
-                region["resonance_level"] = int(region.get("resonance_level") or self._resonance_level(int(region.get("resonance_xp") or 0)))
-                region["resonance_xp"] = int(region.get("resonance_xp") or 0)
-                region["resonance_next_xp"] = self._resonance_threshold(region["resonance_level"] + 1)
-                region["condition_events"] = [
-                    {"title": event.get("title", ""), "condition_label": event.get("condition_label", "现实条件未满足"), "available": bool(event.get("available", True))}
-                    for _, event in all_events if event.get("condition")
-                ]
-                result.append(region)
-            return result
-        finally:
-            conn.close()
-
-    def update_world_region_image(self, region_key: str, image_path: str) -> Optional[Dict[str, Any]]:
-        """绑定区域现实照片；只保存本机相对资源路径。"""
-        region_key = str(region_key or "").strip()
-        image_path = str(image_path or "").strip()
-        now = datetime.now().isoformat()
-        conn = self._connect()
-        try:
-            conn.execute("UPDATE world_regions SET image_path=?, updated_at=? WHERE key=?", (image_path, now, region_key))
-            if conn.total_changes == 0:
-                return None
-            self._add_world_resonance_locked(conn, region_key, 8, now, "绑定现实照片")
-            conn.commit()
-            return conn.execute("SELECT * FROM world_regions WHERE key=?", (region_key,)).fetchone()
-        finally:
-            conn.close()
-
-    def update_world_region(self, region_key: str, values: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        allowed = {"name", "subtitle", "description", "icon", "color", "level_req", "latitude", "longitude", "geofence_radius"}
-        updates = {k: values[k] for k in allowed if k in values}
-        if not updates:
-            conn = self._connect()
-            try:
-                return self._row_to_dict(conn.execute("SELECT * FROM world_regions WHERE key=?", (region_key,)).fetchone())
-            finally:
-                conn.close()
-        if "level_req" in updates:
-            updates["level_req"] = max(1, int(updates["level_req"]))
-        if "geofence_radius" in updates:
-            updates["geofence_radius"] = max(0, min(100000, int(updates["geofence_radius"] or 0)))
-        for coord in ("latitude", "longitude"):
-            if coord in updates and updates[coord] not in (None, ""):
-                try:
-                    updates[coord] = float(updates[coord])
-                except (TypeError, ValueError):
-                    updates[coord] = None
-        # 启用围栏必须有完整坐标；坐标被清空时自动关闭围栏
-        if updates.get("geofence_radius", 0) and (updates.get("latitude") is None or updates.get("longitude") is None):
-            probe = self._connect()
-            try:
-                current = self._row_to_dict(probe.execute("SELECT latitude, longitude FROM world_regions WHERE key=?", (region_key,)).fetchone()) or {}
-            finally:
-                probe.close()
-            merged = {**current, **updates}
-            if merged.get("latitude") is None or merged.get("longitude") is None:
-                updates["geofence_radius"] = 0
-        now = datetime.now().isoformat()
-        conn = self._connect()
-        try:
-            row = conn.execute("SELECT id FROM world_regions WHERE key=?", (region_key,)).fetchone()
-            if not row:
-                return None
-            assignments = ", ".join(f"{key}=?" for key in updates)
-            conn.execute(f"UPDATE world_regions SET {assignments}, updated_at=? WHERE key=?", (*updates.values(), now, region_key))
-            conn.commit()
-            return self._row_to_dict(conn.execute("SELECT * FROM world_regions WHERE key=?", (region_key,)).fetchone())
-        finally:
-            conn.close()
-
-    def list_world_custom_events(self, region_key: str = "") -> List[Dict[str, Any]]:
-        conn = self._connect()
-        try:
-            if region_key:
-                rows = conn.execute("SELECT * FROM world_custom_events WHERE region_key=? ORDER BY id ASC", (region_key,)).fetchall()
-            else:
-                rows = conn.execute("SELECT * FROM world_custom_events ORDER BY id ASC").fetchall()
-            return [dict(row) for row in rows]
-        finally:
-            conn.close()
-
-    def create_world_custom_event(self, region_key: str, title: str, text: str, reward_currency: int = 0, reward_exp: int = 0, kind: str = "story") -> Optional[Dict[str, Any]]:
-        if not any(region["key"] == region_key for region in WORLD_REGION_SEEDS):
-            return None
-        if not title.strip() or not text.strip():
-            return None
-        now = datetime.now().isoformat()
-        conn = self._connect()
-        try:
-            cur = conn.execute(
-                "INSERT INTO world_custom_events (region_key, title, text, kind, reward_currency, reward_exp, created_at) VALUES (?,?,?,?,?,?,?)",
-                (region_key, title.strip()[:160], text.strip(), kind or "story", max(0, int(reward_currency)), max(0, int(reward_exp)), now),
-            )
-            self._add_world_resonance_locked(conn, region_key, 5, now, "新增自定义世界发现")
-            conn.commit()
-            return self._row_to_dict(conn.execute("SELECT * FROM world_custom_events WHERE id=?", (cur.lastrowid,)).fetchone())
-        finally:
-            conn.close()
-
-    def delete_world_custom_event(self, event_id: int) -> bool:
-        conn = self._connect()
-        try:
-            conn.execute("DELETE FROM world_custom_events WHERE id=?", (int(event_id),))
-            changed = conn.total_changes > 0
-            conn.commit()
-            return changed
-        finally:
-            conn.close()
 
     @staticmethod
     def _geo_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -4217,103 +4223,11 @@ class EarthOnlineStore:
             return "黄昏"
         return "夜晚"
 
-    @staticmethod
-    def _resonance_threshold(level: int) -> int:
-        return {1: 0, 2: 40, 3: 100, 4: 180, 5: 300}.get(max(1, int(level)), 300 + (max(1, int(level)) - 5) * 150)
-
-    @classmethod
-    def _resonance_level(cls, xp: int) -> int:
-        level = 1
-        for candidate in range(2, 20):
-            if xp >= cls._resonance_threshold(candidate):
-                level = candidate
-            else:
-                break
-        return level
-
-    def _add_world_resonance_locked(self, conn: sqlite3.Connection, region_key: str, amount: int, now: str, reason: str = "") -> Dict[str, Any]:
-        row = conn.execute("SELECT resonance_xp, resonance_level FROM world_regions WHERE key=?", (region_key,)).fetchone()
-        if not row:
-            return {"level": 1, "xp": 0, "level_up": False}
-        old_level = int(row["resonance_level"] or 1)
-        xp = max(0, int(row["resonance_xp"] or 0) + max(0, int(amount)))
-        new_level = self._resonance_level(xp)
-        conn.execute("UPDATE world_regions SET resonance_xp=?, resonance_level=?, updated_at=? WHERE key=?", (xp, new_level, now, region_key))
-        if amount and reason:
-            self._log_activity(conn, "world", "◎", f"区域共鸣 +{amount}", reason)
-        return {"level": new_level, "xp": xp, "level_up": new_level > old_level, "old_level": old_level}
-
-    @staticmethod
-    def _season_of(now: datetime) -> str:
-        """月份 → 季节 (3-5 春 / 6-8 夏 / 9-11 秋 / 12-2 冬)。纯本地日期判断，不依赖天气同步。"""
-        month = now.month
-        if 3 <= month <= 5:
-            return "spring"
-        if 6 <= month <= 8:
-            return "summer"
-        if 9 <= month <= 11:
-            return "autumn"
-        return "winter"
-
-    def _world_condition_available(self, event: Dict[str, Any], context: Dict[str, Any]) -> bool:
-        condition = event.get("condition") or {}
-        if not condition:
-            return True
-        # 只有天气条件才依赖现实天气同步；季节/时段条件用本地时间即可判定
-        needs_weather = bool(condition.get("weather_any"))
-        if needs_weather and context.get("source_status") != "ok":
-            return False
-        weather = str(context.get("weather") or "")
-        period = str(context.get("period") or "")
-        season = str(context.get("season") or "")
-        if not season:
-            try:
-                season = self._season_of(datetime.now())
-            except Exception:
-                season = ""
-        if condition.get("weather_any") and not any(token in weather for token in condition["weather_any"]):
-            return False
-        if condition.get("period_any") and period not in condition["period_any"]:
-            return False
-        if condition.get("season_any") and season not in condition["season_any"]:
-            return False
-        return True
-
-    def _world_events_for_region(self, region_key: str, include_locked: bool = True, context: Optional[Dict[str, Any]] = None) -> List[tuple[str, Dict[str, Any]]]:
-        events = [(f"{region_key}_{i}", event) for i, event in enumerate(WORLD_REGION_EVENTS.get(region_key, []))]
-        for index, event in enumerate(WORLD_CONDITIONAL_EVENTS.get(region_key, [])):
-            item = dict(event)
-            item["available"] = self._world_condition_available(item, context or {})
-            if include_locked or item["available"]:
-                events.append((f"{region_key}_condition_{index}", item))
-        for custom in self.list_world_custom_events(region_key):
-            events.append((f"{region_key}_custom_{custom['id']}", {
-                "title": custom["title"], "text": custom["text"], "reward_currency": custom["reward_currency"],
-                "reward_exp": custom["reward_exp"], "kind": custom.get("kind", "story"), "available": bool(custom.get("active", 1)),
-            }))
-        return events
-
-    @staticmethod
-    def _world_companion_dialogue(region: Dict[str, Any], event: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, str]:
-        weather = str(context.get("weather") or "未同步")
-        period = str(context.get("period") or "今天")
-        if context.get("source_status") == "ok":
-            lead = f"我看见了你所在城市的{weather}，现在是{period}。"
-        else:
-            lead = f"现实天气还没有同步，但我知道你正在{period}里向前走。"
-        kind = str(event.get("kind", "story"))
-        tail = {
-            "chest": "这只宝箱先替你保管一会儿，等你回来时再一起打开。",
-            "hidden": "你发现了别人可能会错过的细节，这就是属于你的观测方式。",
-            "story": "这一刻不需要被夸张地命名，认真走过就已经值得留下。",
-        }.get(kind, "我会把这一刻收进我们的世界档案里。")
-        return {"speaker": "弥娅", "text": f"{lead} {tail}", "tone": "同行", "region": str(region.get("name", ""))}
-
-    # ── 限时活动: 内置活动 + 后台自定义活动 ─────────
+    # ── 现实活动: 纪念日与玩家创建的活动 ───────────
 
     def list_world_event_areas(self) -> List[Dict[str, Any]]:
-        """全部活动区域 = 内置常量 + 后台自定义 (is_custom 标记来源)。"""
-        areas = [{**area, "is_custom": False, "active": 1} for area in WORLD_EVENT_AREAS]
+        """Return only persisted real-life activities; no fictional built-ins are injected."""
+        areas: List[Dict[str, Any]] = []
         conn = self._connect()
         try:
             rows = conn.execute("SELECT * FROM world_custom_event_areas ORDER BY id ASC").fetchall()
@@ -4426,7 +4340,7 @@ class EarthOnlineStore:
         finally:
             conn.close()
         items = []
-        for item in WORLD_EVENT_SHOP_ITEMS.get(event_key, []) + custom_items:
+        for item in custom_items:
             items.append({**item, "purchased": purchases.get(item["key"], 0), "can_buy": purchases.get(item["key"], 0) < int(item.get("limit", 1))})
         return {"event_key": event_key, "name": event["name"], "active": event["start"] <= today <= event["end"] and bool(event.get("active", 1)), "start": event["start"], "end": event["end"], "items": items}
 
@@ -4440,9 +4354,9 @@ class EarthOnlineStore:
         if not item.get("can_buy"):
             return {"success": False, "message": "这件活动商品已经兑换过了"}
         if int(item.get("requires_discoveries", 0)):
-            discovered = len(self.list_world_discoveries(limit=10000))
-            if discovered < int(item["requires_discoveries"]):
-                return {"success": False, "message": f"还需要累计发现 {item['requires_discoveries']} 个世界事件"}
+            recorded_places = len(self.list_real_places(limit=1000))
+            if recorded_places < int(item["requires_discoveries"]):
+                return {"success": False, "message": f"还需要记录 {item['requires_discoveries']} 个现实地点"}
         try:
             result = self.spend_miya_coins(int(item["cost"]), f"兑换活动「{shop['name']}」· {item['name']}")
         except ValueError as exc:
@@ -4648,62 +4562,6 @@ class EarthOnlineStore:
             "player": self.get_player(),
         }
 
-    def list_world_discoveries(self, region_key: str = "", limit: int = 100) -> List[Dict[str, Any]]:
-        conn = self._connect()
-        try:
-            if region_key:
-                rows = conn.execute(
-                    "SELECT * FROM world_discoveries WHERE region_key = ? ORDER BY id DESC LIMIT ?",
-                    (region_key, max(1, min(1000, int(limit)))),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM world_discoveries ORDER BY id DESC LIMIT ?",
-                    (max(1, min(1000, int(limit))),),
-                ).fetchall()
-            result = []
-            for row in rows:
-                item = dict(row)
-                choice = conn.execute("SELECT choice, chosen_at FROM world_discovery_choices WHERE discovery_id=?", (item.get("id"),)).fetchone()
-                item["choice"] = dict(choice) if choice else None
-                result.append(item)
-            return result
-        finally:
-            conn.close()
-
-    def choose_world_discovery(self, discovery_id: int, choice: str) -> Dict[str, Any]:
-        """探索后的单次同行选择：继续、记录、休息。选择只影响这条发现一次。"""
-        choice = str(choice or "").strip().lower()
-        labels = {"continue": "继续前进", "record": "记录此刻", "rest": "先休息"}
-        if choice not in labels:
-            return {"success": False, "message": "无效的同行选择"}
-        with self._lock:
-            conn = self._connect()
-            try:
-                discovery = conn.execute("SELECT * FROM world_discoveries WHERE id=?", (int(discovery_id),)).fetchone()
-                if not discovery:
-                    return {"success": False, "message": "发现记录不存在"}
-                existing = conn.execute("SELECT choice FROM world_discovery_choices WHERE discovery_id=?", (int(discovery_id),)).fetchone()
-                if existing:
-                    return {"success": False, "message": f"你已经选择过「{labels.get(existing['choice'], existing['choice'])}」"}
-                now = datetime.now().isoformat()
-                conn.execute("INSERT INTO world_discovery_choices (discovery_id, choice, chosen_at) VALUES (?,?,?)", (int(discovery_id), choice, now))
-                resonance_amount = {"continue": 6, "record": 10, "rest": 3}[choice]
-                resonance = self._add_world_resonance_locked(conn, str(discovery["region_key"]), resonance_amount, now, labels[choice])
-                if choice == "record":
-                    self._link_story_locked(conn, f"同行记录: {discovery['title']}", f"你选择记录这一刻：{discovery['content']}", event_type="world")
-                elif choice == "continue":
-                    self._log_activity(conn, "world", "→", f"继续探索「{discovery['title']}」", "弥娅陪你把脚步往前放了一点")
-                else:
-                    self._log_activity(conn, "world", "☾", f"在「{discovery['title']}」处休息", "休息也是探索的一部分")
-                conn.commit()
-                result = {"success": True, "choice": choice, "label": labels[choice], "resonance": resonance, "player": self.get_player()}
-            finally:
-                conn.close()
-        self._write_mirror()
-        self.refresh_achievements()
-        return result
-
     # ── 现实上下文同步 ─────────────────────────────
 
     def get_real_context_settings(self) -> Dict[str, Any]:
@@ -4778,13 +4636,39 @@ class EarthOnlineStore:
             conn.close()
         return self.get_real_context_settings()
 
+    def query_weather(
+        self,
+        location: str,
+        include_forecast: bool = True,
+        forecast_days: int = 3,
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
+        """查询任意地点天气；不修改默认城市，也不写入世界快照或地点档案。"""
+        from core.weather_service import query_weather
+
+        return query_weather(
+            location,
+            include_forecast=include_forecast,
+            forecast_days=forecast_days,
+            force_refresh=force_refresh,
+        )
+
     def refresh_real_context(self, values: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """从真实天气源抓取并保存快照；失败时保存 unavailable，而不是生成模拟天气。"""
+        """刷新已保存天气地点的世界快照；临时地点查询不会修改或污染世界状态。"""
         values = values or {}
-        settings = self.update_real_context_settings(values) if values else self.get_real_context_settings()
+        settings = self.get_real_context_settings()
         now = datetime.now().astimezone()
         captured_at = now.isoformat()
-        city = str(values.get("city") or settings.get("city") or "").strip()
+        saved_city = str(settings.get("city") or "").strip()
+        requested_city = str(values.get("city") or "").strip()
+        if requested_city and requested_city.casefold() != saved_city.casefold():
+            return self.query_weather(
+                requested_city,
+                include_forecast=bool(values.get("include_forecast", True)),
+                forecast_days=int(values.get("forecast_days") or 3),
+                force_refresh=bool(values.get("force_refresh", False)),
+            )
+        city = saved_city
         base = {
             "captured_at": captured_at, "source": "unavailable", "source_status": "unavailable",
             "city": city, "latitude": settings.get("latitude"), "longitude": settings.get("longitude"),
@@ -4797,31 +4681,22 @@ class EarthOnlineStore:
             base["source_status"] = "needs_location"
             return self._save_real_context_snapshot(base)
         try:
-            from config.config_utils import get_api_key
-            import httpx
-
-            api_key = get_api_key("SENIVERSE_API_KEY") or get_api_key("WEATHER_API_KEY")
-            if not api_key:
-                base["source_status"] = "not_configured"
+            weather = self.query_weather(city, include_forecast=False, force_refresh=True)
+            if weather.get("source_status") != "ok":
+                base["source_status"] = str(weather.get("source_status") or "unavailable")
+                base["raw_payload"] = weather
                 return self._save_real_context_snapshot(base)
-            with httpx.Client(timeout=10) as client:
-                response = client.get(
-                    "https://api.seniverse.com/v3/weather/now.json",
-                    params={"key": api_key, "location": city, "language": "zh-Hans", "unit": "c"},
-                )
-            response.raise_for_status()
-            payload = response.json()
-            result = (payload.get("results") or [])[0]
-            current = result.get("now") or {}
-            location = result.get("location") or {}
-            text = str(current.get("text") or "未知")
-            icon = "☼" if any(x in text for x in ("晴", "阳光")) else "≋" if any(x in text for x in ("雨", "雪")) else "◌"
+            resolved = weather.get("resolved_location") or {}
             base.update({
-                "source": "seniverse", "source_status": "ok", "city": str(location.get("name") or city),
-                "weather": text, "weather_icon": icon, "temperature": self._to_float(current.get("temperature")),
-                "condition_code": str(current.get("code") or ""), "humidity": self._to_float(current.get("humidity")),
-                "wind": f"{current.get('wind_direction', '')} {current.get('wind_scale', '')}级".strip(),
-                "timezone": str(now.tzinfo or ""), "raw_payload": payload, "is_stale": 0,
+                "captured_at": str(weather.get("captured_at") or captured_at),
+                "source": "seniverse", "source_status": "ok", "city": str(weather.get("city") or city),
+                "weather": str(weather.get("weather") or "未知"),
+                "weather_icon": str(weather.get("weather_icon") or "?"),
+                "temperature": weather.get("temperature"),
+                "condition_code": str(weather.get("condition_code") or ""),
+                "humidity": weather.get("humidity"), "wind": str(weather.get("wind") or ""),
+                "timezone": str(resolved.get("timezone") or resolved.get("timezone_offset") or ""),
+                "raw_payload": weather, "is_stale": 0,
             })
         except Exception as exc:
             logger.warning("[EarthOnline] 现实天气同步失败: %s", exc)
@@ -4873,7 +4748,9 @@ class EarthOnlineStore:
                 stale = age > settings["refresh_minutes"]
             except Exception:
                 stale = True
-            if str(snapshot.get("city") or "").strip() != str(settings.get("city") or "").strip():
+            raw_payload = snapshot.get("raw_payload") if isinstance(snapshot.get("raw_payload"), dict) else {}
+            snapshot_query = str(raw_payload.get("requested_location") or snapshot.get("city") or "").strip()
+            if snapshot_query.casefold() != str(settings.get("city") or "").strip().casefold():
                 stale = True
         if auto_refresh and (snapshot is None or stale):
             snapshot = self.refresh_real_context()
@@ -4912,193 +4789,6 @@ class EarthOnlineStore:
             "source_status": real.get("source_status", "unavailable"),
             "event_areas": events,
         }
-
-    def create_region_commission(self, region_key: str) -> Dict[str, Any]:
-        """为区域生成当天唯一的专属委托。"""
-        region = next((r for r in WORLD_REGION_SEEDS if r["key"] == region_key), None)
-        seed = REGION_COMMISSION_SEEDS.get(region_key)
-        if not region or not seed:
-            return {"success": False, "message": "未知区域"}
-        player = self.get_player()
-        if int(player.get("level", 1)) < int(region["level_req"]):
-            return {"success": False, "message": f"需要达到 Lv.{region['level_req']} 才能领取该区域委托"}
-        today = self._today()
-        for quest in self.list_quests():
-            fields = quest.get("fields") or {}
-            if fields.get("world_region") == region_key and fields.get("generated_date") == today and quest.get("status") in ("pending", "ongoing"):
-                return {"success": True, "created": False, "quest": quest}
-        status = self.get_world_status()
-        boost_applied = self._consume_boost_item("commission_resonance")
-        quest = self.create_quest(
-            title=f"{seed['title']} · {status['weather']}{status['period']}",
-            description=seed["description"],
-            quest_type="daily",
-            must_complete=False,
-            reward_currency=12 + int(region["level_req"]) * 3,
-            reward_exp=18 + int(region["level_req"]) * 5,
-            penalty_currency=0,
-            source="miya",
-            difficulty=min(5, max(1, int(region["level_req"]))),
-            fields={"world_region": region_key, "generated_date": today, "weather": status["weather"], "period": status["period"], "boosted": 1 if boost_applied else 0},
-            subtasks=[{"text": text, "done": 0} for text in seed["subtasks"]],
-            recurring="",
-        )
-        if boost_applied:
-            now = datetime.now().isoformat()
-            conn = self._connect()
-            try:
-                self._add_world_resonance_locked(conn, region_key, 30, now, "现实委托改写券生效")
-                self._log_activity(conn, "miya", "❦", "现实委托改写券已生效", "这次区域委托附带了额外的共鸣加成")
-                conn.commit()
-            finally:
-                conn.close()
-            self._write_mirror()
-        return {"success": True, "created": True, "quest": quest, "boost_applied": bool(boost_applied)}
-
-    def _consume_boost_item(self, boost_key: str) -> bool:
-        """找到并消耗一枚背包里的 boost 券 (fields.boost 匹配)，返回是否消耗成功。"""
-        conn = self._connect()
-        try:
-            rows = conn.execute(
-                "SELECT id, quantity, fields FROM items WHERE fields LIKE ?",
-                (f'%{json.dumps({"boost": boost_key}, ensure_ascii=False)[1:-1]}%',),
-            ).fetchall()
-            # LIKE 模糊匹配可能撞到其它 key，逐条精确核对
-            for row in rows:
-                fields = row["fields"] if isinstance(row["fields"], dict) else {}
-                if str(fields.get("boost") or "") != boost_key:
-                    continue
-                if int(row["quantity"] or 1) > 1:
-                    conn.execute("UPDATE items SET quantity = quantity - 1, updated_at = ? WHERE id = ?", (datetime.now().isoformat(), row["id"]))
-                else:
-                    conn.execute("DELETE FROM items WHERE id = ?", (row["id"],))
-                conn.commit()
-                return True
-            return False
-        finally:
-            conn.close()
-
-    def explore_world_region(self, region_key: str, latitude: Optional[float] = None, longitude: Optional[float] = None) -> Dict[str, Any]:
-        """探索一个区域，首次发现事件才发放奖励；重复探索会返回已发现提示。
-
-        区域绑定了地理围栏时，必须携带真实坐标且在半径范围内才能探索。
-        """
-        region_key = str(region_key or "").strip()
-        region_def = next((r for r in WORLD_REGION_SEEDS if r["key"] == region_key), None)
-        if not region_def:
-            return {"success": False, "message": "未知区域"}
-        geofence = self._check_geofence(region_key, latitude, longitude)
-        if not geofence.get("passed"):
-            return {"success": False, "message": geofence["message"], "geofence": geofence}
-        with self._lock:
-            conn = self._connect()
-            try:
-                player_row = conn.execute("SELECT * FROM player_profile WHERE id = 1").fetchone()
-                player_level = self._exp_to_level(int(player_row["exp"])) if player_row else 1
-                if player_level < int(region_def["level_req"]):
-                    return {
-                        "success": False,
-                        "message": f"需要达到 Lv.{region_def['level_req']} 才能探索「{region_def['name']}」",
-                        "level_req": int(region_def["level_req"]),
-                    }
-                real_context = self.get_real_context(auto_refresh=True)
-                period = self._world_period(datetime.now())
-                world_context = {**real_context, "period": period}
-                existing = conn.execute(
-                    "SELECT event_key FROM world_discoveries WHERE region_key = ?", (region_key,)
-                ).fetchall()
-                seen = {str(row["event_key"]) for row in existing}
-                candidates = [
-                    (event_key, event) for event_key, event in self._world_events_for_region(region_key, include_locked=False, context=world_context)
-                    if event_key not in seen
-                ]
-                if not candidates:
-                    region = conn.execute("SELECT * FROM world_regions WHERE key = ?", (region_key,)).fetchone()
-                    return {
-                        "success": True,
-                        "complete": True,
-                        "message": f"「{region_def['name']}」已经探索完毕，弥娅把这里标记成了你的观测站。",
-                        "region": dict(region) if region else {"key": region_key, "name": region_def["name"]},
-                        "discovery": None,
-                        "player": self.get_player(),
-                    }
-                event_key, event = candidates[0]
-                now = datetime.now().isoformat()
-                companion = self._world_companion_dialogue(region_def, event, world_context)
-                context_snapshot = {"date": now, "real_context": real_context, "companion": companion}
-                discovery_cursor = conn.execute(
-                    "INSERT INTO world_discoveries (region_key, event_key, kind, title, content, reward_currency, reward_exp, discovered_at, context_snapshot) VALUES (?,?,?,?,?,?,?,?,?)",
-                    (region_key, event_key, str(event.get("kind", "story")), event["title"], event["text"], int(event["reward_currency"]), int(event["reward_exp"]), now, json.dumps(context_snapshot, ensure_ascii=False)),
-                )
-                conn.execute(
-                    "UPDATE world_regions SET discovered=1, discovery_count=discovery_count+1, last_explored_at=?, updated_at=? WHERE key=?",
-                    (now, now, region_key),
-                )
-                resonance = self._add_world_resonance_locked(conn, region_key, 16 if event.get("condition") else 10, now, f"发现「{event['title']}」")
-                self._grant_miya_locked(conn, int(event["reward_currency"]), f"探索发现: {event['title']}")
-                level_up = self._add_exp_locked(conn, int(event["reward_exp"]))
-                self._log_activity(
-                    conn, "world", region_def["icon"], f"探索发现: {region_def['name']} · {event['title']}",
-                    f"奖励 +{event['reward_currency']} 弥娅币 · +{event['reward_exp']} 经验",
-                )
-                self._link_story_locked(conn, f"探索发现: {event['title']}", event["text"], event_type="world")
-                self._react_locked(conn, "world_discovered", f"在「{region_def['name']}」发现「{event['title']}」")
-                conn.commit()
-                region = conn.execute("SELECT * FROM world_regions WHERE key = ?", (region_key,)).fetchone()
-                result = {
-                    "success": True,
-                    "complete": len(candidates) == 1,
-                    "region": dict(region) if region else {},
-                    "discovery": {
-                        "region_key": region_key,
-                        "event_key": event_key,
-                        "kind": str(event.get("kind", "story")),
-                        "title": event["title"],
-                        "content": event["text"],
-                        "reward_currency": int(event["reward_currency"]),
-                        "reward_exp": int(event["reward_exp"]),
-                        "discovered_at": now,
-                        "companion": companion,
-                        "id": discovery_cursor.lastrowid,
-                    },
-                    "player": self.get_player(),
-                    "level_up": level_up,
-                    "resonance": resonance,
-                }
-            finally:
-                conn.close()
-        self._write_mirror()
-        self.refresh_achievements()
-        # 属性联动: 探索消耗少量体力, 好发现补充心情
-        result["attrs"] = {"energy": self._adjust_attr("energy", -4), "mood": self._adjust_attr("mood", 2)}
-        result["geofence"] = geofence
-        return result
-
-    def _check_geofence(self, region_key: str, latitude: Optional[float], longitude: Optional[float]) -> Dict[str, Any]:
-        """地理围栏校验: 区域未绑定坐标时直接放行; 绑定后必须在真实半径内。"""
-        conn = self._connect()
-        try:
-            region = conn.execute("SELECT latitude, longitude, geofence_radius, name FROM world_regions WHERE key=?", (region_key,)).fetchone()
-        finally:
-            conn.close()
-        if not region or not region["latitude"] or not region["longitude"] or not int(region["geofence_radius"] or 0):
-            return {"enabled": False, "passed": True}
-        radius = int(region["geofence_radius"])
-        try:
-            latitude = float(latitude) if latitude not in (None, "") else None
-            longitude = float(longitude) if longitude not in (None, "") else None
-        except (TypeError, ValueError):
-            latitude = longitude = None
-        if latitude is None or longitude is None:
-            return {
-                "enabled": True, "passed": False,
-                "message": f"「{region['name']}」是真实地点，需要开启定位并到达附近 {radius} 米内才能探索哦",
-            }
-        distance = self._geo_distance_m(latitude, longitude, float(region["latitude"]), float(region["longitude"]))
-        info = {"enabled": True, "passed": distance <= radius, "distance_m": round(distance), "radius_m": radius}
-        if not info["passed"]:
-            info["message"] = f"距离「{region['name']}」还有 {round(distance)} 米，走近一点再试试吧 (围栏半径 {radius} 米)"
-        return info
 
     # ── v17: 每日自动日常委托 ──────────────────────
 
@@ -5660,7 +5350,7 @@ class EarthOnlineStore:
         return {"monday": monday, "monday_iso": monday.isoformat(), "monday_date": monday.strftime("%Y-%m-%d"), "week_key": f"{iso[0]}-W{iso[1]:02d}", "iso_week": int(iso[1])}
 
     def get_battle_pass(self) -> Dict[str, Any]:
-        """本周纪行: 积分来自真实游玩数据 (完成委托/签到/探索/剧情/抽卡)，达到阈值可领奖励。"""
+        """本周纪行: 积分来自真实游玩数据 (完成委托/签到/地点到访/剧情/抽卡)。"""
         bounds = self._week_bounds()
         conn = self._connect()
         try:
@@ -5671,8 +5361,8 @@ class EarthOnlineStore:
             checkins = conn.execute(
                 "SELECT COUNT(*) c FROM daily_checkins WHERE date >= ?", (bounds["monday_date"],)
             ).fetchone()["c"]
-            discoveries = conn.execute(
-                "SELECT COUNT(*) c FROM world_discoveries WHERE discovered_at >= ?", (bounds["monday_iso"],)
+            place_visits = conn.execute(
+                "SELECT COUNT(*) c FROM real_place_visits WHERE visited_at >= ?", (bounds["monday_iso"],)
             ).fetchone()["c"]
             stories = conn.execute(
                 "SELECT COUNT(*) c FROM story_events WHERE happened_at >= ?", (bounds["monday_iso"],)
@@ -5689,7 +5379,7 @@ class EarthOnlineStore:
         breakdown = {
             "quest_completed": {"count": int(quests_done), "points_each": BATTLE_PASS_POINTS["quest_completed"]},
             "checkin": {"count": int(checkins), "points_each": BATTLE_PASS_POINTS["checkin"]},
-            "discovery": {"count": int(discoveries), "points_each": BATTLE_PASS_POINTS["discovery"]},
+            "place_visit": {"count": int(place_visits), "points_each": BATTLE_PASS_POINTS["place_visit"]},
             "story": {"count": int(stories), "points_each": BATTLE_PASS_POINTS["story"]},
             "memory_pull": {"count": int(pulls), "points_each": BATTLE_PASS_POINTS["memory_pull"]},
         }
@@ -5790,6 +5480,51 @@ class EarthOnlineStore:
                 raise
         return str(value).strip()[:1000]
 
+    @classmethod
+    def _validate_public_feed_resolution(cls, value: Any) -> str:
+        """Validate all current DNS answers; redirects are validated separately per hop."""
+        url = cls._public_feed_url(value)
+        parsed = urlparse(url)
+        try:
+            addresses = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+        except socket.gaierror as exc:
+            raise ValueError("信息源域名无法解析") from exc
+        if not addresses:
+            raise ValueError("信息源域名没有可用地址")
+        for address in addresses:
+            ip = ipaddress.ip_address(address[4][0])
+            if not ip.is_global:
+                raise ValueError("信息源域名解析到了内网、本机或保留地址")
+        return url
+
+    @classmethod
+    def _fetch_public_feed(cls, value: Any) -> bytes:
+        opener = urllib.request.build_opener(_NoFeedRedirect())
+        current = str(value)
+        for _ in range(4):
+            current = cls._validate_public_feed_resolution(current)
+            request = urllib.request.Request(
+                current,
+                headers={"User-Agent": "Miya-EarthOnline/1.0", "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml"},
+            )
+            try:
+                response = opener.open(request, timeout=10)
+            except urllib.error.HTTPError as exc:
+                if exc.code not in {301, 302, 303, 307, 308}:
+                    raise
+                location = exc.headers.get("Location")
+                if not location:
+                    raise ValueError("信息源返回了无目标的重定向") from exc
+                current = urljoin(current, location)
+                continue
+            with response:
+                cls._validate_public_feed_resolution(response.geturl())
+                payload = response.read(1024 * 1024 + 1)
+            if len(payload) > 1024 * 1024:
+                raise ValueError("信息源响应超过 1MB")
+            return payload
+        raise ValueError("信息源重定向次数过多")
+
     def list_earning_sources(self) -> List[Dict[str, Any]]:
         conn = self._connect()
         try:
@@ -5874,10 +5609,7 @@ class EarthOnlineStore:
         created, skipped, errors = [], 0, []
         for source in sources:
             try:
-                request = urllib.request.Request(source["url"], headers={"User-Agent": "Miya-EarthOnline/1.0", "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml"})
-                with urllib.request.urlopen(request, timeout=10) as response:
-                    payload = response.read(1024 * 1024 + 1)
-                if len(payload) > 1024 * 1024: raise ValueError("信息源响应超过 1MB")
+                payload = self._fetch_public_feed(source["url"])
                 entries = self._parse_public_feed(payload); now = datetime.now().isoformat()
                 with self._lock:
                     conn = self._connect()
@@ -5906,9 +5638,13 @@ class EarthOnlineStore:
         try:
             row = conn.execute("SELECT * FROM earning_preferences WHERE id = 1").fetchone()
             if not row:
-                return {"skills": [], "preferred_kinds": [], "weekly_hours": 5, "target_amount": 500, "min_hourly_rate": 0, "risk_tolerance": "low"}
+                return {
+                    "skills": [], "preferred_kinds": [], "weekly_hours": 5, "target_amount": 500,
+                    "min_hourly_rate": 0, "risk_tolerance": "low", "accepted_models": [],
+                    "sellable_assets": [], "constraints": "", "primary_route": "",
+                }
             result = dict(row)
-            for key in ("skills", "preferred_kinds"):
+            for key in ("skills", "preferred_kinds", "accepted_models", "sellable_assets"):
                 try: result[key] = json.loads(result.get(key) or "[]")
                 except (TypeError, ValueError): result[key] = []
             return result
@@ -5926,13 +5662,369 @@ class EarthOnlineStore:
             except (TypeError, ValueError): return fallback
         tolerance = str(data.get("risk_tolerance", current.get("risk_tolerance", "low"))).lower()
         if tolerance not in {"low", "medium", "high"}: tolerance = "low"
-        updated = {"skills": list_value("skills"), "preferred_kinds": list_value("preferred_kinds"), "weekly_hours": number("weekly_hours", 5), "target_amount": number("target_amount", 500), "min_hourly_rate": number("min_hourly_rate", 0), "risk_tolerance": tolerance}
+        updated = {
+            "skills": list_value("skills"),
+            "preferred_kinds": list_value("preferred_kinds"),
+            "accepted_models": list_value("accepted_models"),
+            "sellable_assets": list_value("sellable_assets"),
+            "weekly_hours": number("weekly_hours", 5),
+            "target_amount": number("target_amount", 500),
+            "min_hourly_rate": number("min_hourly_rate", 0),
+            "risk_tolerance": tolerance,
+            "constraints": str(data.get("constraints", current.get("constraints", "")) or "").strip()[:1000],
+            "primary_route": str(data.get("primary_route", current.get("primary_route", "")) or "").strip()[:40],
+        }
         with self._lock:
             conn = self._connect()
             try:
-                conn.execute("UPDATE earning_preferences SET skills = ?, preferred_kinds = ?, weekly_hours = ?, target_amount = ?, min_hourly_rate = ?, risk_tolerance = ?, updated_at = ? WHERE id = 1", (json.dumps(updated["skills"], ensure_ascii=False), json.dumps(updated["preferred_kinds"], ensure_ascii=False), updated["weekly_hours"], updated["target_amount"], updated["min_hourly_rate"], updated["risk_tolerance"], datetime.now().isoformat())); conn.commit()
+                conn.execute(
+                    "UPDATE earning_preferences SET skills = ?, preferred_kinds = ?, weekly_hours = ?, target_amount = ?, min_hourly_rate = ?, risk_tolerance = ?, accepted_models = ?, sellable_assets = ?, constraints = ?, primary_route = ?, updated_at = ? WHERE id = 1",
+                    (
+                        json.dumps(updated["skills"], ensure_ascii=False), json.dumps(updated["preferred_kinds"], ensure_ascii=False),
+                        updated["weekly_hours"], updated["target_amount"], updated["min_hourly_rate"], updated["risk_tolerance"],
+                        json.dumps(updated["accepted_models"], ensure_ascii=False), json.dumps(updated["sellable_assets"], ensure_ascii=False),
+                        updated["constraints"], updated["primary_route"], datetime.now().isoformat(),
+                    ),
+                )
+                conn.commit()
             finally: conn.close()
         self._write_mirror(); return self.get_earning_preferences()
+
+    # ── v18.2: 可售服务与外部动作审批 ────────────────
+
+    def list_earning_offers(self, status: str = "") -> List[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            if status:
+                rows = conn.execute(
+                    "SELECT * FROM earning_offers WHERE status = ? ORDER BY updated_at DESC, id DESC",
+                    (str(status),),
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM earning_offers ORDER BY updated_at DESC, id DESC").fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def get_earning_offer(self, offer_id: int) -> Optional[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT * FROM earning_offers WHERE id = ?", (int(offer_id),)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def create_earning_offer(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        data = data if isinstance(data, dict) else {}
+        title = str(data.get("title", "")).strip()[:200]
+        if not title:
+            raise ValueError("可售服务标题不能为空")
+
+        def number(key: str, default: float = 0.0) -> float:
+            try:
+                return max(0.0, float(data.get(key, default) or 0))
+            except (TypeError, ValueError):
+                return default
+
+        now = datetime.now().isoformat()
+        status = self._normalise_earning_status(data.get("status"), ("draft", "active", "paused", "retired"), "draft")
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute(
+                    "INSERT INTO earning_offers (title, customer, problem, deliverables, scope, proof, price, cost_estimate, delivery_days, revisions, route_key, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        title, str(data.get("customer", ""))[:500], str(data.get("problem", ""))[:2000],
+                        str(data.get("deliverables", ""))[:3000], str(data.get("scope", ""))[:3000],
+                        str(data.get("proof", ""))[:3000], number("price"), number("cost_estimate"),
+                        max(1, min(90, int(number("delivery_days", 2)))), max(0, min(20, int(number("revisions", 1)))),
+                        str(data.get("route_key", "automation_tool"))[:40], status, now, now,
+                    ),
+                )
+                offer_id = int(cur.lastrowid)
+                self._log_activity(conn, "earning", "◆", f"建立可售服务: {title}", f"报价 ¥{number('price'):.2f}")
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_earning_offer(offer_id) or {}
+
+    def update_earning_offer(self, offer_id: int, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if not self.get_earning_offer(offer_id):
+            return None
+        data = data if isinstance(data, dict) else {}
+        updates: Dict[str, Any] = {}
+        text_limits = {"title": 200, "customer": 500, "problem": 2000, "deliverables": 3000, "scope": 3000, "proof": 3000, "route_key": 40}
+        for key, limit in text_limits.items():
+            if key in data:
+                value = str(data[key] or "").strip()[:limit]
+                if key != "title" or value:
+                    updates[key] = value
+        for key in ("price", "cost_estimate"):
+            if key in data:
+                try:
+                    updates[key] = max(0.0, float(data[key] or 0))
+                except (TypeError, ValueError):
+                    pass
+        for key, lower, upper in (("delivery_days", 1, 90), ("revisions", 0, 20)):
+            if key in data:
+                try:
+                    updates[key] = max(lower, min(upper, int(data[key])))
+                except (TypeError, ValueError):
+                    pass
+        if "status" in data:
+            updates["status"] = self._normalise_earning_status(data["status"], ("draft", "active", "paused", "retired"), "draft")
+        if not updates:
+            return self.get_earning_offer(offer_id)
+        with self._lock:
+            conn = self._connect()
+            try:
+                assignments = ", ".join(f"{key} = ?" for key in updates)
+                conn.execute(
+                    f"UPDATE earning_offers SET {assignments}, updated_at = ? WHERE id = ?",
+                    (*updates.values(), datetime.now().isoformat(), int(offer_id)),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_earning_offer(offer_id)
+
+    @staticmethod
+    def _earning_action_hash(data: Dict[str, Any]) -> str:
+        payload = {
+            key: data.get(key)
+            for key in ("opportunity_id", "offer_id", "action_type", "target", "title", "content", "attachments", "amount", "risk")
+        }
+        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _expire_earning_actions(self) -> None:
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE earning_action_drafts SET status = 'expired', updated_at = ? WHERE status = 'approved' AND expires_at != '' AND expires_at <= ?",
+                    (now, now),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def list_earning_actions(self, status: str = "", limit: int = 100) -> List[Dict[str, Any]]:
+        self._expire_earning_actions()
+        conn = self._connect()
+        try:
+            bounded = max(1, min(500, int(limit)))
+            if status:
+                rows = conn.execute(
+                    "SELECT * FROM earning_action_drafts WHERE status = ? ORDER BY updated_at DESC, id DESC LIMIT ?",
+                    (str(status), bounded),
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM earning_action_drafts ORDER BY updated_at DESC, id DESC LIMIT ?", (bounded,)).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def get_earning_action(self, action_id: int) -> Optional[Dict[str, Any]]:
+        self._expire_earning_actions()
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT * FROM earning_action_drafts WHERE id = ?", (int(action_id),)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def create_earning_action(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        data = data if isinstance(data, dict) else {}
+        action_type = str(data.get("action_type", "proposal")).strip().lower()
+        allowed = {"proposal", "publish", "contact", "upload", "accept_order"}
+        if action_type not in allowed:
+            raise ValueError("仅允许准备提案、发布、联系、上传或接单草稿；付款、转账、提现和退款不受支持")
+        title = str(data.get("title", "")).strip()[:200]
+        content = str(data.get("content", "")).strip()[:12000]
+        if not title or not content:
+            raise ValueError("外部动作草稿必须包含标题和完整内容")
+        opportunity_id = int(data["opportunity_id"]) if data.get("opportunity_id") else None
+        offer_id = int(data["offer_id"]) if data.get("offer_id") else None
+        if opportunity_id and not self.get_earning_opportunity(opportunity_id):
+            raise ValueError("关联的收益机会不存在")
+        if offer_id and not self.get_earning_offer(offer_id):
+            raise ValueError("关联的可售服务不存在")
+        attachments = data.get("attachments", [])
+        if not isinstance(attachments, list):
+            attachments = []
+        attachments = [str(value).strip()[:500] for value in attachments if str(value).strip()][:20]
+        try:
+            amount = max(0.0, float(data.get("amount", 0) or 0))
+        except (TypeError, ValueError):
+            amount = 0.0
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute(
+                    "INSERT INTO earning_action_drafts (opportunity_id, offer_id, action_type, target, title, content, attachments, amount, risk, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,'draft',?,?)",
+                    (
+                        opportunity_id, offer_id, action_type, str(data.get("target", ""))[:1000], title, content,
+                        json.dumps(attachments, ensure_ascii=False), amount,
+                        self._normalise_earning_status(data.get("risk"), ("low", "medium", "high"), "medium"), now, now,
+                    ),
+                )
+                action_id = int(cur.lastrowid)
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_earning_action(action_id) or {}
+
+    def update_earning_action(self, action_id: int, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        action = self.get_earning_action(action_id)
+        if not action:
+            return None
+        data = data if isinstance(data, dict) else {}
+        updates: Dict[str, Any] = {}
+        for key, limit in (("target", 1000), ("title", 200), ("content", 12000)):
+            if key in data:
+                value = str(data[key] or "").strip()[:limit]
+                if key not in {"title", "content"} or value:
+                    updates[key] = value
+        if "attachments" in data:
+            raw = data["attachments"] if isinstance(data["attachments"], list) else []
+            updates["attachments"] = json.dumps([str(value).strip()[:500] for value in raw if str(value).strip()][:20], ensure_ascii=False)
+        if "amount" in data:
+            try:
+                updates["amount"] = max(0.0, float(data["amount"] or 0))
+            except (TypeError, ValueError):
+                pass
+        if "risk" in data:
+            updates["risk"] = self._normalise_earning_status(data["risk"], ("low", "medium", "high"), "medium")
+        if not updates:
+            return action
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                assignments = ", ".join(f"{key} = ?" for key in updates)
+                conn.execute(
+                    f"UPDATE earning_action_drafts SET {assignments}, status = 'draft', content_hash = '', approved_hash = '', submitted_at = '', approved_at = '', expires_at = '', revoked_at = '', updated_at = ? WHERE id = ?",
+                    (*updates.values(), now, int(action_id)),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_earning_action(action_id)
+
+    def submit_earning_action(self, action_id: int) -> Dict[str, Any]:
+        action = self.get_earning_action(action_id)
+        if not action:
+            raise ValueError("外部动作草稿不存在")
+        if action.get("status") not in {"draft", "revoked", "expired"}:
+            raise ValueError("只有草稿、已撤销或已过期动作可以重新提交")
+        digest = self._earning_action_hash(action)
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE earning_action_drafts SET status = 'pending', content_hash = ?, approved_hash = '', submitted_at = ?, approved_at = '', expires_at = '', revoked_at = '', updated_at = ? WHERE id = ?",
+                    (digest, now, now, int(action_id)),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_earning_action(action_id) or {}
+
+    def approve_earning_action(self, action_id: int, expected_hash: str) -> Dict[str, Any]:
+        action = self.get_earning_action(action_id)
+        if not action:
+            raise ValueError("外部动作草稿不存在")
+        if action.get("status") != "pending":
+            raise ValueError("只有待确认动作可以批准")
+        current_hash = self._earning_action_hash(action)
+        stored_hash = str(action.get("content_hash") or "")
+        if not expected_hash or not hmac.compare_digest(str(expected_hash), stored_hash):
+            raise ValueError("草稿内容校验失败，请刷新后重新确认")
+        if current_hash != stored_hash:
+            raise ValueError("草稿内容已经变化，请重新提交审批")
+        now_dt = datetime.now()
+        now = now_dt.isoformat()
+        expires_at = (now_dt + timedelta(minutes=30)).isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE earning_action_drafts SET status = 'approved', approved_hash = ?, approved_at = ?, expires_at = ?, updated_at = ? WHERE id = ?",
+                    (current_hash, now, expires_at, now, int(action_id)),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_earning_action(action_id) or {}
+
+    def revoke_earning_action(self, action_id: int) -> Dict[str, Any]:
+        action = self.get_earning_action(action_id)
+        if not action:
+            raise ValueError("外部动作草稿不存在")
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE earning_action_drafts SET status = 'revoked', approved_hash = '', approved_at = '', expires_at = '', revoked_at = ?, updated_at = ? WHERE id = ?",
+                    (now, now, int(action_id)),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_earning_action(action_id) or {}
+
+    def start_first_income_experiment(self, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """按玩家明确授权建立首单实验；只写站内数据，不执行外部动作。"""
+        data = data if isinstance(data, dict) else {}
+        def bounded_number(key: str, default: float, minimum: float) -> float:
+            try:
+                return max(minimum, float(data.get(key, default) or default))
+            except (TypeError, ValueError):
+                return default
+
+        weekly_hours = bounded_number("weekly_hours", 14.0, 14.0)
+        target_amount = bounded_number("target_amount", 250.0, 201.0)
+        price = bounded_number("price", 299.0, 0.0)
+        cost_estimate = bounded_number("cost_estimate", 30.0, 0.0)
+        preferences = self.update_earning_preferences({
+            "weekly_hours": weekly_hours,
+            "target_amount": target_amount,
+            "risk_tolerance": "low",
+            "accepted_models": ["automation_tool", "skill_service"],
+            "primary_route": "automation_tool",
+            "constraints": str(data.get("constraints") or "不垫资；账户登录、对外发送、报价承诺、付款和交易必须本人确认"),
+        })
+        offers = self.list_earning_offers()
+        offer = next((item for item in offers if item.get("title") == "48 小时自动化微服务"), None)
+        if not offer:
+            offer = self.create_earning_offer({
+                "title": "48 小时自动化微服务",
+                "customer": "有一个明确、重复电脑流程，希望降低手工时间的小团队或个人",
+                "problem": "把一个可描述输入、输出和操作步骤的重复流程自动化。",
+                "deliverables": "可运行工具或脚本、操作演示、使用说明、一次修改。",
+                "scope": "首单只打通一条流程；不接触付款、转账、验证码绕过、群发或违反平台规则的自动化。",
+                "proof": "先制作两个不含客户数据的演示样例。",
+                "price": price,
+                "cost_estimate": cost_estimate,
+                "delivery_days": 2,
+                "revisions": 1,
+                "route_key": "automation_tool",
+                "status": "active",
+            })
+        sprint = self.create_earning_sprint({"route_key": "automation_tool", "goal_amount": target_amount})
+        return {"success": True, "preferences": preferences, "offer": offer, "sprint": sprint}
 
     def list_earning_opportunities(self, status: str = "", kind: str = "", limit: int = 100) -> List[Dict[str, Any]]:
         conn = self._connect()
@@ -5964,7 +6056,21 @@ class EarthOnlineStore:
         with self._lock:
             conn = self._connect()
             try:
-                cur = conn.execute("INSERT INTO earning_opportunities (title, source, url, kind, description, income_min, income_max, hours, risk, confidence, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", (title, str(data.get("source", ""))[:120], str(data.get("url", ""))[:1000], str(data.get("kind", "other"))[:40], str(data.get("description", ""))[:2000], num("income_min"), num("income_max"), num("hours"), self._normalise_earning_status(data.get("risk"), ("low", "medium", "high", "unknown"), "unknown"), self._normalise_earning_status(data.get("confidence"), ("low", "medium", "high", "unknown"), "unknown"), self._normalise_earning_status(data.get("status"), ("inbox", "shortlisted", "applied", "won", "closed"), "inbox"), now, now))
+                cur = conn.execute(
+                    "INSERT INTO earning_opportunities (title, source, url, kind, description, income_min, income_max, hours, risk, confidence, verification_status, deadline, requirements, scam_flags, last_checked_at, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        title, str(data.get("source", ""))[:120], str(data.get("url", ""))[:1000], str(data.get("kind", "other"))[:40],
+                        str(data.get("description", ""))[:2000], num("income_min"), num("income_max"), num("hours"),
+                        self._normalise_earning_status(data.get("risk"), ("low", "medium", "high", "unknown"), "unknown"),
+                        self._normalise_earning_status(data.get("confidence"), ("low", "medium", "high", "unknown"), "unknown"),
+                        self._normalise_earning_status(data.get("verification_status"), ("unverified", "checking", "verified", "rejected"), "unverified"),
+                        str(data.get("deadline", ""))[:40], str(data.get("requirements", ""))[:2000],
+                        json.dumps(data.get("scam_flags", []) if isinstance(data.get("scam_flags"), list) else [], ensure_ascii=False),
+                        str(data.get("last_checked_at", ""))[:40],
+                        self._normalise_earning_status(data.get("status"), ("inbox", "shortlisted", "applied", "won", "closed"), "inbox"),
+                        now, now,
+                    ),
+                )
                 row_id = cur.lastrowid
                 self._log_activity(conn, "earning", "◇", f"收录收益情报: {title}", str(data.get("source", ""))[:200])
                 conn.commit()
@@ -5975,13 +6081,15 @@ class EarthOnlineStore:
     def update_earning_opportunity(self, opportunity_id: int, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         data = data if isinstance(data, dict) else {}
         updates: Dict[str, Any] = {}
-        for key in ("title", "source", "url", "kind", "description", "income_min", "income_max", "hours", "risk", "confidence", "status"):
+        for key in ("title", "source", "url", "kind", "description", "income_min", "income_max", "hours", "risk", "confidence", "verification_status", "deadline", "requirements", "scam_flags", "last_checked_at", "status"):
             if key not in data: continue
             if key in {"income_min", "income_max", "hours"}:
                 try: updates[key] = max(0.0, float(data[key] or 0))
                 except (TypeError, ValueError): continue
             elif key == "status": updates[key] = self._normalise_earning_status(data[key], ("inbox", "shortlisted", "applied", "won", "closed"), "inbox")
             elif key in {"risk", "confidence"}: updates[key] = self._normalise_earning_status(data[key], ("low", "medium", "high", "unknown"), "unknown")
+            elif key == "verification_status": updates[key] = self._normalise_earning_status(data[key], ("unverified", "checking", "verified", "rejected"), "unverified")
+            elif key == "scam_flags": updates[key] = json.dumps(data[key] if isinstance(data[key], list) else [], ensure_ascii=False)
             else: updates[key] = str(data[key] or "").strip()[:2000]
         if not updates: return self.get_earning_opportunity(opportunity_id)
         with self._lock:
@@ -6160,9 +6268,99 @@ class EarthOnlineStore:
         with self._lock:
             conn = self._connect()
             try:
-                cur = conn.execute("INSERT INTO earning_plans (title, goal_amount, target_date, status, notes, created_at, updated_at) VALUES (?,?,?,?,?,?,?)", (title, goal, str(data.get("target_date", ""))[:30], self._normalise_earning_status(data.get("status"), ("active", "paused", "completed", "archived"), "active"), str(data.get("notes", ""))[:2000], now, now)); row_id = cur.lastrowid; conn.commit()
+                cur = conn.execute(
+                    "INSERT INTO earning_plans (title, goal_amount, target_date, status, notes, route_key, is_sprint, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                    (
+                        title, goal, str(data.get("target_date", ""))[:30],
+                        self._normalise_earning_status(data.get("status"), ("active", "paused", "completed", "archived"), "active"),
+                        str(data.get("notes", ""))[:2000], str(data.get("route_key", ""))[:40],
+                        1 if data.get("is_sprint") else 0, now, now,
+                    ),
+                )
+                row_id = cur.lastrowid
+                conn.commit()
             finally: conn.close()
         self._write_mirror(); return self.get_earning_plan(int(row_id)) or {}
+
+    def earning_routes(self) -> List[Dict[str, Any]]:
+        """按玩家档案给第一笔收入实验路线排序，不承诺收益。"""
+        prefs = self.get_earning_preferences()
+        accepted = {str(value) for value in prefs.get("accepted_models", [])}
+        profile_text = " ".join(str(value) for value in [
+            *prefs.get("skills", []), *prefs.get("sellable_assets", []), *prefs.get("preferred_kinds", []),
+        ]).lower()
+        ranked: List[Dict[str, Any]] = []
+        for index, template in enumerate(EARNING_ROUTE_TEMPLATES):
+            if accepted and template["key"] not in accepted:
+                continue
+            item = {key: value for key, value in template.items() if key != "keywords"}
+            matches = [keyword for keyword in template["keywords"] if keyword.lower() in profile_text]
+            score = 60 - index * 0.5 + min(36, len(matches) * 12)
+            reasons: List[str] = []
+            if matches:
+                reasons.append("与你填写的能力或资源相关：" + "、".join(matches[:3]))
+            if template["cash_cost"] in {"零", "几乎为零"}:
+                score += 8
+                reasons.append("启动成本很低")
+            if template["key"] == "resale" and any(word in profile_text for word in ("闲置", "数码", "书", "收藏", "物品")):
+                score += 12
+            if not reasons:
+                reasons.append("当前资料不足，先作为低成本验证方向")
+            item["fit_score"] = max(0, min(100, score))
+            item["fit_reasons"] = reasons
+            item["first_action"] = template["steps"][0][0]
+            ranked.append(item)
+        ranked.sort(key=lambda value: value["fit_score"], reverse=True)
+        return ranked
+
+    def create_earning_sprint(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """创建 7 天第一笔收入实验；只产生站内计划和首个委托。"""
+        data = data if isinstance(data, dict) else {}
+        route_key = str(data.get("route_key", "")).strip()
+        route = next((item for item in EARNING_ROUTE_TEMPLATES if item["key"] == route_key), None)
+        if not route:
+            raise ValueError("请选择有效的赚钱路线")
+        accepted = {str(value) for value in self.get_earning_preferences().get("accepted_models", [])}
+        if accepted and route_key not in accepted:
+            raise ValueError("这条路线不在当前档案的可接受范围内")
+        active = [plan for plan in self.list_earning_plans(status="active") if plan.get("route_key") == route_key and plan.get("is_sprint")]
+        if active:
+            self.update_earning_preferences({"primary_route": route_key})
+            return {"success": True, "created": False, "plan": active[0], "route": {key: value for key, value in route.items() if key != "keywords"}}
+        try:
+            goal = max(1.0, float(data.get("goal_amount", 100) or 100))
+        except (TypeError, ValueError):
+            goal = 100.0
+        target_date = str(data.get("target_date", "")).strip()[:30] or (datetime.now() + timedelta(days=7)).date().isoformat()
+        plan = self.create_earning_plan({
+            "title": f"7 天第一笔收入实验 · {route['name']}",
+            "goal_amount": goal,
+            "target_date": target_date,
+            "notes": f"目标不是保证赚到 ¥{goal:g}，而是在 7 天内完成一次真实市场验证。外部发布、联系、上传和交易均需玩家确认。",
+            "route_key": route_key,
+            "is_sprint": True,
+        })
+        steps = []
+        for position, (title, description) in enumerate(route["steps"]):
+            steps.append(self.create_earning_plan_step(plan["id"], {"title": title, "description": description, "position": position}))
+        first = steps[0]
+        quest_result = self.convert_earning_plan_step_to_quest(first["id"])
+        self.update_earning_preferences({"primary_route": route_key, "target_amount": goal})
+        with self._lock:
+            conn = self._connect()
+            try:
+                self._log_activity(conn, "earning", "◆", f"开始第一笔收入实验: {route['name']}", f"7 天目标 ¥{goal:g}")
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return {
+            "success": True,
+            "created": True,
+            "plan": self.get_earning_plan(plan["id"]),
+            "quest": quest_result.get("quest"),
+            "route": {key: value for key, value in route.items() if key != "keywords"},
+        }
 
     def list_income_records(self, limit: int = 100) -> List[Dict[str, Any]]:
         conn = self._connect()
@@ -6176,7 +6374,7 @@ class EarthOnlineStore:
             try: return float(data.get(key, 0) or 0)
             except (TypeError, ValueError): return 0.0
         amount, cost, hours = num("amount"), max(0.0, num("cost")), max(0.0, num("hours"))
-        if amount < 0: raise ValueError("收入金额不能为负数，请用成本字段记录支出")
+        if amount <= 0: raise ValueError("收入金额必须大于 0；支出请记录在成本字段")
         opportunity_id = int(data["opportunity_id"]) if data.get("opportunity_id") else None
         if opportunity_id and not self.get_earning_opportunity(opportunity_id):
             raise ValueError("关联的收益情报不存在")
@@ -6199,6 +6397,7 @@ class EarthOnlineStore:
 
     def earning_guidance(self) -> Dict[str, Any]:
         opportunities = self.list_earning_opportunities(limit=200); plans = self.list_earning_plans(); records = self.list_income_records(limit=200); prefs = self.get_earning_preferences(); ranked = []
+        offers = self.list_earning_offers(); actions = self.list_earning_actions(limit=100)
         skills = [str(value).lower() for value in prefs.get("skills", [])]; preferred_kinds = [str(value).lower() for value in prefs.get("preferred_kinds", [])]
         for raw in opportunities:
             item = dict(raw); hours = float(item.get("hours") or 0); lo = float(item.get("income_min") or 0); hi = float(item.get("income_max") or 0); text = f"{item.get('title', '')} {item.get('description', '')} {item.get('kind', '')}".lower(); item["hourly_estimate"] = round((lo + hi) / 2 / hours, 2) if hours > 0 else 0
@@ -6211,10 +6410,62 @@ class EarthOnlineStore:
             tolerance = prefs.get("risk_tolerance", "low")
             if tolerance == "low" and item.get("risk") == "high": score -= 25; reasons.append("风险高于你的接受范围")
             elif tolerance == "high" and item.get("risk") == "low": reasons.append("风险低于你的上限")
+            verification = item.get("verification_status", "unverified")
+            if verification == "verified": score += 12; reasons.append("来源和关键条件已核验")
+            elif verification == "rejected": score -= 100; reasons.append("核验未通过")
+            else: score -= 8; reasons.append("关键条件仍待核验")
+            if item.get("scam_flags"):
+                score -= min(40, len(item["scam_flags"]) * 12); reasons.append("存在风险信号")
             if not reasons: reasons.append("按预估时薪、风险与可信度排序")
             item["fit_score"] = round(score, 2); item["fit_reasons"] = reasons; ranked.append(item)
         ranked.sort(key=lambda x: x["fit_score"], reverse=True)
-        return {"opportunities": ranked[:10], "plans": plans[:10], "income_records": records[:10], "preferences": prefs, "totals": {"net_income": round(sum(float(r.get("amount") or 0) - float(r.get("cost") or 0) for r in records), 2), "opportunity_count": len(opportunities), "active_plan_count": sum(1 for p in plans if p.get("status") == "active")}, "boundary": "建议基于你记录的资料，不保证收益；涉及外部平台、付款或提交前需要你确认。"}
+        active_plans = [plan for plan in plans if plan.get("status") == "active"]
+        next_step = None
+        focus_plan = active_plans[0] if active_plans else None
+        for candidate in active_plans:
+            next_step = next((step for step in candidate.get("steps", []) if step.get("status") not in {"done", "skipped"}), None)
+            if next_step:
+                focus_plan = candidate
+                break
+        pipeline = {key: sum(1 for item in opportunities if item.get("status") == key) for key in ("inbox", "shortlisted", "applied", "won", "closed")}
+        routes = self.earning_routes()
+        active_offers = [offer for offer in offers if offer.get("status") == "active"]
+        pending_actions = [action for action in actions if action.get("status") == "pending"]
+        approved_actions = [action for action in actions if action.get("status") == "approved"]
+        profile_ready = bool(prefs.get("skills") or prefs.get("sellable_assets") or active_offers) and float(prefs.get("weekly_hours") or 0) > 0
+        if pending_actions:
+            brief = f"审批箱里有 {len(pending_actions)} 份外部动作草稿待你逐项确认；批准只在 30 分钟内有效，也不会自动发送。"
+        elif approved_actions:
+            brief = f"有 {len(approved_actions)} 份草稿已经批准，等待你人工执行；弥娅不会自行发送或交易。"
+        elif next_step:
+            brief = f"当前先推进「{next_step['title']}」。完成后，弥娅会把实验推进到下一阶段。"
+        elif ranked:
+            brief = f"情报箱里优先核验「{ranked[0]['title']}」，先确认条件，再决定是否投入时间。"
+        elif not profile_ready:
+            brief = "先补充你能出售的能力或资源，弥娅才能把路线缩小到最值得验证的两三条。"
+        else:
+            brief = f"档案已就绪。建议从「{routes[0]['name']}」开始一个 7 天低成本实验。" if routes else "档案已就绪，可以开始第一轮收入实验。"
+        total_hours = sum(float(record.get("hours") or 0) for record in records)
+        net_income = round(sum(float(record.get("amount") or 0) - float(record.get("cost") or 0) for record in records), 2)
+        return {
+            "opportunities": ranked[:30], "plans": plans[:20], "income_records": records[:30], "preferences": prefs,
+            "offers": offers[:20], "action_drafts": actions[:50],
+            "routes": routes, "profile_ready": profile_ready, "brief": brief, "focus_plan": focus_plan, "next_action": next_step,
+            "pipeline": pipeline,
+            "totals": {
+                "net_income": net_income, "opportunity_count": len(opportunities),
+                "active_plan_count": len(active_plans), "active_offer_count": len(active_offers),
+                "pending_approval_count": len(pending_actions), "approved_action_count": len(approved_actions),
+                "total_hours": round(total_hours, 2),
+                "effective_hourly_rate": round(net_income / total_hours, 2) if total_hours > 0 else 0,
+            },
+            "automation": {
+                "automatic": ["公开信息同步", "去重与初筛", "生成草稿", "站内提醒", "收益复盘"],
+                "requires_confirmation": ["对外发布", "联系客户", "提交申请", "上传资料", "接受订单"],
+                "blocked": ["付款", "转账", "提现", "退款", "自动输入验证码或支付密码"],
+            },
+            "boundary": "建议不保证收益；外部动作必须逐项审批且当前仍由你人工执行。付款、转账、提现、退款和金融凭据输入不开放给弥娅。",
+        }
 
     # ── 汇总 (弥娅/前端一键读取) ────────────────────
 

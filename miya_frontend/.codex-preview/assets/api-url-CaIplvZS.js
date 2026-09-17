@@ -1,0 +1,1 @@
+import{r as e}from"./api-port-BWeTv8ls.js";function t(t){let n=t.startsWith(`/`)?t:`/${t}`;return`http://localhost:${e()}${n}`}export{t};

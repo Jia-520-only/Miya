@@ -38,46 +38,40 @@ class EarthOnlineWorld(_EarthBase):
     def config(self) -> Dict[str, Any]:
         return {
             "name": "earth_world",
-            "description": "查看佳的现实世界地图与已记录地点",
+            "description": "查看佳的现实地图事实，包含来源、确认状态、采集时间和旅程；待确认候选不可当作事实",
             "parameters": {"type": "object", "properties": {}, "required": []},
         }
 
     async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
         try:
-            store = self._store()
-            places = store.list_real_places(limit=20)
-            if not places:
-                return "现实地图里还没有记录地点～"
-            lines = ["【现实世界地图】"]
-            for place in places:
+            facts = self._store().get_map_fact_context(place_limit=20, journey_limit=10)
+            counts = facts["counts"]
+            weather = facts["weather"]
+            lines = [
+                "【现实地图事实】",
+                f"地点 {counts['places']} · 设备观测 {counts['observed']} · 玩家确认 {counts['confirmed']} · 待确认 {counts['unverified']} · 旅程 {counts['journeys']}",
+                f"天气源 {weather['source']} · 状态 {weather['source_status']} · 采集于 {weather['captured_at'] or '未同步'}",
+            ]
+            for place in facts["places"]:
                 coords = f"({place['latitude']:.6f}, {place['longitude']:.6f})" if place.get("latitude") is not None and place.get("longitude") is not None else "暂无坐标"
-                lines.append(f"◇ {place['name']} · 到访 {place['visit_count']} 次 · {coords}")
+                lines.append(f"◇ {place['name']} · {place.get('verification_status', 'unverified')} · 来源 {place.get('source', 'unknown')} · 到访 {place['visit_count']} 次 · {coords} · 最近 {place.get('last_visited_at') or '时间未知'}")
+            if not facts["places"]:
+                lines.append("还没有现实地点事实。")
             return "\n".join(lines)
         except Exception as e:
             return f"读取世界地图失败: {e}"
 
 
-class EarthOnlineExplore(_EarthBase):
-    """探索世界区域"""
+class EarthOnlineMapContext(EarthOnlineWorld):
+    """完整现实地图事实上下文。"""
 
     @property
     def config(self) -> Dict[str, Any]:
         return {
-            "name": "earth_explore",
-            "description": "旧版虚拟区域探索已停用；请使用现实地图记录地点",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "region_key": {"type": "string", "description": "区域 key，例如 miya_garden、city_lumen"},
-                    "latitude": {"type": "number", "description": "玩家当前纬度（区域绑定地理围栏时必填）"},
-                    "longitude": {"type": "number", "description": "玩家当前经度（区域绑定地理围栏时必填）"},
-                },
-                "required": ["region_key"],
-            },
+            "name": "earth_map_context",
+            "description": "读取弥娅可用的完整现实地图事实上下文，严格区分设备观测、玩家确认和待确认候选",
+            "parameters": {"type": "object", "properties": {}, "required": []},
         }
-
-    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
-        return "虚拟区域探索已停用；请使用现实地图记录地点或查询实时现实上下文。"
 
 
 class EarthOnlineWorldStatus(_EarthBase):
@@ -123,7 +117,7 @@ class EarthOnlineRefreshRealContext(_EarthBase):
     def config(self) -> Dict[str, Any]:
         return {
             "name": "earth_refresh_real_context",
-            "description": "刷新真实天气快照；失败不会回退到模拟天气",
+            "description": "刷新已保存的默认天气地点；传入不同城市时仅做一次性查询",
             "parameters": {"type": "object", "properties": {"city": {"type": "string", "description": "城市名称，可留空"}}, "required": []},
         }
 
@@ -131,27 +125,78 @@ class EarthOnlineRefreshRealContext(_EarthBase):
         try:
             data = self._store().refresh_real_context({"city": args.get("city", "")} if args.get("city") else {})
             if data.get("source_status") == "ok":
-                return f"现实天气已同步：{data.get('city')} · {data.get('weather')} · {data.get('temperature', '未知')}°C"
+                if args.get("city") and data.get("requested_location"):
+                    from core.weather_service import format_weather_report
+                    return format_weather_report(data)
+                return f"默认天气地点已同步：{data.get('city')} · {data.get('weather')} · {data.get('temperature', '未知')}°C"
             return f"现实天气未同步：{data.get('source_status', 'unavailable')}"
         except Exception as e:
             return f"刷新现实天气失败: {e}"
 
 
-class EarthOnlineRegionCommission(_EarthBase):
+class EarthOnlineQueryWeather(_EarthBase):
     @property
     def config(self) -> Dict[str, Any]:
         return {
-            "name": "earth_region_commission",
-            "description": "旧版虚拟区域委托已停用",
+            "name": "earth_query_weather",
+            "description": "查询任意地点的真实天气和可选未来预报；只读，不修改默认天气地点、当前位置或地图档案",
             "parameters": {
                 "type": "object",
-                "properties": {"region_key": {"type": "string", "description": "区域 key，例如 miya_garden、night_sea"}},
-                "required": ["region_key"],
+                "properties": {
+                    "location": {"type": "string", "description": "城市、区县或国家等地点名称"},
+                    "include_forecast": {"type": "boolean", "description": "是否查询未来预报，默认 true"},
+                    "forecast_days": {"type": "integer", "description": "预报天数，1-7，默认 3"},
+                },
+                "required": ["location"],
             },
         }
 
     async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
-        return "虚拟区域委托已停用；可以直接创建普通现实任务。"
+        try:
+            from core.weather_service import format_weather_report
+            data = self._store().query_weather(
+                str(args.get("location", "")),
+                include_forecast=bool(args.get("include_forecast", True)),
+                forecast_days=int(args.get("forecast_days", 3)),
+            )
+            return format_weather_report(data)
+        except Exception as e:
+            return f"查询天气失败: {e}"
+
+
+class EarthOnlineListJourneys(_EarthBase):
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_list_journeys",
+            "description": "查看由 GPS 定位轨迹形成的现实旅程，包含距离、定位点数、来源和时间",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        journeys = self._store().list_real_journeys(limit=20)
+        if not journeys:
+            return "还没有由定位轨迹记录的现实旅程。"
+        lines = ["【现实旅程事实】"]
+        for journey in journeys:
+            lines.append(f"- #{journey['id']} {journey['title']} · {journey['verification_status']} · {journey['distance_m'] / 1000:.2f}km · {journey['point_count']} 个定位点 · {journey['happened_at']}")
+        return "\n".join(lines)
+
+
+class EarthOnlineConfirmPlace(_EarthBase):
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_confirm_place",
+            "description": "仅在佳明确确认后，将一个待确认地点候选升级为玩家确认事实",
+            "parameters": {"type": "object", "properties": {"place_key": {"type": "string"}}, "required": ["place_key"]},
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        place = self._store().update_real_place(str(args.get("place_key", "")), {"verification_status": "confirmed"})
+        if not place:
+            return f"地点 {args.get('place_key', '')} 不存在"
+        return f"地点「{place['name']}」已标记为玩家确认事实；原始来源仍保留为 {place.get('source', 'unknown')}。"
 
 
 class EarthOnlineSummary(_EarthBase):
@@ -545,10 +590,12 @@ class EarthOnlineAddStory(_EarthBase):
                 place = self._store().record_real_place_visit(
                     str(args["location_name"]), latitude=args.get("latitude"), longitude=args.get("longitude"),
                     note=str(args.get("content", ""))[:240] or str(args.get("title", "")), source="conversation",
+                    verification_status="unverified", confidence=0.5,
                 )
                 if args.get("image_path") and place:
                     self._store().update_real_place_image(place["place_key"], str(args["image_path"]))
-            return f"剧情已记录: 「{s['title']}」"
+            suffix = "；地点已作为待确认候选保存" if args.get("location_name") else ""
+            return f"剧情已记录: 「{s['title']}」{suffix}"
         except Exception as e:
             return f"记录剧情失败: {e}"
 
@@ -1041,6 +1088,11 @@ class EarthOnlineAnalyze(_EarthBase):
             if chars["top_affinity"]:
                 lines.append("好感排行: " + "、".join(f"{c['name']}({c['affinity']})" for c in chars["top_affinity"]))
             lines.append(f"成就: {ach['unlocked']}/{ach['total']} | 剧情 {a['stories']['total']} 段 | 连签 {a['checkin'].get('streak', 0)} 天")
+            map_counts = a["map_facts"]["counts"]
+            lines.append(f"现实地图: 地点 {map_counts['places']} · 旅程 {map_counts['journeys']} · 设备观测 {map_counts['observed']} · 玩家确认 {map_counts['confirmed']} · 待确认 {map_counts['unverified']}")
+            pending_places = [place["name"] for place in a["map_facts"]["places"] if place.get("verification_status") == "unverified"]
+            if pending_places:
+                lines.append("待确认地点（不可当作事实）: " + "、".join(pending_places[:5]))
             w = a["weekly"]
             lines.append(f"本周: 完成 {w['quests']['completed']} 任务 / 收入 +{w['earned']['currency']} 弥娅币 / 签到 {w['checkins']} 天")
             return "\n".join(lines)
@@ -1699,219 +1751,6 @@ class EarthOnlineUpdatePlayer(_EarthBase):
             return f"修改玩家档案失败: {e}"
 
 
-class EarthOnlineUpdateRegion(_EarthBase):
-    """修改世界区域"""
-
-    @property
-    def config(self) -> Dict[str, Any]:
-        return {
-            "name": "earth_update_region",
-            "description": "修改世界区域设定（名称/简介/等级门槛/地理围栏等，只更新传入的字段）。geofence_radius 单位米、0=关闭围栏；绑定后玩家探索该区域必须开启真实定位并在半径内",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "region_key": {"type": "string", "description": "区域 key，如 miya_garden"},
-                    "name": {"type": "string", "description": "区域名称"},
-                    "subtitle": {"type": "string", "description": "区域副标题"},
-                    "description": {"type": "string", "description": "区域描述（传空字符串可清除）"},
-                    "icon": {"type": "string", "description": "图标符号"},
-                    "color": {"type": "string", "description": "主题色，如 #f0a35b"},
-                    "level_req": {"type": "integer", "description": "解锁等级"},
-                    "latitude": {"type": "number", "description": "围栏中心纬度"},
-                    "longitude": {"type": "number", "description": "围栏中心经度"},
-                    "geofence_radius": {"type": "integer", "description": "围栏半径（米），0=关闭围栏"},
-                },
-                "required": ["region_key"],
-            },
-        }
-
-    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
-        try:
-            values: Dict[str, Any] = {}
-            for key in ("name", "subtitle", "icon", "color"):
-                if args.get(key):
-                    values[key] = args[key]
-            if args.get("description") is not None:
-                values["description"] = args["description"]
-            if args.get("level_req") is not None:
-                values["level_req"] = int(args["level_req"])
-            if args.get("latitude") is not None:
-                values["latitude"] = float(args["latitude"])
-            if args.get("longitude") is not None:
-                values["longitude"] = float(args["longitude"])
-            if args.get("geofence_radius") is not None:
-                values["geofence_radius"] = int(args["geofence_radius"])
-            r = self._store().update_world_region(str(args.get("region_key", "")), values)
-            if not r:
-                return f"区域 {args.get('region_key')} 不存在"
-            geo = "未绑定围栏"
-            if r.get("latitude") is not None and r.get("longitude") is not None and int(r.get("geofence_radius") or 0) > 0:
-                geo = f"围栏 ({r['latitude']}, {r['longitude']}) 半径 {r['geofence_radius']} 米"
-            return f"区域 {r['key']}「{r['name']}」已更新 · Lv.{r['level_req']} 解锁 · {geo}"
-        except Exception as e:
-            return f"修改区域失败: {e}"
-
-
-class EarthOnlineAddWorldEvent(_EarthBase):
-    """添加自定义世界发现"""
-
-    @property
-    def config(self) -> Dict[str, Any]:
-        return {
-            "name": "earth_add_world_event",
-            "description": "为区域添加一条自定义世界发现（玩家探索该区域时可遇到），策划丰富世界内容的主要手段",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "region_key": {"type": "string", "description": "目标区域 key"},
-                    "title": {"type": "string", "description": "发现标题"},
-                    "text": {"type": "string", "description": "发现文案（写给佳看的正文）"},
-                    "reward_currency": {"type": "integer", "description": "奖励弥娅币，默认0"},
-                    "reward_exp": {"type": "integer", "description": "奖励经验，默认0"},
-                    "kind": {"type": "string", "description": "story故事/chest宝箱/hidden隐藏，默认story"},
-                },
-                "required": ["region_key", "title", "text"],
-            },
-        }
-
-    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
-        try:
-            ev = self._store().create_world_custom_event(
-                region_key=str(args.get("region_key", "")),
-                title=str(args.get("title", "")),
-                text=str(args.get("text", "")),
-                reward_currency=int(args.get("reward_currency", 0)),
-                reward_exp=int(args.get("reward_exp", 0)),
-                kind=str(args.get("kind", "story")),
-            )
-            if not ev:
-                return "创建失败: 区域不存在，或标题/内容为空"
-            return (
-                f"世界发现已添加 #{ev['id']}「{ev['title']}」→ 区域 {ev['region_key']} · "
-                f"+{ev['reward_currency']}币/+{ev['reward_exp']}经验 [{ev['kind']}]"
-            )
-        except Exception as e:
-            return f"添加世界发现失败: {e}"
-
-
-class EarthOnlineListWorldEvents(_EarthBase):
-    """查看自定义世界发现"""
-
-    @property
-    def config(self) -> Dict[str, Any]:
-        return {
-            "name": "earth_list_world_events",
-            "description": "查看自定义世界发现清单（可按区域过滤，不传查全部）",
-            "parameters": {
-                "type": "object",
-                "properties": {"region_key": {"type": "string", "description": "区域 key，留空查全部"}},
-                "required": [],
-            },
-        }
-
-    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
-        try:
-            events = self._store().list_world_custom_events(region_key=str(args.get("region_key", "")))
-            if not events:
-                return "还没有自定义世界发现～"
-            lines = ["【自定义世界发现】"]
-            for ev in events:
-                lines.append(
-                    f"- #{ev['id']} [{ev['region_key']}/{ev['kind']}] {ev['title']} "
-                    f"+{ev['reward_currency']}币/+{ev['reward_exp']}经验"
-                )
-            return "\n".join(lines)
-        except Exception as e:
-            return f"查看世界发现失败: {e}"
-
-
-class EarthOnlineDeleteWorldEvent(_EarthBase):
-    """删除自定义世界发现"""
-
-    @property
-    def config(self) -> Dict[str, Any]:
-        return {
-            "name": "earth_delete_world_event",
-            "description": "删除一条自定义世界发现（玩家尚未遇到的将不会再遇到）",
-            "parameters": {
-                "type": "object",
-                "properties": {"event_id": {"type": "integer", "description": "世界发现ID（先调用 earth_list_world_events 查看）"}},
-                "required": ["event_id"],
-            },
-        }
-
-    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
-        try:
-            if not self._store().delete_world_custom_event(int(args.get("event_id", 0))):
-                return f"世界发现 #{args.get('event_id')} 不存在"
-            return f"世界发现 #{args.get('event_id')} 已删除"
-        except Exception as e:
-            return f"删除世界发现失败: {e}"
-
-
-class EarthOnlineListDiscoveries(_EarthBase):
-    """查看探索发现记录"""
-
-    @property
-    def config(self) -> Dict[str, Any]:
-        return {
-            "name": "earth_list_discoveries",
-            "description": "查看玩家的世界探索发现记录（可按区域过滤，含同行选择结果）",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "region_key": {"type": "string", "description": "区域 key，留空查全部"},
-                    "limit": {"type": "integer", "description": "条数，默认20"},
-                },
-                "required": [],
-            },
-        }
-
-    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
-        try:
-            rows = self._store().list_world_discoveries(region_key=str(args.get("region_key", "")), limit=int(args.get("limit", 20)))
-            if not rows:
-                return "还没有探索发现记录～"
-            labels = {"continue": "继续前进", "record": "记录此刻", "rest": "先休息"}
-            lines = ["【世界探索发现】"]
-            for d in rows:
-                choice = d.get("choice") or {}
-                mark = f" → {labels.get(choice.get('choice'), choice.get('choice'))}" if choice else ""
-                lines.append(f"- #{d['id']} [{d['region_key']}] {d['title']}{mark} ({str(d.get('discovered_at', ''))[:10]})")
-            return "\n".join(lines)
-        except Exception as e:
-            return f"查看探索记录失败: {e}"
-
-
-class EarthOnlineChooseDiscovery(_EarthBase):
-    """同行选择"""
-
-    @property
-    def config(self) -> Dict[str, Any]:
-        return {
-            "name": "earth_choose_discovery",
-            "description": "对一条探索发现做同行选择（choice: continue继续前进/record记录此刻/rest先休息），弥娅可以陪佳一起选，每条发现只能选一次",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "discovery_id": {"type": "integer", "description": "发现记录ID（先调用 earth_list_discoveries 查看）"},
-                    "choice": {"type": "string", "description": "continue继续前进/record记录此刻/rest先休息"},
-                },
-                "required": ["discovery_id", "choice"],
-            },
-        }
-
-    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
-        try:
-            r = self._store().choose_world_discovery(int(args.get("discovery_id", 0)), str(args.get("choice", "")))
-            if not r.get("success"):
-                return r.get("message", "选择失败")
-            res = r.get("resonance") or {}
-            return f"已选择「{r['label']}」· 区域共鸣 Lv.{res.get('level', 1)} (xp {res.get('xp', 0)})"
-        except Exception as e:
-            return f"同行选择失败: {e}"
-
-
 class EarthOnlineListEventAreas(_EarthBase):
     """查看限时活动区域"""
 
@@ -1996,7 +1835,7 @@ class EarthOnlineUpdateEventArea(_EarthBase):
     def config(self) -> Dict[str, Any]:
         return {
             "name": "earth_update_event_area",
-            "description": "修改自定义限时活动（只更新传入的字段；active 可手动上下架；内置活动不可修改）",
+            "description": "修改玩家创建的现实活动（只更新传入的字段；active 可手动上下架）",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2031,7 +1870,7 @@ class EarthOnlineUpdateEventArea(_EarthBase):
                 values["active"] = bool(args["active"])
             a = self._store().update_world_event_area(str(args.get("event_key", "")), values)
             if not a:
-                return f"自定义活动 {args.get('event_key')} 不存在 (内置活动不可修改)"
+                return f"现实活动 {args.get('event_key')} 不存在"
             return f"限时活动「{a['name']}」({a['key']}) 已更新: {a['start']} ~ {a['end']}"
         except Exception as e:
             return f"修改限时活动失败: {e}"
@@ -2044,7 +1883,7 @@ class EarthOnlineDeleteEventArea(_EarthBase):
     def config(self) -> Dict[str, Any]:
         return {
             "name": "earth_delete_event_area",
-            "description": "删除自定义限时活动（连带删除其活动商店商品；内置活动不可删除）",
+            "description": "删除玩家创建的现实活动，并连带删除其活动商品",
             "parameters": {
                 "type": "object",
                 "properties": {"event_key": {"type": "string", "description": "活动 key"}},
@@ -2055,7 +1894,7 @@ class EarthOnlineDeleteEventArea(_EarthBase):
     async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
         try:
             if not self._store().delete_world_event_area(str(args.get("event_key", ""))):
-                return f"自定义活动 {args.get('event_key')} 不存在 (内置活动不可删除)"
+                return f"现实活动 {args.get('event_key')} 不存在"
             return f"限时活动 {args.get('event_key')} 及其商店商品已删除"
         except Exception as e:
             return f"删除限时活动失败: {e}"
@@ -2068,7 +1907,7 @@ class EarthOnlineAddEventShopItem(_EarthBase):
     def config(self) -> Dict[str, Any]:
         return {
             "name": "earth_add_event_shop_item",
-            "description": "给限时活动上架一件兑换商品（花的是玩家的弥娅币，购买由玩家自己操作；requires_discoveries 可设探索发现门槛）",
+            "description": "给现实活动上架兑换商品（购买由玩家自己操作；requires_discoveries 是兼容字段，表示需记录的现实地点数）",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2079,7 +1918,7 @@ class EarthOnlineAddEventShopItem(_EarthBase):
                     "cost": {"type": "integer", "description": "弥娅币价格，默认0"},
                     "limit": {"type": "integer", "description": "限购次数，默认1"},
                     "kind": {"type": "string", "description": "collectible收藏品/story剧情/interaction互动，默认collectible"},
-                    "requires_discoveries": {"type": "integer", "description": "需累计探索发现数，默认0"},
+                    "requires_discoveries": {"type": "integer", "description": "需记录的现实地点数，默认0"},
                 },
                 "required": ["event_key", "key", "name"],
             },
@@ -2873,6 +2712,221 @@ class EarthOnlineRedeemService(_EarthBase):
             return f"使用服务券失败: {e}"
 
 
+class EarthOnlineEarningBrief(_EarthBase):
+    """收益中枢只读简报。"""
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_earning_brief",
+            "description": "查看收益中枢简报：赚钱档案、推荐路线、当前实验下一步、机会漏斗、真实净收入和时薪。只读",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            guidance = self._store().earning_guidance()
+            totals = guidance["totals"]
+            pipeline = guidance["pipeline"]
+            lines = [
+                "【收益中枢简报】",
+                guidance["brief"],
+                f"真实净收入 ¥{totals['net_income']:.2f} · 实际时薪 ¥{totals['effective_hourly_rate']:.2f} · 进行中实验 {totals['active_plan_count']}",
+                f"机会漏斗: 待评估 {pipeline['inbox']} / 候选 {pipeline['shortlisted']} / 已尝试 {pipeline['applied']} / 已成交 {pipeline['won']}",
+            ]
+            next_action = guidance.get("next_action")
+            if next_action:
+                lines.append(f"下一步: #{next_action['id']} {next_action['title']} · {next_action.get('description') or '暂无说明'}")
+            else:
+                routes = guidance.get("routes") or []
+                if routes:
+                    lines.append("推荐路线: " + "、".join(f"{route['name']}({route['fit_score']}分)" for route in routes[:3]))
+            lines.append("边界: 可自动收集、整理和起草；对外发布、联系、上传、承诺、付款或交易必须由佳确认。")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"读取收益中枢失败: {e}"
+
+
+class EarthOnlineCreateEarningSprint(_EarthBase):
+    """创建站内第一笔收入实验。"""
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_create_earning_sprint",
+            "description": "创建一个站内 7 天第一笔收入实验并把第一步放进委托板；不会对外发布、联系、上传、承诺或交易",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "route_key": {"type": "string", "enum": ["skill_service", "digital_product", "resale", "content", "knowledge_help", "automation_tool", "local_service"], "description": "赚钱路线"},
+                    "goal_amount": {"type": "number", "description": "本轮真实收入目标，默认100元"},
+                },
+                "required": ["route_key"],
+            },
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            result = self._store().create_earning_sprint({
+                "route_key": str(args.get("route_key", "")),
+                "goal_amount": float(args.get("goal_amount", 100) or 100),
+            })
+            plan = result["plan"]
+            first = next((step for step in plan.get("steps", []) if step.get("status") not in {"done", "skipped"}), None)
+            state = "已创建" if result.get("created") else "已经存在"
+            return (
+                f"7 天收入实验{state}: 「{plan['title']}」· 目标 ¥{plan['goal_amount']:.0f} · 截止 {plan.get('target_date') or '未设置'}\n"
+                f"第一步: {first['title'] if first else '所有步骤已完成'}。只建立了站内计划；任何外部动作仍需佳确认。"
+            )
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"创建收入实验失败: {e}"
+
+
+class EarthOnlineStartFirstIncomeExperiment(_EarthBase):
+    """建立已授权的首单实验，只写站内数据。"""
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_start_first_income_experiment",
+            "description": "建立用户已明确授权的首单实验、自动化微服务卡和7天站内计划；不执行外部或资金动作",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "weekly_hours": {"type": "number", "description": "每周时间，默认且最低14小时"},
+                    "target_amount": {"type": "number", "description": "目标净收入，默认250元且必须超过200元"},
+                },
+                "required": [],
+            },
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            result = self._store().start_first_income_experiment({
+                "weekly_hours": args.get("weekly_hours", 14),
+                "target_amount": args.get("target_amount", 250),
+            })
+            offer = result["offer"]
+            plan = result["sprint"]["plan"]
+            return (
+                f"首单实验已就绪: 「{offer['title']}」· 报价 ¥{offer['price']:.0f} · "
+                f"目标净收入 ¥{result['preferences']['target_amount']:.0f} · 每周 {result['preferences']['weekly_hours']:.0f} 小时\n"
+                f"7 天计划: 「{plan['title']}」。仅建立站内服务卡和计划，没有对外发送或资金操作。"
+            )
+        except Exception as e:
+            return f"启动首单实验失败: {e}"
+
+
+class EarthOnlineListEarningOffers(_EarthBase):
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_list_earning_offers",
+            "description": "查看站内可售服务卡；只读",
+            "parameters": {"type": "object", "properties": {"status": {"type": "string"}}, "required": []},
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            offers = self._store().list_earning_offers(status=str(args.get("status", "") or ""))
+            if not offers:
+                return "目前没有可售服务卡。"
+            return "\n".join(
+                ["【可售服务卡】"]
+                + [f"#{offer['id']} {offer['title']} · ¥{offer['price']:.0f} · {offer['delivery_days']} 天 · {offer['status']}" for offer in offers[:20]]
+            )
+        except Exception as e:
+            return f"读取可售服务失败: {e}"
+
+
+class EarthOnlineListEarningActions(_EarthBase):
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_list_earning_actions",
+            "description": "查看外部动作草稿与审批状态；只读，不发送、不执行",
+            "parameters": {"type": "object", "properties": {"status": {"type": "string"}}, "required": []},
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            actions = self._store().list_earning_actions(status=str(args.get("status", "") or ""), limit=50)
+            if not actions:
+                return "审批箱目前为空。"
+            lines = ["【外部动作审批箱】"]
+            lines.extend(
+                f"#{action['id']} [{action['status']}] {action['title']} · {action['action_type']} · 目标: {action.get('target') or '未填写'}"
+                for action in actions
+            )
+            lines.append("批准也不等于发送；系统没有提供外部执行或资金操作工具。")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"读取审批箱失败: {e}"
+
+
+class EarthOnlineCreateEarningAction(_EarthBase):
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_create_earning_action",
+            "description": "创建站内提案、发布、联系、上传或接单草稿；不批准、不发送，且不支持任何资金动作",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action_type": {"type": "string", "enum": ["proposal", "publish", "contact", "upload", "accept_order"]},
+                    "title": {"type": "string"},
+                    "content": {"type": "string"},
+                    "target": {"type": "string"},
+                    "offer_id": {"type": "integer"},
+                    "opportunity_id": {"type": "integer"},
+                    "amount": {"type": "number"},
+                },
+                "required": ["action_type", "title", "content"],
+            },
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            action = self._store().create_earning_action({
+                "action_type": args.get("action_type"),
+                "title": args.get("title"),
+                "content": args.get("content"),
+                "target": args.get("target", ""),
+                "offer_id": args.get("offer_id") or None,
+                "opportunity_id": args.get("opportunity_id") or None,
+                "amount": args.get("amount", 0),
+            })
+            return f"审批草稿 #{action['id']} 已创建: 「{action['title']}」。当前为 draft，尚未批准、发送或执行。"
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"创建审批草稿失败: {e}"
+
+
+class EarthOnlineSubmitEarningAction(_EarthBase):
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_submit_earning_action",
+            "description": "将站内草稿提交给用户审批；不批准、不发送、不执行",
+            "parameters": {"type": "object", "properties": {"action_id": {"type": "integer"}}, "required": ["action_id"]},
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            action = self._store().submit_earning_action(int(args.get("action_id", 0)))
+            return (
+                f"审批草稿 #{action['id']} 已提交，内容校验值 {action['content_hash']}。"
+                "需要用户在收益中枢逐次确认；提交不等于批准，批准也不等于发送。"
+            )
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"提交审批草稿失败: {e}"
+
+
 def get_earth_online_tools():
     """获取所有地球online 工具实例"""
     return [
@@ -2909,11 +2963,13 @@ def get_earth_online_tools():
         EarthOnlinePostNote(),
         EarthOnlineListNotes(),
         EarthOnlineWorld(),
-        EarthOnlineExplore(),
+        EarthOnlineMapContext(),
+        EarthOnlineListJourneys(),
+        EarthOnlineConfirmPlace(),
         EarthOnlineWorldStatus(),
         EarthOnlineRealContext(),
         EarthOnlineRefreshRealContext(),
-        EarthOnlineRegionCommission(),
+        EarthOnlineQueryWeather(),
         # 策划级: 实体修改/删除
         EarthOnlineGetItem(),
         EarthOnlineUpdateItem(),
@@ -2931,13 +2987,6 @@ def get_earth_online_tools():
         EarthOnlineCheckin(),
         # 策划级: 玩家档案
         EarthOnlineUpdatePlayer(),
-        # 策划级: 世界与地理围栏
-        EarthOnlineUpdateRegion(),
-        EarthOnlineAddWorldEvent(),
-        EarthOnlineListWorldEvents(),
-        EarthOnlineDeleteWorldEvent(),
-        EarthOnlineListDiscoveries(),
-        EarthOnlineChooseDiscovery(),
         # 策划级: 限时活动运营
         EarthOnlineListEventAreas(),
         EarthOnlineCreateEventArea(),
@@ -2971,4 +3020,11 @@ def get_earth_online_tools():
         EarthOnlineClaimBattlePass(),
         EarthOnlineIssueCareCommission(),
         EarthOnlineRedeemService(),
+        EarthOnlineEarningBrief(),
+        EarthOnlineCreateEarningSprint(),
+        EarthOnlineStartFirstIncomeExperiment(),
+        EarthOnlineListEarningOffers(),
+        EarthOnlineListEarningActions(),
+        EarthOnlineCreateEarningAction(),
+        EarthOnlineSubmitEarningAction(),
     ]

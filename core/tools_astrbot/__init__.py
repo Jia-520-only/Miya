@@ -377,11 +377,13 @@ class ToolRegistry:
                         "earth_post_note": self.earth.earth_post_note,
                         "earth_list_notes": self.earth.earth_list_notes,
                         "earth_world": self.earth.earth_world,
-                        "earth_explore": self.earth.earth_explore,
+                        "earth_map_context": self.earth.earth_map_context,
+                        "earth_list_journeys": self.earth.earth_list_journeys,
+                        "earth_confirm_place": self.earth.earth_confirm_place,
                         "earth_world_status": self.earth.earth_world_status,
                         "earth_real_context": self.earth.earth_real_context,
                         "earth_refresh_real_context": self.earth.earth_refresh_real_context,
-                        "earth_region_commission": self.earth.earth_region_commission,
+                        "earth_query_weather": self.earth.earth_query_weather,
                         # 策划级: 实体修改/删除
                         "earth_get_item": self.earth.earth_get_item,
                         "earth_update_item": self.earth.earth_update_item,
@@ -399,13 +401,6 @@ class ToolRegistry:
                         "earth_checkin": self.earth.earth_checkin,
                         # 策划级: 玩家档案
                         "earth_update_player": self.earth.earth_update_player,
-                        # 策划级: 世界与地理围栏
-                        "earth_update_region": self.earth.earth_update_region,
-                        "earth_add_world_event": self.earth.earth_add_world_event,
-                        "earth_list_world_events": self.earth.earth_list_world_events,
-                        "earth_delete_world_event": self.earth.earth_delete_world_event,
-                        "earth_list_discoveries": self.earth.earth_list_discoveries,
-                        "earth_choose_discovery": self.earth.earth_choose_discovery,
                         # 策划级: 限时活动运营
                         "earth_list_event_areas": self.earth.earth_list_event_areas,
                         "earth_create_event_area": self.earth.earth_create_event_area,
@@ -439,6 +434,14 @@ class ToolRegistry:
                         "earth_claim_battle_pass": self.earth.earth_claim_battle_pass,
                         "earth_issue_care_commission": self.earth.earth_issue_care_commission,
                         "earth_redeem_service": self.earth.earth_redeem_service,
+                        # v18.1: 收益中枢
+                        "earth_earning_brief": self.earth.earth_earning_brief,
+                        "earth_create_earning_sprint": self.earth.earth_create_earning_sprint,
+                        "earth_start_first_income_experiment": self.earth.earth_start_first_income_experiment,
+                        "earth_list_earning_offers": self.earth.earth_list_earning_offers,
+                        "earth_list_earning_actions": self.earth.earth_list_earning_actions,
+                        "earth_create_earning_action": self.earth.earth_create_earning_action,
+                        "earth_submit_earning_action": self.earth.earth_submit_earning_action,
                     }
                 )
 

@@ -70,6 +70,11 @@ export interface EarthEarningOpportunity {
   hours: number
   risk: 'low' | 'medium' | 'high' | 'unknown'
   confidence: 'low' | 'medium' | 'high' | 'unknown'
+  verification_status: 'unverified' | 'checking' | 'verified' | 'rejected'
+  deadline?: string
+  requirements?: string
+  scam_flags?: string[]
+  last_checked_at?: string
   status: 'inbox' | 'shortlisted' | 'applied' | 'won' | 'closed'
   quest_id?: number | null
   hourly_estimate?: number
@@ -86,6 +91,8 @@ export interface EarthEarningPlan {
   target_date: string
   status: 'active' | 'paused' | 'completed' | 'archived'
   notes: string
+  route_key?: string
+  is_sprint?: boolean | number
   created_at?: string
   updated_at?: string
   steps?: EarthEarningPlanStep[]
@@ -116,23 +123,100 @@ export interface EarthIncomeRecord {
   recorded_at: string
 }
 
+export interface EarthEarningOffer {
+  id: number
+  title: string
+  customer: string
+  problem: string
+  deliverables: string
+  scope: string
+  proof: string
+  price: number
+  cost_estimate: number
+  delivery_days: number
+  revisions: number
+  route_key: string
+  status: 'draft' | 'active' | 'paused' | 'retired'
+  created_at?: string
+  updated_at?: string
+}
+
+export interface EarthEarningActionDraft {
+  id: number
+  opportunity_id?: number | null
+  offer_id?: number | null
+  action_type: 'proposal' | 'publish' | 'contact' | 'upload' | 'accept_order'
+  target: string
+  title: string
+  content: string
+  attachments: string[]
+  amount: number
+  risk: 'low' | 'medium' | 'high'
+  status: 'draft' | 'pending' | 'approved' | 'revoked' | 'expired'
+  content_hash: string
+  approved_hash: string
+  submitted_at?: string
+  approved_at?: string
+  expires_at?: string
+  revoked_at?: string
+  created_at?: string
+  updated_at?: string
+}
+
 export interface EarthEarningGuidance {
   opportunities: EarthEarningOpportunity[]
   plans: EarthEarningPlan[]
   income_records: EarthIncomeRecord[]
-  totals: { net_income: number, opportunity_count: number, active_plan_count: number }
+  offers: EarthEarningOffer[]
+  action_drafts: EarthEarningActionDraft[]
+  routes: EarthEarningRoute[]
+  profile_ready: boolean
+  brief: string
+  focus_plan?: EarthEarningPlan | null
+  next_action?: EarthEarningPlanStep | null
+  pipeline: Record<EarthEarningOpportunity['status'], number>
+  totals: { net_income: number, opportunity_count: number, active_plan_count: number, active_offer_count: number, pending_approval_count: number, approved_action_count: number, total_hours: number, effective_hourly_rate: number }
   preferences: EarthEarningPreferences
+  automation: { automatic: string[], requires_confirmation: string[], blocked: string[] }
   boundary: string
 }
 
 export interface EarthEarningPreferences {
   skills: string[]
   preferred_kinds: string[]
+  accepted_models: string[]
+  sellable_assets: string[]
+  constraints: string
+  primary_route: string
   weekly_hours: number
   target_amount: number
   min_hourly_rate: number
   risk_tolerance: 'low' | 'medium' | 'high'
   updated_at?: string
+}
+
+export interface EarthEarningRoute {
+  key: string
+  name: string
+  icon: string
+  kind: string
+  summary: string
+  best_for: string
+  first_revenue_days: string
+  cash_cost: string
+  effort: string
+  steps: Array<[string, string]>
+  fit_score: number
+  fit_reasons: string[]
+  first_action: string
+}
+
+export interface EarthEarningSprintResult {
+  success: boolean
+  created: boolean
+  plan: EarthEarningPlan
+  quest?: EarthQuest | null
+  route: EarthEarningRoute
 }
 
 export interface EarthEarningSource {
@@ -147,32 +231,6 @@ export interface EarthEarningSource {
   updated_at?: string
 }
 
-export interface EarthWorldRegion {
-  id: number
-  key: string
-  name: string
-  subtitle: string
-  description: string
-  icon: string
-  color: string
-  level_req: number
-  discovered: number
-  discovery_count: number
-  event_total: number
-  discovery_total: number
-  exploration_percent: number
-  image_path?: string
-  last_explored_at?: string
-  resonance_xp?: number
-  resonance_level?: number
-  resonance_next_xp?: number
-  available_event_total?: number
-  condition_events?: Array<{ title: string, condition_label: string, available: boolean }>
-  latitude?: number | null
-  longitude?: number | null
-  geofence_radius?: number
-}
-
 export interface EarthRealPlace {
   id: number
   place_key: string
@@ -185,6 +243,8 @@ export interface EarthRealPlace {
   last_visited_at?: string
   source?: string
   confidence?: number
+  verification_status?: 'unverified' | 'confirmed' | 'observed'
+  source_updated_at?: string
   accuracy_m?: number | null
   image_path?: string
   country?: string
@@ -210,6 +270,10 @@ export interface EarthRealPlaceVisit {
   longitude?: number | null
   accuracy_m?: number | null
   source?: string
+  confidence?: number
+  verification_status?: 'unverified' | 'confirmed' | 'observed'
+  provider_id?: string
+  observed_at?: string
   note?: string
 }
 
@@ -240,30 +304,27 @@ export interface EarthMapSearchResult {
   opening_hours?: string
 }
 
-export interface EarthWorldDiscovery {
-  id?: number
-  region_key: string
-  event_key: string
-  kind?: string
+export interface EarthMapJourney {
+  id: number
   title: string
-  content: string
-  reward_currency: number
-  reward_exp: number
-  discovered_at: string
-  companion?: { speaker: string, text: string, tone: string, region: string }
-  choice?: { choice: string, chosen_at: string } | null
+  happened_at: string
+  narrative: string
+  source: string
+  verification_status: 'unverified' | 'confirmed' | 'observed'
+  recorded_at: string
+  duration_seconds: number
+  distance_m: number
+  point_count: number
+  track: Array<{ latitude: number, longitude: number, timestamp?: number }>
 }
 
-export interface EarthWorldCustomEvent {
-  id: number
-  region_key: string
-  title: string
-  text: string
-  kind: string
-  reward_currency: number
-  reward_exp: number
-  active: number
-  created_at: string
+export interface EarthMapFactContext {
+  generated_at: string
+  truth_policy: Record<string, string>
+  weather: { source: string, source_status: string, captured_at: string, is_stale: boolean, city: string, weather: string, temperature?: number | null }
+  places: EarthRealPlace[]
+  journeys: EarthMapJourney[]
+  counts: { places: number, journeys: number, observed: number, confirmed: number, unverified: number }
 }
 
 export interface EarthWorldShopItem {
@@ -339,7 +400,7 @@ export interface EarthMiyaShopManagedItem {
   is_custom?: boolean
 }
 
-// 上架 / 编辑自定义商品入参 (kind=boost 时 boost 固定 commission_resonance)
+// 上架 / 编辑自定义商品入参
 export interface EarthMiyaShopItemInput {
   key: string
   name: string
@@ -357,9 +418,7 @@ export interface EarthMiyaShopItemInput {
 }
 
 export interface EarthWorldResponse {
-  regions: EarthWorldRegion[]
   places?: EarthRealPlace[]
-  discoveries: EarthWorldDiscovery[]
   /** 世界模块降级或尚未初始化时可能暂无状态。 */
   status: EarthWorldStatus | null
   mode?: 'real_world' | string
@@ -398,6 +457,7 @@ export interface EarthWorldEventShopItemInput {
   cost?: number
   limit?: number
   kind?: string
+  /** 需要先记录的现实地点数量；字段名为历史兼容名。 */
   requires_discoveries?: number
 }
 
@@ -430,6 +490,41 @@ export interface EarthRealContext {
   timezone?: string
   is_stale?: number
   settings?: Record<string, any>
+}
+
+export interface EarthWeatherForecastDay {
+  date: string
+  text_day: string
+  text_night: string
+  high?: number | null
+  low?: number | null
+  rainfall?: number | null
+  precip?: number | null
+  humidity?: number | null
+  wind_direction?: string
+  wind_scale?: string
+}
+
+export interface EarthWeatherQuery {
+  requested_location: string
+  resolved_location: { id?: string, name?: string, country?: string, path?: string, timezone?: string, timezone_offset?: string }
+  city: string
+  provider: string
+  source: string
+  source_status: string
+  resolution_status: string
+  captured_at: string
+  served_at: string
+  expires_at: string
+  is_stale: boolean
+  from_cache: boolean
+  weather: string
+  weather_icon: string
+  temperature?: number | null
+  humidity?: number | null
+  wind?: string
+  forecast_status: string
+  forecast: EarthWeatherForecastDay[]
 }
 
 export interface EarthItem {
@@ -1064,6 +1159,54 @@ export class EarthApiClient extends ApiClient {
     return this.instance.get('/api/earth/earning/guidance')
   }
 
+  async earningRoutes(): Promise<EarthEarningRoute[]> {
+    return this.instance.get('/api/earth/earning/routes')
+  }
+
+  async createEarningSprint(data: { route_key: string, goal_amount?: number, target_date?: string }): Promise<EarthEarningSprintResult> {
+    return this.instance.post('/api/earth/earning/sprints', data)
+  }
+
+  async startFirstIncomeExperiment(data: { weekly_hours?: number, target_amount?: number, price?: number, cost_estimate?: number } = {}): Promise<{ success: boolean, preferences: EarthEarningPreferences, offer: EarthEarningOffer, sprint: EarthEarningSprintResult }> {
+    return this.instance.post('/api/earth/earning/first-income-experiment', data)
+  }
+
+  async earningOffers(status = ''): Promise<EarthEarningOffer[]> {
+    return this.instance.get('/api/earth/earning/offers', { params: status ? { status } : undefined })
+  }
+
+  async addEarningOffer(data: Partial<EarthEarningOffer>): Promise<EarthEarningOffer> {
+    return this.instance.post('/api/earth/earning/offers', data)
+  }
+
+  async updateEarningOffer(id: number, data: Partial<EarthEarningOffer>): Promise<EarthEarningOffer> {
+    return this.instance.put(`/api/earth/earning/offers/${id}`, data)
+  }
+
+  async earningActions(status = ''): Promise<EarthEarningActionDraft[]> {
+    return this.instance.get('/api/earth/earning/actions', { params: status ? { status } : undefined })
+  }
+
+  async addEarningAction(data: Partial<EarthEarningActionDraft>): Promise<EarthEarningActionDraft> {
+    return this.instance.post('/api/earth/earning/actions', data)
+  }
+
+  async updateEarningAction(id: number, data: Partial<EarthEarningActionDraft>): Promise<EarthEarningActionDraft> {
+    return this.instance.put(`/api/earth/earning/actions/${id}`, data)
+  }
+
+  async submitEarningAction(id: number): Promise<EarthEarningActionDraft> {
+    return this.instance.post(`/api/earth/earning/actions/${id}/submit`)
+  }
+
+  async approveEarningAction(id: number, contentHash: string): Promise<EarthEarningActionDraft> {
+    return this.instance.post(`/api/earth/earning/actions/${id}/approve`, { content_hash: contentHash })
+  }
+
+  async revokeEarningAction(id: number): Promise<EarthEarningActionDraft> {
+    return this.instance.post(`/api/earth/earning/actions/${id}/revoke`)
+  }
+
   async earningPreferences(): Promise<EarthEarningPreferences> {
     return this.instance.get('/api/earth/earning/preferences')
   }
@@ -1251,6 +1394,14 @@ export class EarthApiClient extends ApiClient {
     return this.instance.get('/api/earth/world/nearby', { params: { latitude, longitude, radius_m: radiusM, limit } })
   }
 
+  async mapFacts(placeLimit = 20, journeyLimit = 10): Promise<EarthMapFactContext> {
+    return this.instance.get('/api/earth/world/facts', { params: { place_limit: placeLimit, journey_limit: journeyLimit } })
+  }
+
+  async listWorldJourneys(limit = 50): Promise<EarthMapJourney[]> {
+    return this.instance.get('/api/earth/world/journeys', { params: { limit } })
+  }
+
   async reverseGeocodeWorldPlace(latitude: number, longitude: number): Promise<EarthMapSearchResult & { success: boolean }> {
     return this.instance.get('/api/earth/world/reverse-geocode', { params: { latitude, longitude } })
   }
@@ -1259,7 +1410,7 @@ export class EarthApiClient extends ApiClient {
     return this.instance.post('/api/earth/world/route', values)
   }
 
-  async recordPlaceVisit(values: { name: string, latitude?: number | null, longitude?: number | null, accuracy_m?: number | null, note?: string, visited_at?: string, source?: string, place_key?: string, provider_id?: string, display_address?: string, category?: string }): Promise<{ success: boolean, place: EarthRealPlace }> {
+  async recordPlaceVisit(values: { name: string, latitude?: number | null, longitude?: number | null, accuracy_m?: number | null, note?: string, visited_at?: string, observed_at?: string, source?: string, confidence?: number, verification_status?: 'unverified' | 'confirmed' | 'observed', place_key?: string, provider_id?: string, display_address?: string, category?: string }): Promise<{ success: boolean, place: EarthRealPlace }> {
     return this.instance.post('/api/earth/world/places/visits', values)
   }
 
@@ -1292,6 +1443,14 @@ export class EarthApiClient extends ApiClient {
     return this.instance.post('/api/earth/world/real-context/refresh', values)
   }
 
+  async queryWeather(location: string, includeForecast = true, forecastDays = 3): Promise<EarthWeatherQuery> {
+    return this.instance.post('/api/earth/world/weather/query', {
+      location,
+      include_forecast: includeForecast,
+      forecast_days: forecastDays,
+    })
+  }
+
   async realContextSettings(): Promise<Record<string, any>> {
     return this.instance.get('/api/earth/world/real-context/settings')
   }
@@ -1302,22 +1461,6 @@ export class EarthApiClient extends ApiClient {
 
   async updateWeatherApiKey(apiKey: string): Promise<Record<string, any>> {
     return this.instance.put('/api/earth/world/real-context/api-key', { api_key: apiKey })
-  }
-
-  async updateWorldRegion(regionKey: string, values: Record<string, any>): Promise<EarthWorldRegion> {
-    return this.instance.put(`/api/earth/world/regions/${encodeURIComponent(regionKey)}`, values)
-  }
-
-  async listWorldEvents(regionKey = ''): Promise<EarthWorldCustomEvent[]> {
-    return this.instance.get('/api/earth/world/events', { params: { region_key: regionKey } })
-  }
-
-  async createWorldEvent(values: Record<string, any>): Promise<EarthWorldCustomEvent> {
-    return this.instance.post('/api/earth/world/events', values)
-  }
-
-  async deleteWorldEvent(eventId: number): Promise<{ success: boolean }> {
-    return this.instance.delete(`/api/earth/world/events/${eventId}`)
   }
 
   async worldEventShop(eventKey: string): Promise<EarthWorldShop> {
@@ -1363,42 +1506,6 @@ export class EarthApiClient extends ApiClient {
     return this.instance.delete(`/api/earth/miya-shop/manage/${encodeURIComponent(itemKey)}`)
   }
 
-  async worldDiscoveries(regionKey = '', limit = 100): Promise<EarthWorldDiscovery[]> {
-    return this.instance.get('/api/earth/world/discoveries', { params: { region_key: regionKey, limit } })
-  }
-
-  async exploreWorld(regionKey: string, coords?: { latitude: number, longitude: number }): Promise<{
-    success: boolean
-    complete: boolean
-    region: EarthWorldRegion
-    discovery: EarthWorldDiscovery | null
-    player: EarthPlayer
-    level_up?: EarthLevelUp | null
-    message?: string
-    resonance?: { level: number, xp: number, level_up?: boolean }
-    geofence?: { enabled: boolean, passed: boolean, distance_m?: number, radius_m?: number, message?: string }
-    attrs?: Record<string, number>
-  }> {
-    // 区域启用地理围栏时需要携带真实坐标 (latitude/longitude)
-    const body = coords ? { latitude: coords.latitude, longitude: coords.longitude } : undefined
-    return this.instance.post(`/api/earth/world/${encodeURIComponent(regionKey)}/explore`, body)
-  }
-
-  async chooseWorldDiscovery(discoveryId: number, choice: 'continue' | 'record' | 'rest'): Promise<{ success: boolean, label: string, resonance?: { level: number, xp: number }, player: EarthPlayer }> {
-    return this.instance.post(`/api/earth/world/discoveries/${discoveryId}/choice`, { choice })
-  }
-
-  async uploadWorldRegionImage(regionKey: string, file: File): Promise<{ success: boolean, image_path: string, region: EarthWorldRegion }> {
-    const form = new FormData()
-    form.append('file', file)
-    return this.instance.post(`/api/earth/world/${encodeURIComponent(regionKey)}/image`, form, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    })
-  }
-
-  async regionCommission(regionKey: string): Promise<{ success: boolean, created: boolean, quest: EarthQuest }> {
-    return this.instance.post(`/api/earth/world/${encodeURIComponent(regionKey)}/commission`)
-  }
 }
 
 export default new EarthApiClient(apiPort)

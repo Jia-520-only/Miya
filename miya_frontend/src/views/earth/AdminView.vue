@@ -13,9 +13,7 @@ import EarthAPI, {
   type EarthStory,
   type EarthTemplates,
   type EarthRealContext,
-  type EarthWorldCustomEvent,
   type EarthWorldEventArea,
-  type EarthWorldRegion,
 } from '@/api/earth'
 import FieldsEditor from './FieldsEditor.vue'
 import Markdown from '@/components/Markdown.vue'
@@ -32,13 +30,9 @@ const questHistory = ref<EarthQuest[]>([])
 const templates = ref<EarthTemplates | null>(null)
 const notes = ref<EarthMiyaNote[]>([])
 const toast = ref('')
-const worldRegions = ref<EarthWorldRegion[]>([])
-const worldEvents = ref<EarthWorldCustomEvent[]>([])
 const realContext = ref<EarthRealContext | null>(null)
 const realSettings = reactive({ enabled: true, city: '', refresh_minutes: 30, allow_precise_location: false, weather_api_key_masked: '' })
 const weatherApiKey = ref('')
-const worldRegionForm = reactive({ key: '', name: '', subtitle: '', description: '', icon: '◇', color: '#c9ac67', level_req: 1, latitude: '' as string | number, longitude: '' as string | number, geofence_radius: 0 })
-const worldEventForm = reactive({ region_key: '', title: '', text: '', kind: 'story', reward_currency: 10, reward_exp: 15 })
 const worldBusy = ref(false)
 
 const RARITY_COLORS: Record<string, string> = {
@@ -92,51 +86,12 @@ async function loadStories() { stories.value = await EarthAPI.listStory() }
 async function loadTemplates() { templates.value = await EarthAPI.getTemplates() }
 async function loadNotes() { notes.value = await EarthAPI.listNotes(100) }
 async function loadWorldAdmin() {
-  const [world, settings, context, events, areas, miyaShopManaged, commemorationsList] = await Promise.all([EarthAPI.world(), EarthAPI.realContextSettings(), EarthAPI.realContext(), EarthAPI.listWorldEvents(), EarthAPI.listEventAreas(), EarthAPI.listMiyaShopManaged(), EarthAPI.listCommemorations()])
-  worldRegions.value = world.regions || []
+  const [settings, context, areas, miyaShopManaged, commemorationsList] = await Promise.all([EarthAPI.realContextSettings(), EarthAPI.realContext(), EarthAPI.listEventAreas(), EarthAPI.listMiyaShopManaged(), EarthAPI.listCommemorations()])
   Object.assign(realSettings, settings)
   realContext.value = context
-  worldEvents.value = events || []
   eventAreas.value = areas || []
   miyaShopItems.value = miyaShopManaged || []
   commemorations.value = commemorationsList || []
-  if (!worldEventForm.region_key && worldRegions.value[0]) worldEventForm.region_key = worldRegions.value[0].key
-}
-
-function editWorldRegion(region: EarthWorldRegion) {
-  Object.assign(worldRegionForm, {
-    key: region.key, name: region.name, subtitle: region.subtitle, description: region.description, icon: region.icon, color: region.color, level_req: region.level_req,
-    // 地理围栏: 坐标/半径按当前区域值回填
-    latitude: region.latitude ?? '', longitude: region.longitude ?? '', geofence_radius: region.geofence_radius || 0,
-  })
-}
-function selectWorldRegion(e: Event) {
-  const key = (e.target as HTMLSelectElement).value
-  const region = worldRegions.value.find(item => item.key === key)
-  if (region) editWorldRegion(region)
-}
-async function saveWorldRegion() {
-  if (!worldRegionForm.key || worldBusy.value) return
-  worldBusy.value = true
-  try {
-    // 地理围栏: 半径 0 或坐标留空表示关闭围栏
-    const lat = String(worldRegionForm.latitude).trim()
-    const lng = String(worldRegionForm.longitude).trim()
-    const radius = Number(worldRegionForm.geofence_radius) || 0
-    const fenceEnabled = radius > 0 && lat !== '' && lng !== ''
-    await EarthAPI.updateWorldRegion(worldRegionForm.key, {
-      ...worldRegionForm,
-      latitude: fenceEnabled ? Number(lat) : null,
-      longitude: fenceEnabled ? Number(lng) : null,
-      geofence_radius: fenceEnabled ? radius : 0,
-    })
-    await loadWorldAdmin()
-    showToast(fenceEnabled ? `区域已保存，地理围栏 ${radius} 米已启用` : '区域已保存，地理围栏已关闭')
-  }
-  catch (e: any) {
-    showToast(e?.response?.data?.detail || '区域保存失败')
-  }
-  finally { worldBusy.value = false }
 }
 async function saveRealSettings() {
   if (worldBusy.value) return
@@ -156,52 +111,7 @@ async function saveRealSettings() {
   }
   finally { worldBusy.value = false }
 }
-async function addWorldEvent() {
-  if (!worldEventForm.region_key || !worldEventForm.title.trim() || !worldEventForm.text.trim() || worldBusy.value) return
-  worldBusy.value = true
-  try {
-    await EarthAPI.createWorldEvent({ ...worldEventForm })
-    worldEventForm.title = ''; worldEventForm.text = ''
-    await loadWorldAdmin()
-    showToast('自定义世界事件已添加')
-  }
-  catch (e: any) {
-    showToast(e?.response?.data?.detail || '世界事件添加失败')
-  }
-  finally { worldBusy.value = false }
-}
-async function removeWorldEvent(event: EarthWorldCustomEvent) {
-  if (!confirm(`删除「${event.title}」？`)) return
-  if (worldBusy.value) return
-  worldBusy.value = true
-  try {
-    await EarthAPI.deleteWorldEvent(event.id)
-    await loadWorldAdmin()
-    showToast('世界事件已删除')
-  }
-  catch (e: any) {
-    showToast(e?.response?.data?.detail || '世界事件删除失败')
-  }
-  finally { worldBusy.value = false }
-}
-async function onPickWorldRegionImage(region: EarthWorldRegion, e: Event) {
-  const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = ''
-  if (!file || worldBusy.value) return
-  worldBusy.value = true
-  try {
-    await EarthAPI.uploadWorldRegionImage(region.key, file)
-    await loadWorldAdmin()
-    showToast(`已更新「${region.name}」照片`)
-  }
-  catch (e: any) {
-    showToast(e?.response?.data?.detail || '区域照片上传失败')
-  }
-  finally { worldBusy.value = false }
-}
-
-// ── 限时活动管理 (内置活动只读，自定义活动可增改删 + 商品管理) ──
+// ── 玩家创建的现实活动与商品管理 ──
 const eventAreas = ref<EarthWorldEventArea[]>([])
 const eventAreaForm = reactive({
   key: '', name: '', subtitle: '', description: '', icon: '✦', color: '#c9ac67',
@@ -218,7 +128,7 @@ async function reloadEventAreaShop(areaKey: string) {
     const shop = await EarthAPI.worldEventShop(areaKey)
     eventAreaShopItems.value = shop.items || []
   }
-  catch { /* 内置活动无商店时静默 */ }
+  catch { /* 活动无商店时静默 */ }
 }
 // 展开/收起某个活动的商品管理面板
 function manageEventAreaItems(area: EarthWorldEventArea) {
@@ -337,7 +247,7 @@ const miyaShopForm = reactive({
   interaction: '', story_title: '', story_content: '', title_award: '',
 })
 const MIYA_SHOP_KIND_LABELS: Record<string, string> = {
-  interaction: '亲昵互动', story: '短篇剧情', title: '专属称号', boost: '现实辅助', collectible: '纪念物',
+  interaction: '亲昵互动', story: '短篇剧情', title: '专属称号', collectible: '纪念物',
 }
 function resetMiyaShopForm() {
   Object.assign(miyaShopForm, {
@@ -364,7 +274,7 @@ async function submitMiyaShopItem() {
   miyaShopBusy.value = true
   try {
     const kind = miyaShopForm.kind
-    // 只提交当前类型对应的专属字段；boost 固定生效 commission_resonance
+    // 只提交当前类型对应的专属字段。
     const payload: EarthMiyaShopItemInput = {
       key: miyaShopForm.key.trim(),
       name: miyaShopForm.name.trim(),
@@ -376,7 +286,6 @@ async function submitMiyaShopItem() {
       story_title: kind === 'story' ? miyaShopForm.story_title : '',
       story_content: kind === 'story' ? miyaShopForm.story_content : '',
       title_award: kind === 'title' ? miyaShopForm.title_award : '',
-      boost: kind === 'boost' ? 'commission_resonance' : '',
     }
     const isEditing = !!editingMiyaShopItem.value
     const editingKey = editingMiyaShopItem.value?.key || ''
@@ -1388,52 +1297,11 @@ function questStars(difficulty: number): string {
             <input v-model="weatherApiKey" type="password" placeholder="留空表示不修改" autocomplete="off" />
             <button class="btn-primary" :disabled="worldBusy" @click="saveRealSettings">保存并刷新现实</button>
           </div>
-          <div v-if="false" class="world-admin-card">
-            <h4>区域编辑</h4>
-            <select @change="selectWorldRegion">
-              <option value="">选择一个区域</option>
-              <option v-for="region in worldRegions" :key="region.key" :value="region.key">{{ region.name }}</option>
-            </select>
-            <template v-if="worldRegionForm.key">
-              <label>名称</label><input v-model="worldRegionForm.name" />
-              <label>副标题</label><input v-model="worldRegionForm.subtitle" />
-              <label>描述</label><textarea v-model="worldRegionForm.description" />
-              <div class="modal-row"><div><label>图标</label><input v-model="worldRegionForm.icon" /></div><div><label>等级</label><input v-model.number="worldRegionForm.level_req" type="number" min="1" /></div></div>
-              <label>主题色</label><input v-model="worldRegionForm.color" type="color" />
-              <label>地理围栏 <small>坐标与半径 (米) 都设置后启用；半径 0 或坐标留空表示关闭</small></label>
-              <div class="modal-row">
-                <div><label>纬度 latitude</label><input v-model="worldRegionForm.latitude" placeholder="如 30.2741" /></div>
-                <div><label>经度 longitude</label><input v-model="worldRegionForm.longitude" placeholder="如 120.1551" /></div>
-              </div>
-              <label>围栏半径 (米，0 = 关闭)</label>
-              <input v-model.number="worldRegionForm.geofence_radius" type="number" min="0" />
-              <button class="btn-primary" :disabled="worldBusy" @click="saveWorldRegion">保存区域</button>
-            </template>
-          </div>
-        </div>
-        <div v-if="false" class="world-admin-card">
-          <h4>区域现实照片</h4>
-          <div class="world-admin-region-list">
-            <div v-for="region in worldRegions" :key="region.key" class="world-admin-region">
-              <span class="world-admin-region-name">{{ region.name }}</span>
-              <span class="world-admin-region-photo">{{ region.image_path ? '已绑定照片' : '尚未绑定' }}</span>
-              <label class="btn-sm upload-btn">选择照片<input type="file" accept="image/*" hidden @change="onPickWorldRegionImage(region, $event)" /></label>
-            </div>
-          </div>
-        </div>
-        <div v-if="false" class="world-admin-card">
-          <h4>新增自定义发现</h4>
-          <div class="modal-row"><div><label>区域</label><select v-model="worldEventForm.region_key"><option v-for="region in worldRegions" :key="region.key" :value="region.key">{{ region.name }}</option></select></div><div><label>类型</label><select v-model="worldEventForm.kind"><option value="story">剧情</option><option value="chest">宝箱</option><option value="hidden">隐藏</option></select></div></div>
-          <label>标题</label><input v-model="worldEventForm.title" placeholder="例如：窗边的新光" />
-          <label>发现内容</label><textarea v-model="worldEventForm.text" placeholder="这条发现对应你现实里的什么事情？" />
-          <div class="modal-row"><div><label>弥娅币</label><input v-model.number="worldEventForm.reward_currency" type="number" min="0" /></div><div><label>经验</label><input v-model.number="worldEventForm.reward_exp" type="number" min="0" /></div></div>
-          <button class="btn-primary" :disabled="worldBusy" @click="addWorldEvent">添加发现</button>
-          <div v-if="worldEvents.length" class="world-event-list"><div v-for="event in worldEvents" :key="event.id" class="world-event-row"><span>{{ event.title }}</span><small>{{ worldRegions.find(r => r.key === event.region_key)?.name || event.region_key }} · +{{ event.reward_currency }} ◆</small><button class="btn-sm btn-danger" @click="removeWorldEvent(event)">删除</button></div></div>
         </div>
 
         <!-- 限时活动管理 -->
         <div v-if="false" class="world-admin-card">
-          <h4>限时活动管理 <small>内置活动不可修改；自定义活动可编辑 / 删除并管理商品</small></h4>
+          <h4>现实活动管理 <small>玩家创建的活动可编辑、删除并管理商品</small></h4>
           <div v-if="eventAreas.length" class="event-area-list">
             <div v-for="area in eventAreas" :key="area.key" class="event-area-row">
               <span class="event-area-icon" :style="{ color: area.color }">{{ area.icon }}</span>
@@ -1462,7 +1330,7 @@ function questStars(difficulty: number): string {
               <div><label>价格 (弥娅币)</label><input v-model.number="eventItemForm.cost" type="number" min="0" /></div>
               <div><label>限购</label><input v-model.number="eventItemForm.limit" type="number" min="1" /></div>
               <div><label>类型</label><select v-model="eventItemForm.kind"><option value="collectible">纪念物</option><option value="title">称号</option><option value="story">剧情</option><option value="badge">徽章</option></select></div>
-              <div><label>需发现数</label><input v-model.number="eventItemForm.requires_discoveries" type="number" min="0" /></div>
+              <div><label>需记录现实地点数</label><input v-model.number="eventItemForm.requires_discoveries" type="number" min="0" /></div>
             </div>
             <button class="btn-primary" :disabled="worldBusy" @click="addEventShopItem">添加商品</button>
             <div v-if="eventAreaShopItems.length" class="world-event-list">
@@ -1472,7 +1340,7 @@ function questStars(difficulty: number): string {
                 <button class="btn-sm btn-danger" :disabled="worldBusy" @click="removeEventShopItem(eventItemTarget, item.key)">删除</button>
               </div>
             </div>
-            <p v-else class="data-hint">该活动当前没有自定义商品（内置活动的商品为内置定义）。</p>
+            <p v-else class="data-hint">该活动当前没有商品。</p>
           </template>
           <!-- 新建 / 编辑自定义活动表单 -->
           <label>{{ editingEventArea ? `编辑自定义活动「${editingEventArea.name}」` : '新建自定义活动' }}</label>
@@ -1552,9 +1420,6 @@ function questStars(difficulty: number): string {
           <template v-else-if="miyaShopForm.kind === 'title'">
             <label>专属称号 <small>兑换后解锁并写入玩家档案</small></label>
             <input v-model="miyaShopForm.title_award" placeholder="如 弥娅的心上人" />
-          </template>
-          <template v-else-if="miyaShopForm.kind === 'boost'">
-            <div class="world-admin-status">现实辅助固定生效：下一次区域委托获得额外共鸣奖励 (commission_resonance)，无需额外填写内容。</div>
           </template>
           <div class="event-area-form-actions">
             <button class="btn-primary" :disabled="miyaShopBusy" @click="submitMiyaShopItem">{{ editingMiyaShopItem ? '保存商品' : '上架商品' }}</button>

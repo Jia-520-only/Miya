@@ -3,7 +3,7 @@ import { readdir } from 'node:fs/promises'
 import { dirname, resolve, sep } from 'node:path'
 import process from 'node:process'
 import { domainToUnicode, fileURLToPath, pathToFileURL } from 'node:url'
-import { app, BrowserWindow, desktopCapturer, ipcMain, Menu, nativeTheme, net, protocol, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, desktopCapturer, ipcMain, Menu, nativeTheme, net, protocol, session, shell, systemPreferences } from 'electron'
 import { getBackendLogs, startBackend, stopBackend, startPortPolling, stopPortPolling } from './modules/backend'
 import { registerHotkeys, unregisterHotkeys } from './modules/hotkeys'
 import { createMenu } from './modules/menu'
@@ -98,6 +98,36 @@ app.whenReady().then(async () => {
   try {
   // Set Miya project root for terminal module
   setMiyaRoot(MIYA_ROOT)
+
+  // Sensitive web capabilities are available only to Miya's trusted main frame.
+  // The OS still controls final device-level access such as Windows Location Services.
+  function isTrustedMiyaAppUrl(requestingUrl: string) {
+    try {
+      const url = new URL(requestingUrl)
+      if (url.protocol === 'miya-app:' && url.hostname === 'dist') return true
+      return !app.isPackaged
+        && (url.protocol === 'http:' || url.protocol === 'https:')
+        && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+    }
+    catch {
+      return false
+    }
+  }
+
+  const appSession = session.defaultSession
+  appSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
+    if (!['geolocation', 'media', 'notifications'].includes(permission) || !details.isMainFrame) return false
+    const requestingUrl = details.requestingUrl || requestingOrigin
+    return webContents === getMainWindow()?.webContents && isTrustedMiyaAppUrl(requestingUrl)
+  })
+  appSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    const requestingUrl = 'requestingUrl' in details ? details.requestingUrl : ''
+    const granted = ['geolocation', 'media', 'notifications'].includes(permission)
+      && details.isMainFrame
+      && webContents === getMainWindow()?.webContents
+      && isTrustedMiyaAppUrl(requestingUrl)
+    callback(granted)
+  })
 
   // MIME 映射（音频/视频等二进制媒体文件需要通过 fs.readFile 读取以兼容 asar）
   const MEDIA_MIME: Record<string, string> = {

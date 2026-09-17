@@ -1,5 +1,6 @@
 import json
 import os
+import pathlib
 import tempfile
 
 from core.earth_online_store import EarthOnlineStore
@@ -262,58 +263,49 @@ def test_currency_and_exp_reject_invalid_negative_mutations():
     assert store.get_player()["miya_currency"] == player["miya_currency"]
 
 
-def test_new_save_starts_with_miya_currency_and_world_regions():
+def test_new_save_has_no_virtual_world_tables_or_seeded_areas():
     store, _ = _build_store()
-
     player = store.get_player()
     assert player["miya_currency"] == 100
     assert player["earth_currency"] == 0
-
-    regions = store.list_world_regions()
-    assert len(regions) == 5
-    assert all(r["discovery_total"] == 0 for r in regions)
-
-    result = store.explore_world_region("miya_garden")
-    assert result["success"] is True
-    assert result["discovery"]["region_key"] == "miya_garden"
-    assert result["discovery"]["reward_currency"] > 0
-    assert len(store.list_world_discoveries("miya_garden")) == 1
-
-
-def test_world_region_level_gate_and_completion():
-    store, _ = _build_store()
-
-    locked = store.explore_world_region("starfall_ridge")
-    assert locked["success"] is False
-    assert locked["level_req"] == 5
-
-    for _ in range(5):
-        result = store.explore_world_region("miya_garden")
-        assert result["success"] is True
-    complete = store.explore_world_region("miya_garden")
-    assert complete["success"] is True
-    assert complete["complete"] is True
-    assert complete["discovery"] is None
-
-
-def test_world_status_and_region_commission_are_daily_unique():
-    store, _ = _build_store()
-
+    import sqlite3
+    conn = sqlite3.connect(store.db_path)
+    names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    conn.close()
+    assert not {"world_regions", "world_discoveries", "world_discovery_choices", "world_custom_events"} & names
     status = store.get_world_status()
     assert status["date"]
     assert status["weather"]
-    assert any(area["key"] == "summer_signal_2026" for area in status["event_areas"])
-
-    first = store.create_region_commission("miya_garden")
-    second = store.create_region_commission("miya_garden")
-    assert first["success"] is True
-    assert first["created"] is True
-    assert second["success"] is True
-    assert second["created"] is False
-    assert second["quest"]["id"] == first["quest"]["id"]
+    assert status["event_areas"] == []
 
 
-def test_real_context_never_fakes_weather_and_persists_snapshot():
+def test_legacy_virtual_world_is_backed_up_then_removed():
+    import sqlite3
+
+    temp_dir = tempfile.mkdtemp(prefix="earthonline_legacy_")
+    db_path = os.path.join(temp_dir, "earthonline.db")
+    conn = sqlite3.connect(db_path)
+    for table in ("world_regions", "world_discoveries", "world_discovery_choices", "world_custom_events"):
+        conn.execute(f"CREATE TABLE {table} (id INTEGER PRIMARY KEY, payload TEXT)")
+    conn.execute("INSERT INTO world_regions (payload) VALUES ('legacy virtual region')")
+    conn.commit()
+    conn.close()
+
+    store = EarthOnlineStore(db_path=db_path)
+
+    backups = list(pathlib.Path(store.backup_dir).glob("earthonline-before-reality-map-*.db"))
+    assert len(backups) == 1
+    conn = sqlite3.connect(store.db_path)
+    names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    conn.close()
+    assert not {"world_regions", "world_discoveries", "world_discovery_choices", "world_custom_events"} & names
+
+    backup = sqlite3.connect(backups[0])
+    assert backup.execute("SELECT payload FROM world_regions").fetchone()[0] == "legacy virtual region"
+    backup.close()
+
+
+def test_real_context_never_fakes_weather_and_map_context_keeps_provenance():
     store, _ = _build_store()
 
     settings = store.update_real_context_settings({"city": ""})
@@ -323,58 +315,156 @@ def test_real_context_never_fakes_weather_and_persists_snapshot():
     if context["source_status"] != "ok":
         assert context["weather"] == "未同步"
 
-    result = store.explore_world_region("miya_garden")
-    assert result["success"] is True
-    discovery = store.list_world_discoveries("miya_garden")[0]
-    assert "context_snapshot" in discovery
+    pending = store.record_real_place_visit("对话地点", source="conversation", latitude=30, longitude=120)
+    observed = store.record_real_place_visit("定位地点", source="browser_geolocation", latitude=31, longitude=121, accuracy_m=12)
+    facts = store.get_map_fact_context()
+    assert pending["verification_status"] == "unverified"
+    assert observed["verification_status"] == "observed"
+    assert facts["counts"]["unverified"] == 1
+    assert facts["counts"]["observed"] == 1
+    assert facts["weather"]["source_status"] == context["source_status"]
 
 
-def test_custom_world_events_are_editable_and_enter_exploration_pool():
+def test_one_off_weather_query_does_not_change_default_city_or_world_snapshot(monkeypatch):
+    import sqlite3
+
     store, _ = _build_store()
-    event = store.create_world_custom_event("miya_garden", "窗边的新光", "今天真实记录的一束光。", 3, 4, "hidden")
-    assert event and event["region_key"] == "miya_garden"
-    assert store.list_world_regions()[0]["event_total"] == 6
-    assert store.update_world_region("miya_garden", {"subtitle": "现实照片中的起点"})["subtitle"] == "现实照片中的起点"
-    assert store.delete_world_custom_event(event["id"]) is True
+    store.update_real_context_settings({"city": "杭州"})
+
+    def fake_query(location, **kwargs):
+        assert location == "东京"
+        return {
+            "requested_location": location,
+            "resolved_location": {"name": "东京", "path": "日本, 东京", "timezone": "Asia/Tokyo"},
+            "city": "东京",
+            "source": "seniverse",
+            "source_status": "ok",
+            "captured_at": "2026-09-17T16:00:00+09:00",
+            "weather": "晴",
+            "weather_icon": "☼",
+            "temperature": 27.0,
+            "humidity": 55.0,
+            "wind": "东 2级",
+            "forecast": [],
+        }
+
+    monkeypatch.setattr("core.weather_service.query_weather", fake_query)
+
+    result = store.refresh_real_context({"city": "东京", "include_forecast": True})
+
+    assert result["city"] == "东京"
+    assert result["requested_location"] == "东京"
+    assert store.get_real_context_settings()["city"] == "杭州"
+    conn = sqlite3.connect(store.db_path)
+    snapshot_count = conn.execute("SELECT COUNT(*) FROM world_real_context_snapshots").fetchone()[0]
+    conn.close()
+    assert snapshot_count == 0
 
 
-def test_active_event_shop_consumes_miya_currency_and_archives_item():
+def test_default_weather_snapshot_uses_requested_location_for_freshness(monkeypatch):
+    from datetime import datetime
+
     store, _ = _build_store()
-    before = store.get_player()["miya_currency"]
-    shop = store.list_world_event_shop("summer_signal_2026")
-    assert shop["active"] is True
-    result = store.purchase_world_event_item("summer_signal_2026", "signal_postcard")
-    assert result["success"] is True
-    assert store.get_player()["miya_currency"] == before - 18
-    assert store.list_items()[0]["name"] == "夏末信号明信片"
-    duplicate = store.purchase_world_event_item("summer_signal_2026", "signal_postcard")
-    assert duplicate["success"] is False
+    store.update_real_context_settings({"city": "杭州市", "refresh_minutes": 30})
+
+    def fake_query(location, **kwargs):
+        return {
+            "requested_location": location,
+            "resolved_location": {"name": "杭州", "path": "中国, 浙江, 杭州", "timezone": "Asia/Shanghai"},
+            "city": "杭州",
+            "source": "seniverse",
+            "source_status": "ok",
+            "captured_at": datetime.now().astimezone().isoformat(),
+            "weather": "晴",
+            "weather_icon": "☼",
+            "temperature": 28.0,
+            "humidity": 50.0,
+            "wind": "东 2级",
+            "forecast": [],
+        }
+
+    monkeypatch.setattr("core.weather_service.query_weather", fake_query)
+    snapshot = store.refresh_real_context()
+    loaded = store.get_real_context(auto_refresh=False)
+
+    assert snapshot["city"] == "杭州"
+    assert loaded["city"] == "杭州"
+    assert loaded["is_stale"] == 0
+    assert loaded["settings"]["city"] == "杭州市"
 
 
-def test_exploration_returns_companion_dialogue():
+def test_unverified_place_can_be_explicitly_confirmed_without_losing_source():
     store, _ = _build_store()
-    result = store.explore_world_region("miya_garden")
-    assert result["success"] is True
-    assert result["discovery"]["companion"]["speaker"] == "弥娅"
-    assert result["discovery"]["companion"]["text"]
+    pending = store.record_real_place_visit(
+        "对话候选地点", source="conversation", latitude=30.2, longitude=120.1,
+    )
+    original_source = pending["source"]
+
+    confirmed = store.update_real_place(pending["place_key"], {"verification_status": "confirmed"})
+
+    assert confirmed["verification_status"] == "confirmed"
+    assert confirmed["source"] == original_source
+    assert confirmed["source_updated_at"]
 
 
-# ── v13: 地理围栏 / 属性联动 / 改写券 / 好感解锁 / 自定义活动 ──
-
-
-def test_geofence_blocks_and_allows_exploration():
+def test_journey_facts_require_a_real_coordinate_track():
     store, _ = _build_store()
-    store.update_world_region("miya_garden", {"latitude": 31.2304, "longitude": 121.4737, "geofence_radius": 500})
+    store.create_story(
+        title="现实步行旅程",
+        content="这段文字只是叙事，不作为坐标事实。",
+        fields={
+            "journey": True,
+            "source": "journey_gps",
+            "verification_status": "observed",
+            "recorded_at": "2026-09-17T10:05:00+08:00",
+            "distance_m": 1234.5,
+            "duration_seconds": 900,
+            "track": [
+                {"latitude": 30.1001, "longitude": 120.2001, "timestamp": 1},
+                {"latitude": 30.1010, "longitude": 120.2020, "timestamp": 2},
+                {"latitude": "invalid", "longitude": 120.3},
+            ],
+        },
+    )
+    store.create_story(title="纯叙事旅程", fields={"journey": True, "track": []})
+    store.create_story(
+        title="对话生成的伪轨迹",
+        fields={
+            "journey": True,
+            "source": "conversation",
+            "track": [{"latitude": 30.5, "longitude": 120.5}],
+        },
+    )
 
-    blocked = store.explore_world_region("miya_garden")
-    assert blocked["success"] is False
-    assert "围栏" in blocked["geofence"]["message"] or "定位" in blocked["geofence"]["message"]
+    journeys = store.list_real_journeys()
 
-    far = store.explore_world_region("miya_garden", latitude=39.9042, longitude=116.4074)
-    assert far["success"] is False and far["geofence"]["passed"] is False
+    assert len(journeys) == 1
+    assert journeys[0]["source"] == "journey_gps"
+    assert journeys[0]["verification_status"] == "observed"
+    assert journeys[0]["distance_m"] == 1234.5
+    assert len(journeys[0]["track"]) == 2
 
-    near = store.explore_world_region("miya_garden", latitude=31.2310, longitude=121.4740)
-    assert near["success"] is True and near["geofence"]["passed"] is True
+
+def test_real_place_provenance_survives_export_import_roundtrip():
+    source_store, _ = _build_store()
+    place = source_store.record_real_place_visit(
+        "轨迹终点", latitude=31.1, longitude=121.2, accuracy_m=8,
+        source="journey_gps", provider_id="gps-finish", observed_at="2026-09-17T11:00:00+08:00",
+    )
+    payload = source_store.export_json()
+    target_store, _ = _build_store()
+
+    target_store.import_json(payload)
+    restored = target_store.get_real_place(place["place_key"])
+
+    assert restored["verification_status"] == "observed"
+    assert restored["source"] == "journey_gps"
+    assert restored["provider_id"] == "gps-finish"
+    assert restored["visits"][0]["verification_status"] == "observed"
+    assert restored["visits"][0]["observed_at"] == "2026-09-17T11:00:00+08:00"
+
+
+# ── v13: 属性联动 / 好感解锁 / 现实活动 ──
 
 
 def test_quest_completion_and_checkin_move_player_attrs():
@@ -391,22 +481,6 @@ def test_quest_completion_and_checkin_move_player_attrs():
     assert checkin["success"] is True
     attrs_final = {a["key"]: a["value"] for a in store.get_player()["attrs"]}
     assert attrs_final["energy"] == min(100, attrs_after["energy"] + 15)
-
-
-def test_commission_rewrite_boost_is_consumed():
-    store, _ = _build_store()
-    purchased = store.purchase_miya_shop_item("miya_reality_pass")
-    assert purchased["success"] is True
-    assert any((i.get("fields") or {}).get("boost") == "commission_resonance" for i in store.list_items())
-
-    result = store.create_region_commission("miya_garden")
-    assert result["success"] is True and result["created"] is True
-    assert result["boost_applied"] is True
-    assert result["quest"]["fields"]["boosted"] == 1
-    # 改写券已被消耗
-    assert not any((i.get("fields") or {}).get("boost") == "commission_resonance" for i in store.list_items())
-    second = store.create_region_commission("city_lumen")
-    assert second["boost_applied"] is False
 
 
 def test_affinity_tier_up_unlocks_reward():
@@ -439,7 +513,7 @@ def test_custom_event_areas_and_shop_items_flow():
     assert store.list_world_event_shop("autumn_test_2026")["active"] is False
     assert store.delete_world_event_shop_item("autumn_test_2026", "test_badge") is True
     assert store.delete_world_event_area("autumn_test_2026") is True
-    assert store.delete_world_event_area("summer_signal_2026") is False  # 内置活动不可删
+    assert store.list_world_event_areas() == []
 
 
 def test_miya_shop_custom_items_full_lifecycle():
@@ -722,16 +796,6 @@ def test_battle_pass_progress_and_claim():
     assert again["success"] is False  # 不可重复领
 
 
-def test_season_events_available_without_weather_sync():
-    """季节条件不依赖天气同步；天气条件在未同步时保持锁定"""
-    store, _ = _build_store()
-    context = {"source_status": "unavailable", "weather": "未同步", "period": "白昼", "season": "winter"}
-    season_event = {"condition": {"season_any": ["winter"]}}
-    weather_event = {"condition": {"weather_any": ["雨"]}}
-    assert store._world_condition_available(season_event, context) is True
-    assert store._world_condition_available(weather_event, context) is False
-
-
 def test_items_cap_and_ledger_on_manual_currency_edit():
     """背包上限受配置控制；手动改币写流水"""
     store, _ = _build_store()
@@ -749,7 +813,7 @@ def test_items_cap_and_ledger_on_manual_currency_edit():
 
 
 def test_v17_toolnet_registry_sync():
-    """三个注册层的 v17 工具名逐一对齐"""
+    """工具注册层严格对齐，并且不再暴露虚拟世界能力。"""
     from core.tools_astrbot.earth_tools import EARTH_TOOLS_SCHEMA
 
     import webnet.ToolNet.tools.earth_online as toolnet_earth
@@ -766,9 +830,185 @@ def test_v17_toolnet_registry_sync():
     }
     schema_names = {t["function"]["name"] for t in EARTH_TOOLS_SCHEMA}
     toolnet_names = {t.config["name"] for t in toolnet_earth.get_earth_online_tools()}
-    assert v17 <= schema_names
-    assert v17 <= toolnet_names
-    assert len(schema_names) == len(toolnet_names) == 87
+    reality_map = {"earth_map_context", "earth_list_journeys", "earth_confirm_place", "earth_query_weather"}
+    retired = {
+        "earth_explore", "earth_region_commission", "earth_update_region",
+        "earth_add_world_event", "earth_list_world_events", "earth_delete_world_event",
+        "earth_list_discoveries", "earth_choose_discovery",
+    }
+    assert v17 | reality_map <= schema_names
+    assert schema_names == toolnet_names
+    assert not retired & schema_names
+
+
+def test_earning_profile_routes_and_sprint_flow():
+    """收益档案会排序路线；7 天实验幂等创建，并把首步放入委托板。"""
+    store, _ = _build_store()
+    prefs = store.update_earning_preferences({
+        "skills": ["Python", "自动化", "写作"],
+        "sellable_assets": ["脚本", "模板"],
+        "accepted_models": ["automation_tool", "digital_product", "skill_service"],
+        "weekly_hours": 6,
+        "target_amount": 100,
+        "constraints": "不垫资",
+    })
+    assert prefs["skills"] == ["Python", "自动化", "写作"]
+    assert prefs["accepted_models"] == ["automation_tool", "digital_product", "skill_service"]
+
+    routes = store.earning_routes()
+    assert {route["key"] for route in routes} == {"automation_tool", "digital_product", "skill_service"}
+    assert "automation_tool" in {route["key"] for route in routes[:2]}
+    assert next(route for route in routes if route["key"] == "automation_tool")["fit_score"] >= 80
+
+    sprint = store.create_earning_sprint({"route_key": "automation_tool", "goal_amount": 100})
+    assert sprint["success"] is True and sprint["created"] is True
+    assert sprint["plan"]["is_sprint"] == 1
+    assert len(sprint["plan"]["steps"]) == 5
+    assert sprint["plan"]["steps"][0]["quest_id"]
+
+    again = store.create_earning_sprint({"route_key": "automation_tool", "goal_amount": 200})
+    assert again["success"] is True and again["created"] is False
+    assert again["plan"]["id"] == sprint["plan"]["id"]
+
+
+def test_earning_quest_completion_syncs_plan_and_guidance():
+    """委托完成会回写收益阶段，指导接口给出真实下一步与漏斗。"""
+    store, _ = _build_store()
+    store.update_earning_preferences({"skills": ["整理"], "weekly_hours": 3})
+    sprint = store.create_earning_sprint({"route_key": "resale", "goal_amount": 100})
+    first = sprint["plan"]["steps"][0]
+
+    result = store.complete_quest(first["quest_id"])
+    assert result["success"] is True
+    plan = store.get_earning_plan(sprint["plan"]["id"])
+    assert plan["steps"][0]["status"] == "done"
+    assert plan["steps"][1]["status"] == "pending"
+
+    guidance = store.earning_guidance()
+    assert guidance["profile_ready"] is True
+    assert guidance["next_action"]["id"] == plan["steps"][1]["id"]
+    assert guidance["totals"]["effective_hourly_rate"] == 0
+    assert set(guidance["pipeline"]) == {"inbox", "shortlisted", "applied", "won", "closed"}
+
+
+def test_earning_opportunity_verification_and_income_validation():
+    """机会核验影响推荐分；零收入不会污染真实收益流水。"""
+    import pytest
+
+    store, _ = _build_store()
+    pending = store.create_earning_opportunity({
+        "title": "公开需求", "income_min": 100, "income_max": 100, "hours": 2,
+        "risk": "low", "confidence": "medium",
+    })
+    before = store.earning_guidance()["opportunities"][0]["fit_score"]
+    store.update_earning_opportunity(pending["id"], {"verification_status": "verified"})
+    after = store.earning_guidance()["opportunities"][0]["fit_score"]
+    assert after > before
+
+    with pytest.raises(ValueError, match="必须大于 0"):
+        store.record_income({"amount": 0, "cost": 0, "hours": 1})
+
+
+def test_first_income_experiment_creates_guarded_offer_and_sprint():
+    """首单入口固化每天两小时、净收入 200+ 和自动化微服务边界。"""
+    store, _ = _build_store()
+
+    result = store.start_first_income_experiment({
+        "weekly_hours": 2,
+        "target_amount": 100,
+        "price": "invalid",
+    })
+
+    assert result["success"] is True
+    assert result["preferences"]["weekly_hours"] == 14
+    assert result["preferences"]["target_amount"] == 201
+    assert result["preferences"]["primary_route"] == "automation_tool"
+    assert result["offer"]["title"] == "48 小时自动化微服务"
+    assert result["offer"]["price"] == 299
+    assert "付款" in result["offer"]["scope"]
+    assert result["sprint"]["plan"]["route_key"] == "automation_tool"
+
+
+def test_earning_action_approval_is_content_bound_and_revocable():
+    """批准只绑定当前草稿；改稿会使批准失效，且可随时撤销。"""
+    import pytest
+
+    store, _ = _build_store()
+    offer = store.create_earning_offer({"title": "小型自动化", "price": 299})
+    draft = store.create_earning_action({
+        "offer_id": offer["id"],
+        "action_type": "proposal",
+        "target": "公开需求 #123",
+        "title": "自动化服务提案",
+        "content": "交付一条自动化流程，报价 299 元。",
+        "amount": 299,
+        "risk": "low",
+    })
+    submitted = store.submit_earning_action(draft["id"])
+    assert submitted["status"] == "pending"
+    assert len(submitted["content_hash"]) == 64
+
+    with pytest.raises(ValueError, match="校验失败"):
+        store.approve_earning_action(draft["id"], "0" * 64)
+
+    approved = store.approve_earning_action(draft["id"], submitted["content_hash"])
+    assert approved["status"] == "approved"
+    assert approved["approved_hash"] == submitted["content_hash"]
+    assert approved["expires_at"]
+
+    changed = store.update_earning_action(draft["id"], {"content": "调整后的提案内容。"})
+    assert changed["status"] == "draft"
+    assert changed["approved_hash"] == ""
+    assert changed["expires_at"] == ""
+
+    resubmitted = store.submit_earning_action(draft["id"])
+    revoked = store.revoke_earning_action(resubmitted["id"])
+    assert revoked["status"] == "revoked"
+    assert revoked["revoked_at"]
+
+
+def test_earning_actions_reject_financial_operations_and_expire_approval():
+    """资金类动作永不进入审批箱；过期批准会在读取时自动失效。"""
+    import pytest
+
+    store, _ = _build_store()
+    for action_type in ("payment", "transfer", "withdraw", "refund"):
+        with pytest.raises(ValueError, match="不受支持"):
+            store.create_earning_action({
+                "action_type": action_type,
+                "title": "禁止动作",
+                "content": "不得创建",
+            })
+
+    draft = store.create_earning_action({
+        "action_type": "contact",
+        "title": "联系草稿",
+        "content": "仅用于测试审批过期。",
+    })
+    submitted = store.submit_earning_action(draft["id"])
+    approved = store.approve_earning_action(draft["id"], submitted["content_hash"])
+    conn = store._connect()
+    try:
+        conn.execute(
+            "UPDATE earning_action_drafts SET expires_at = ? WHERE id = ?",
+            ("2000-01-01T00:00:00", approved["id"]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    assert store.get_earning_action(approved["id"])["status"] == "expired"
+
+
+def test_public_feed_resolution_rejects_private_dns_answers(monkeypatch):
+    """公开域名若解析到内网地址，也不能被信息源抓取器访问。"""
+    import pytest
+
+    monkeypatch.setattr(
+        "core.earth_online_store.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [(2, 1, 6, "", ("127.0.0.1", 80))],
+    )
+    with pytest.raises(ValueError, match="内网"):
+        EarthOnlineStore._fetch_public_feed("https://example.com/feed.xml")
 
 
 # ── v17.2: 关怀委托引擎 (弥娅主动用委托介入生活) ──

@@ -113,11 +113,13 @@ class PlatformToolsManager:
         "earth_post_note",
         "earth_list_notes",
         "earth_world",
-        "earth_explore",
+        "earth_map_context",
+        "earth_list_journeys",
+        "earth_confirm_place",
         "earth_world_status",
         "earth_real_context",
         "earth_refresh_real_context",
-        "earth_region_commission",
+        "earth_query_weather",
         # 策划级: 实体修改/删除
         "earth_get_item",
         "earth_update_item",
@@ -135,13 +137,6 @@ class PlatformToolsManager:
         "earth_checkin",
         # 策划级: 玩家档案
         "earth_update_player",
-        # 策划级: 世界与地理围栏
-        "earth_update_region",
-        "earth_add_world_event",
-        "earth_list_world_events",
-        "earth_delete_world_event",
-        "earth_list_discoveries",
-        "earth_choose_discovery",
         # 策划级: 限时活动运营
         "earth_list_event_areas",
         "earth_create_event_area",
@@ -175,6 +170,14 @@ class PlatformToolsManager:
         "earth_claim_battle_pass",
         "earth_issue_care_commission",
         "earth_redeem_service",
+        # v18: 收益中枢站内准备与审批草稿（没有批准、发送或资金动作）
+        "earth_earning_brief",
+        "earth_create_earning_sprint",
+        "earth_start_first_income_experiment",
+        "earth_list_earning_offers",
+        "earth_list_earning_actions",
+        "earth_create_earning_action",
+        "earth_submit_earning_action",
     ]
 
     # 平台特定工具映射

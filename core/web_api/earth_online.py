@@ -494,6 +494,17 @@ class EarthOnlineRoutes:
         async def earning_guidance():
             return self.store.earning_guidance()
 
+        @self.router.get("/earning/routes")
+        async def earning_routes():
+            return self.store.earning_routes()
+
+        @self.router.post("/earning/sprints")
+        async def create_earning_sprint(request: Dict[str, Any] = None):
+            try:
+                return self.store.create_earning_sprint(request or {})
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+
         @self.router.get("/earning/preferences")
         async def earning_preferences():
             return self.store.get_earning_preferences()
@@ -589,6 +600,57 @@ class EarthOnlineRoutes:
             try: return self.store.record_income(request or {})
             except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
 
+        # v18.2: 首单服务卡与逐次外部动作审批（批准仍不执行动作）
+        @self.router.get("/earning/offers")
+        async def earning_offers(status: str = ""):
+            return self.store.list_earning_offers(status=status)
+
+        @self.router.post("/earning/offers")
+        async def create_earning_offer(request: Dict[str, Any] = None):
+            try: return self.store.create_earning_offer(request or {})
+            except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.put("/earning/offers/{offer_id}")
+        async def update_earning_offer(offer_id: int, request: Dict[str, Any] = None):
+            result = self.store.update_earning_offer(offer_id, request or {})
+            if result is None: raise HTTPException(status_code=404, detail="可售服务不存在")
+            return result
+
+        @self.router.post("/earning/first-income-experiment")
+        async def start_first_income_experiment(request: Dict[str, Any] = None):
+            try: return self.store.start_first_income_experiment(request or {})
+            except (TypeError, ValueError) as exc: raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.get("/earning/actions")
+        async def earning_actions(status: str = "", limit: int = 100):
+            return self.store.list_earning_actions(status=status, limit=limit)
+
+        @self.router.post("/earning/actions")
+        async def create_earning_action(request: Dict[str, Any] = None):
+            try: return self.store.create_earning_action(request or {})
+            except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.put("/earning/actions/{action_id}")
+        async def update_earning_action(action_id: int, request: Dict[str, Any] = None):
+            result = self.store.update_earning_action(action_id, request or {})
+            if result is None: raise HTTPException(status_code=404, detail="外部动作草稿不存在")
+            return result
+
+        @self.router.post("/earning/actions/{action_id}/submit")
+        async def submit_earning_action(action_id: int):
+            try: return self.store.submit_earning_action(action_id)
+            except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.post("/earning/actions/{action_id}/approve")
+        async def approve_earning_action(action_id: int, request: Dict[str, Any] = None):
+            try: return self.store.approve_earning_action(action_id, str((request or {}).get("content_hash", "")))
+            except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.post("/earning/actions/{action_id}/revoke")
+        async def revoke_earning_action(action_id: int):
+            try: return self.store.revoke_earning_action(action_id)
+            except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
+
         # ── 称号系统 ──
 
         @self.router.get("/titles")
@@ -622,12 +684,10 @@ class EarthOnlineRoutes:
         # ── 单人开放世界探索 ──
 
         @self.router.get("/world")
-        async def world_regions():
-            """获取现实世界地图数据；旧版虚拟区域不再注入默认世界视图。"""
+        async def world_map():
+            """获取现实世界地图数据。"""
             return {
-                "regions": [],
                 "places": self.store.list_real_places(),
-                "discoveries": [],
                 "status": self.store.get_world_status(),
                 "mode": "real_world",
             }
@@ -635,6 +695,15 @@ class EarthOnlineRoutes:
         @self.router.get("/world/places")
         async def world_places(limit: int = 200):
             return self.store.list_real_places(limit=limit)
+
+        @self.router.get("/world/facts")
+        async def world_facts(place_limit: int = 20, journey_limit: int = 10):
+            """Provenance-aware factual map context shared by the UI and Miya."""
+            return self.store.get_map_fact_context(place_limit=place_limit, journey_limit=journey_limit)
+
+        @self.router.get("/world/journeys")
+        async def world_journeys(limit: int = 50):
+            return self.store.list_real_journeys(limit=limit)
 
         @self.router.get("/world/geocode")
         async def geocode_world_place(query: str = ""):
@@ -729,10 +798,11 @@ class EarthOnlineRoutes:
                 name=str(request.get("name", "")),
                 latitude=request.get("latitude"), longitude=request.get("longitude"),
                 note=str(request.get("note", "")), visited_at=str(request.get("visited_at", "")),
-                source=str(request.get("source", "manual")), confidence=float(request.get("confidence", 1.0)),
+                source=str(request.get("source", "manual")), confidence=request.get("confidence"),
                 accuracy_m=request.get("accuracy_m"),
                 place_key=str(request.get("place_key", "")), provider_id=str(request.get("provider_id", "")),
                 display_address=str(request.get("display_address", "")), category=str(request.get("category", "")),
+                verification_status=str(request.get("verification_status", "")), observed_at=str(request.get("observed_at", "")),
             )
             if not place:
                 raise HTTPException(status_code=400, detail="地点名称不能为空")
@@ -781,8 +851,25 @@ class EarthOnlineRoutes:
 
         @self.router.post("/world/real-context/refresh")
         async def refresh_world_real_context(request: Dict[str, Any] = None):
-            """主动刷新现实天气；失败时返回明确的未同步状态"""
+            """刷新默认天气地点；传入不同地点时只做非持久化查询。"""
             return self.store.refresh_real_context(request or {})
+
+        @self.router.post("/world/weather/query")
+        async def query_world_weather(request: Dict[str, Any] = None):
+            """查询任意地点天气，不修改默认城市、当前位置、世界快照或地点档案。"""
+            values = request or {}
+            location = str(values.get("location") or "").strip()
+            if not location:
+                raise HTTPException(status_code=400, detail="需要提供天气查询地点")
+            try:
+                return self.store.query_weather(
+                    location,
+                    include_forecast=bool(values.get("include_forecast", True)),
+                    forecast_days=int(values.get("forecast_days") or 3),
+                    force_refresh=bool(values.get("force_refresh", False)),
+                )
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail="天气查询参数无效") from exc
 
         @self.router.get("/world/real-context/settings")
         async def world_real_context_settings():
@@ -798,34 +885,6 @@ class EarthOnlineRoutes:
                 return self.store.update_weather_api_key(str((request or {}).get("api_key", "")))
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-        @self.router.put("/world/regions/{region_key}")
-        async def update_world_region(region_key: str, request: Dict[str, Any] = None):
-            region = self.store.update_world_region(region_key, request or {})
-            if not region:
-                raise HTTPException(status_code=404, detail="世界区域不存在")
-            return region
-
-        @self.router.get("/world/events")
-        async def list_world_events(region_key: str = ""):
-            return self.store.list_world_custom_events(region_key=region_key)
-
-        @self.router.post("/world/events")
-        async def create_world_event(request: Dict[str, Any] = None):
-            request = request or {}
-            event = self.store.create_world_custom_event(
-                region_key=str(request.get("region_key", "")), title=str(request.get("title", "")), text=str(request.get("text", "")),
-                reward_currency=int(request.get("reward_currency", 0)), reward_exp=int(request.get("reward_exp", 0)), kind=str(request.get("kind", "story")),
-            )
-            if not event:
-                raise HTTPException(status_code=400, detail="自定义世界事件内容不完整或区域不存在")
-            return event
-
-        @self.router.delete("/world/events/{event_id}")
-        async def delete_world_event(event_id: int):
-            if not self.store.delete_world_custom_event(event_id):
-                raise HTTPException(status_code=404, detail="世界事件不存在")
-            return {"success": True}
 
         @self.router.get("/world/events/{event_key}/shop")
         async def world_event_shop(event_key: str):
@@ -898,17 +957,7 @@ class EarthOnlineRoutes:
                 raise HTTPException(status_code=404, detail="自定义商品不存在 (内置商品不可删除)")
             return {"success": True}
 
-        @self.router.get("/world/discoveries")
-        async def world_discoveries(region_key: str = "", limit: int = 100):
-            """旧版虚拟发现接口；现实世界模式不再展示或生成虚拟发现。"""
-            return []
-
-        @self.router.post("/world/{region_key}/explore")
-        async def explore_world_region(region_key: str, request: Dict[str, Any] = None):
-            """旧版虚拟区域探索接口，现实地图模式下不再生成虚拟发现。"""
-            raise HTTPException(status_code=410, detail="虚拟区域探索已停用，请使用现实地图记录地点")
-
-        # ── 限时活动管理 (内置 + 后台自定义) ──
+        # ── 现实活动管理 (纪念日 + 玩家创建) ──
 
         @self.router.get("/world/event-areas")
         async def list_world_event_areas():
@@ -929,13 +978,13 @@ class EarthOnlineRoutes:
         async def update_world_event_area(event_key: str, request: Dict[str, Any] = None):
             area = self.store.update_world_event_area(event_key, request or {})
             if not area:
-                raise HTTPException(status_code=404, detail="自定义活动不存在 (内置活动不可修改)")
+                raise HTTPException(status_code=404, detail="现实活动不存在")
             return {"success": True, "area": area}
 
         @self.router.delete("/world/event-areas/{event_key}")
         async def delete_world_event_area(event_key: str):
             if not self.store.delete_world_event_area(event_key):
-                raise HTTPException(status_code=404, detail="自定义活动不存在 (内置活动不可删除)")
+                raise HTTPException(status_code=404, detail="现实活动不存在")
             return {"success": True}
 
         @self.router.post("/world/event-areas/{event_key}/items")
@@ -950,24 +999,6 @@ class EarthOnlineRoutes:
             if not self.store.delete_world_event_shop_item(event_key, item_key):
                 raise HTTPException(status_code=404, detail="自定义商品不存在")
             return {"success": True}
-
-        @self.router.post("/world/discoveries/{discovery_id}/choice")
-        async def choose_world_discovery(discovery_id: int, request: Dict[str, Any] = None):
-            raise HTTPException(status_code=410, detail="虚拟世界发现与同行选择已停用")
-
-        @self.router.post("/world/{region_key}/image")
-        async def upload_world_region_image(region_key: str, file: UploadFile = File(...)):
-            """上传并绑定区域现实照片，作为世界地图区域底图。"""
-            path = self._save_upload(file)
-            region = self.store.update_world_region_image(region_key, path)
-            if not region:
-                raise HTTPException(status_code=404, detail="世界区域不存在")
-            return {"success": True, "image_path": path, "region": region}
-
-        @self.router.post("/world/{region_key}/commission")
-        async def world_commission(region_key: str):
-            """旧版虚拟区域委托接口。"""
-            raise HTTPException(status_code=410, detail="虚拟区域委托已停用，请创建普通现实任务")
 
         # ── 剧情 ──
 

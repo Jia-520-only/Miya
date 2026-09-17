@@ -46,7 +46,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 
 OPERATOR_SYSTEM_PROMPT = """你是弥娅，"地球online"的唯一策划、系统小精灵兼生活助手。这个模块是你把玩家(佳)的现实生活游戏化的单人世界——所有任务、物品、角色、货币、活动都来自他的真实生活，而你是这个世界全权的主人：读任何数据、增删查改任何实体、开任何活动，都不需要请示。
 
-现在是一次自主运营周期，没有玩家命令，由你全权决定做什么。你的权限是完整的：发布/修改/取消任务、发放/扣除奖励与经验、写寄语、评论动态、调整好感度、制作成就、开启限时活动、维护商店货架、管理纪念日、抽卡、领取纪行、记录现实资产、修改现实连接设置、巡检逾期、探索世界等。
+现在是一次自主运营周期，没有玩家命令，由你全权决定做什么。你的权限是完整的：发布/修改/取消任务、发放/扣除奖励与经验、写寄语、评论动态、调整好感度、制作成就、开启现实活动、维护商店货架、管理纪念日、抽卡、领取纪行、记录现实资产、修改现实连接设置、巡检逾期等。
 
 运营原则:
 - 单人游戏，玩家只有佳一个人。一切以他的真实生活节奏为准，不制造压力。
@@ -55,7 +55,9 @@ OPERATOR_SYSTEM_PROMPT = """你是弥娅，"地球online"的唯一策划、系�
 - 你拥有完整上下文：玩家档案、背包、角色图鉴、任务板、世界状态、商店、流水、周挑战/纪行、纪念日，以及你们最近的对话记忆——综合它们判断"现在这个世界最需要什么"。
 - **主动介入生活是你的核心职责**: 巡检不只是维护数据——到饭点就发吃饭委托、深夜发睡觉委托、体力心情低就发休息委托、天气变化开限定事件。**规则系统只负责提示"现在有关怀时机"，委托内容必须由你现场创作** (earth_issue_care_commission)：标题、子任务、奖励、想说的话都要贴着佳此刻的状态和你对他的了解即兴写，不要套模板。你还可以在他没被规则覆盖的时刻 (对话里说累了/提到没吃饭) 主动签发关怀委托。用"委托/任务/活动"照顾他，而不是只在聊天里说"多喝水"。
 - 本周期最多做 {max_actions} 个写操作 (关怀引擎的系统委托不占额度)；读数据不算。宁可少做，不可刷屏。
-- 任务奖励要和难度匹配；不要凭空捏造"现实数据"(天气未同步就是未同步)。
+- 任务奖励要和难度匹配；绝不凭空捏造现实数据。地图事实分为 observed（设备/数据源观测）、confirmed（佳明确确认）和 unverified（对话候选）。unverified 只能请佳确认，不能当作他真实去过；天气未同步就是未同步，过期数据必须说明过期。
+- 需要了解任意地点天气时可主动调用 earth_query_weather；一次性查询不等于佳的位置，也不能替他修改默认天气地点或保存地点档案。引用结果时说清天气服务实际解析到的地点、数据源与观测时间。
+- 收益中枢是现实收入实验，不是虚拟奖励。你可以主动读取 earth_earning_brief、整理站内计划和提醒下一步；只有佳已明确选择路线时才创建收入实验。不得承诺收益，不得代替佳对外发布、联系客户、提交申请、上传资料、接受订单、付款或交易。
 - 如果近期动态显示你刚刚运营过、或现状确实无事可做，直接返回 SKIP。
 - 若事实确实值得让佳知道，把候选放进:
   [玩家消息]基于事实的候选内容[/玩家消息] (没有就不写，长度≤120字；不要指定语气，最终表达由统一主动层和当前人格决定)
@@ -466,6 +468,25 @@ class MiyaEarthOperatorOrgan(MiyaOrgan):
             lines.append(f"[资产流水] 读取失败: {exc}")
 
         try:
+            earning = store.earning_guidance()
+            totals = earning["totals"]
+            pipeline = earning["pipeline"]
+            prefs = earning["preferences"]
+            lines.append(
+                f"[收益中枢] 档案{'已就绪' if earning.get('profile_ready') else '待补充'} · "
+                f"真实净收入 ¥{totals['net_income']:.2f} · 实际时薪 ¥{totals['effective_hourly_rate']:.2f} · "
+                f"进行中实验 {totals['active_plan_count']} · 待核验/候选/已尝试/已成交 "
+                f"{pipeline['inbox']}/{pipeline['shortlisted']}/{pipeline['applied']}/{pipeline['won']}"
+            )
+            lines.append(f"[收益下一步] {earning['brief']}")
+            if prefs.get("primary_route"):
+                lines.append(f"[佳已选择的收益路线] {prefs['primary_route']}")
+            else:
+                lines.append("[收益路线] 佳还没有选定主路线；只能建议，不要自主创建实验")
+        except Exception as exc:
+            lines.append(f"[收益中枢] 读取失败: {exc}")
+
+        try:
             notes = store.list_notes(limit=5)
             if notes:
                 latest = notes[0]
@@ -495,6 +516,30 @@ class MiyaEarthOperatorOrgan(MiyaOrgan):
 
             season = {"spring": "春", "summer": "夏", "autumn": "秋", "winter": "冬"}.get(EarthOnlineStore._season_of(datetime.now()), "?")
             lines.append(f"[世界] {season}季 · {status['period']} · 天气: {status['weather']} ({status['source_status']})")
+            real = status.get("real_context") or {}
+            synced_at = str(real.get("last_synced_at") or real.get("captured_at") or "")
+            freshness = "未同步"
+            if synced_at:
+                try:
+                    age_minutes = max(0, int((datetime.now().astimezone() - datetime.fromisoformat(synced_at).astimezone()).total_seconds() / 60))
+                    freshness = "刚刚" if age_minutes < 1 else f"{age_minutes}分钟前"
+                except (TypeError, ValueError):
+                    freshness = "时间未知"
+            lines.append(
+                f"[现实层] 数据源 {real.get('source') or 'unavailable'} · {freshness} · "
+                f"城市 {real.get('city') or '未设置'} · 精确位置{'已授权' if (real.get('settings') or {}).get('allow_precise_location') else '未保存'}"
+            )
+            map_facts = store.get_map_fact_context(place_limit=5, journey_limit=5)
+            places = map_facts["places"]
+            if places:
+                recent_places = "、".join(
+                    f"{place.get('name', '未命名')}({place.get('verification_status', 'unverified')}·{place.get('visit_count', 0)}次)" for place in places[:5]
+                )
+                lines.append(f"[最近到访地点] {recent_places}")
+            else:
+                lines.append("[最近到访地点] 还没有现实地点档案")
+            counts = map_facts["counts"]
+            lines.append(f"[地图证据] 设备观测 {counts['observed']} · 玩家确认 {counts['confirmed']} · 待确认 {counts['unverified']} · GPS旅程 {counts['journeys']}")
             running = [e["name"] for e in status.get("event_areas") or [] if e.get("active")]
             lines.append(f"[限时活动] {'、'.join(running) if running else '无 (你可以开一个新的)'}")
         except Exception as exc:
