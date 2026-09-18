@@ -1780,6 +1780,39 @@ class EarthOnlineTools:
         except Exception as e:
             return f"提交审批草稿失败: {e}"
 
+    async def earth_approve_earning_action(self, action_id: int, confirmation: str) -> str:
+        """从对话中批准指定草稿；必须带有明确的同意 #编号文本。"""
+        import re
+
+        if not re.fullmatch(rf"(?:同意|批准)\s*#?{int(action_id)}", str(confirmation or "").strip(), re.IGNORECASE):
+            return f"未批准草稿 #{int(action_id)}：请明确回复“同意 #{int(action_id)}”或“批准 #{int(action_id)}”。"
+        try:
+            action = self._get_store().get_earning_action(int(action_id))
+            if not action:
+                return f"审批草稿 #{int(action_id)} 不存在。"
+            if action.get("status") != "pending":
+                return f"审批草稿 #{int(action_id)} 当前状态为 {action.get('status')}，不能批准。"
+            approved = self._get_store().approve_earning_action(int(action_id), str(action.get("content_hash") or ""))
+            return f"已批准审批草稿 #{approved['id']}，有效 30 分钟；批准不等于发送，仍不会自动执行。"
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"批准审批草稿失败: {e}"
+
+    async def earth_revoke_earning_action(self, action_id: int, confirmation: str) -> str:
+        """从对话中撤销指定草稿；必须带有明确的撤销 #编号文本。"""
+        import re
+
+        if not re.fullmatch(rf"(?:撤销|拒绝)\s*#?{int(action_id)}", str(confirmation or "").strip(), re.IGNORECASE):
+            return f"未撤销草稿 #{int(action_id)}：请明确回复“撤销 #{int(action_id)}”或“拒绝 #{int(action_id)}”。"
+        try:
+            action = self._get_store().revoke_earning_action(int(action_id))
+            return f"审批草稿 #{action['id']} 已撤销，不会发送或执行。"
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"撤销审批草稿失败: {e}"
+
 
 _tools: Optional[EarthOnlineTools] = None
 
@@ -2995,6 +3028,22 @@ EARTH_TOOLS_SCHEMA: List[Dict[str, Any]] = [
             "name": "earth_submit_earning_action",
             "description": "将站内草稿提交给用户审批；不批准、不发送、不执行",
             "parameters": {"type": "object", "properties": {"action_id": {"type": "integer"}}, "required": ["action_id"]},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_approve_earning_action",
+            "description": "用户在对话中明确回复‘同意 #编号’或‘批准 #编号’后，批准指定待确认草稿；不发送、不执行，不支持资金动作",
+            "parameters": {"type": "object", "properties": {"action_id": {"type": "integer"}, "confirmation": {"type": "string", "description": "用户原话，必须是同意 #编号或批准 #编号"}}, "required": ["action_id", "confirmation"]},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_revoke_earning_action",
+            "description": "用户在对话中明确回复‘撤销 #编号’或‘拒绝 #编号’后，撤销指定草稿",
+            "parameters": {"type": "object", "properties": {"action_id": {"type": "integer"}, "confirmation": {"type": "string", "description": "用户原话，必须是撤销 #编号或拒绝 #编号"}}, "required": ["action_id", "confirmation"]},
         },
     },
 ]

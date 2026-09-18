@@ -178,6 +178,8 @@ class PlatformToolsManager:
         "earth_list_earning_actions",
         "earth_create_earning_action",
         "earth_submit_earning_action",
+        "earth_approve_earning_action",
+        "earth_revoke_earning_action",
     ]
 
     # 平台特定工具映射

@@ -871,6 +871,47 @@ def test_earning_profile_routes_and_sprint_flow():
     assert again["plan"]["id"] == sprint["plan"]["id"]
 
 
+def test_earning_automation_cycle_is_read_only_and_returns_safety_boundary():
+    """安全巡检只刷新公开情报与简报，不会创建外部动作。"""
+    store, _ = _build_store()
+
+    result = store.run_earning_automation_cycle()
+
+    assert result["success"] is True
+    assert result["sync"]["created_count"] == 0
+    assert "公开信息同步" in result["actions"]
+    assert "付款" in result["blocked"]
+    assert result["guidance"]["action_drafts"] == []
+
+
+def test_earning_automation_advances_started_automation_experiment_idempotently():
+    """自动化工具实验由后台推进阶段，但不会在没有实验时擅自开局或重复建单。"""
+    store, _ = _build_store()
+    store.update_earning_preferences({"skills": ["Python", "自动化"], "weekly_hours": 6})
+
+    idle = store.run_earning_automation_cycle()
+    assert idle["experiment"]["status"] == "no_active_experiment"
+    assert store.list_earning_plans() == []
+
+    sprint = store.create_earning_sprint({"route_key": "automation_tool", "goal_amount": 250})
+    first_step = sprint["plan"]["steps"][0]
+    waiting = store.run_earning_automation_cycle()
+    assert waiting["experiment"]["status"] == "waiting_on_quest"
+    assert waiting["experiment"]["quest"]["id"] == first_step["quest_id"]
+
+    completed = store.complete_quest(first_step["quest_id"])
+    assert completed["success"] is True
+    advanced = store.run_earning_automation_cycle()
+    assert advanced["experiment"]["status"] == "quest_created"
+    next_step = store.get_earning_plan(sprint["plan"]["id"])["steps"][1]
+    assert next_step["status"] == "doing"
+    assert next_step["quest_id"] == advanced["experiment"]["quest"]["id"]
+
+    repeated = store.run_earning_automation_cycle()
+    assert repeated["experiment"]["status"] == "waiting_on_quest"
+    assert repeated["experiment"]["quest"]["id"] == next_step["quest_id"]
+
+
 def test_earning_quest_completion_syncs_plan_and_guidance():
     """委托完成会回写收益阶段，指导接口给出真实下一步与漏斗。"""
     store, _ = _build_store()
@@ -997,6 +1038,29 @@ def test_earning_actions_reject_financial_operations_and_expire_approval():
     finally:
         conn.close()
     assert store.get_earning_action(approved["id"])["status"] == "expired"
+
+
+def test_earning_authorization_policy_is_allowlisted_simulation_and_audited():
+    """授权中心默认拒绝；白名单动作只能在模拟模式下通过评估，金融动作永远拒绝。"""
+    store, _ = _build_store()
+    denied = store.evaluate_earning_authorization({"action_type": "publish", "target": "https://example.test/jobs", "amount": 10})
+    assert denied["allowed"] is False
+
+    policy = store.update_earning_authorization_policy({
+        "enabled": True,
+        "simulation_only": True,
+        "allowed_actions": ["publish"],
+        "allowed_targets": ["https://example.test/jobs"],
+        "max_single_amount": 100,
+        "max_daily_actions": 2,
+    })
+    assert policy["enabled"] is True and policy["simulation_only"] is True
+
+    allowed = store.evaluate_earning_authorization({"action_type": "publish", "target": "https://example.test/jobs/1", "amount": 10})
+    assert allowed["allowed"] is True and allowed["simulation_only"] is True
+    financial = store.evaluate_earning_authorization({"action_type": "transfer", "target": "https://example.test/jobs", "amount": 10})
+    assert financial["allowed"] is False and "金融" in financial["reason"]
+    assert len(store.list_earning_authorization_audit()) == 3
 
 
 def test_public_feed_resolution_rejects_private_dns_answers(monkeypatch):

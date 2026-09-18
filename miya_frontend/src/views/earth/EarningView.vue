@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import EarthAPI, {
   type EarthEarningActionDraft,
+  type EarthEarningAuthorizationPolicy,
   type EarthEarningGuidance,
   type EarthEarningOpportunity,
   type EarthEarningPlanStep,
@@ -36,8 +37,12 @@ const actionTypeLabels: Record<EarthEarningActionDraft['action_type'], string> =
 const actionStatusLabels: Record<EarthEarningActionDraft['status'], string> = {
   draft: '草稿', pending: '待确认', approved: '已批准', revoked: '已撤销', expired: '已过期',
 }
+const authorizationActionLabels: Array<[EarthEarningAuthorizationPolicy['allowed_actions'][number], string]> = [
+  ['proposal', '准备提案'], ['publish', '发布草稿'], ['contact', '联系草稿'], ['upload', '上传草稿'], ['accept_order', '接单草稿'],
+]
 
 const data = ref<EarthEarningGuidance | null>(null)
+const authorization = ref<EarthEarningAuthorizationPolicy | null>(null)
 const sources = ref<EarthEarningSource[]>([])
 const activeTab = ref<WorkspaceTab>('today')
 const loading = ref(false)
@@ -64,6 +69,10 @@ const actionForm = ref<{
   action_type: EarthEarningActionDraft['action_type'], offer_id: number | null, opportunity_id: number | null,
   target: string, title: string, content: string, amount: number,
 }>({ action_type: 'proposal', offer_id: null, opportunity_id: null, target: '', title: '', content: '', amount: 299 })
+const authorizationForm = ref({
+  enabled: false, simulation_only: true, allowed_actions: [] as EarthEarningAuthorizationPolicy['allowed_actions'],
+  allowed_targets: '', max_single_amount: 0, max_daily_actions: 0, expires_at: '', emergency_stop: false,
+})
 
 const visibleOpportunities = computed(() => {
   const items = data.value?.opportunities || []
@@ -71,6 +80,12 @@ const visibleOpportunities = computed(() => {
 })
 const activePlans = computed(() => (data.value?.plans || []).filter(plan => plan.status === 'active'))
 const focusPlan = computed(() => data.value?.focus_plan || activePlans.value[0] || null)
+const safetyState = computed(() => {
+  if (authorization.value?.emergency_stop) return { label: '紧急停止', tone: 'danger', detail: '所有授权评估都被暂停' }
+  if (authorization.value?.simulation_only) return { label: '模拟模式', tone: 'safe', detail: '只评估，不发送、不交易' }
+  if (authorization.value?.enabled) return { label: '白名单评估', tone: 'warn', detail: '仍需逐项审批，金融动作永久禁止' }
+  return { label: '默认安全', tone: 'safe', detail: '自动巡检只做公开同步、核验筛选和站内推进' }
+})
 
 function csv(values: string[]) {
   return values.join(', ')
@@ -90,9 +105,15 @@ function setMessage(value: string) {
 async function load() {
   loading.value = true
   try {
-    const [guidance, sourceList] = await Promise.all([EarthAPI.earningGuidance(), EarthAPI.earningSources()])
+    const [guidance, sourceList, policy] = await Promise.all([EarthAPI.earningGuidance(), EarthAPI.earningSources(), EarthAPI.earningAuthorization()])
     data.value = guidance
     sources.value = sourceList
+    authorization.value = policy
+    authorizationForm.value = {
+      enabled: policy.enabled, simulation_only: policy.simulation_only, allowed_actions: [...policy.allowed_actions],
+      allowed_targets: policy.allowed_targets.join(', '), max_single_amount: policy.max_single_amount,
+      max_daily_actions: policy.max_daily_actions, expires_at: policy.expires_at || '', emergency_stop: policy.emergency_stop,
+    }
     const prefs = guidance.preferences
     prefsForm.value = {
       skills: csv(prefs.skills || []), sellable_assets: csv(prefs.sellable_assets || []),
@@ -115,6 +136,24 @@ async function load() {
 function toggleModel(key: string) {
   const selected = prefsForm.value.accepted_models
   prefsForm.value.accepted_models = selected.includes(key) ? selected.filter(item => item !== key) : [...selected, key]
+}
+
+function toggleAuthorizationAction(action: EarthEarningAuthorizationPolicy['allowed_actions'][number]) {
+  const selected = authorizationForm.value.allowed_actions
+  authorizationForm.value.allowed_actions = selected.includes(action) ? selected.filter(item => item !== action) : [...selected, action]
+}
+
+async function saveAuthorization() {
+  workingKey.value = 'authorization'
+  try {
+    authorization.value = await EarthAPI.updateEarningAuthorization({
+      ...authorizationForm.value,
+      allowed_targets: authorizationForm.value.allowed_targets.split(/[,，\n]/).map(item => item.trim()).filter(Boolean),
+    })
+    setMessage(authorization.value.simulation_only ? '授权策略已保存为模拟模式，不会执行真实动作' : '授权策略已保存；仍需逐项审批，金融动作保持禁止')
+  }
+  catch (error: any) { setMessage(error?.response?.data?.detail || '授权策略保存失败') }
+  finally { workingKey.value = '' }
 }
 
 async function savePreferences(stayOnSettings = false) {
@@ -149,10 +188,11 @@ async function startSprint(route: EarthEarningRoute) {
 async function startFirstIncomeExperiment() {
   workingKey.value = 'first-income'
   try {
-    const result = await EarthAPI.startFirstIncomeExperiment({ weekly_hours: 14, target_amount: 250 })
+    const targetAmount = Math.max(250, Number(goalAmount.value) || 250)
+    const result = await EarthAPI.startFirstIncomeExperiment({ weekly_hours: 14, target_amount: targetAmount })
     await load()
     activeTab.value = 'workbench'
-    setMessage(`首单实验已建立：${result.offer.title}，报价 ¥${result.offer.price}`)
+    setMessage(`首单实验已建立：${result.offer.title}，目标净收入 ¥${targetAmount}，报价 ¥${result.offer.price}`)
   }
   catch (error: any) { setMessage(error?.response?.data?.detail || '首单实验初始化失败') }
   finally { workingKey.value = '' }
@@ -272,6 +312,27 @@ async function syncSources() {
   finally { workingKey.value = '' }
 }
 
+async function runAutomationCycle() {
+  workingKey.value = 'automation'
+  try {
+    const result = await EarthAPI.runEarningAutomationCycle()
+    data.value = result.guidance
+    const created = result.sync?.created_count || 0
+    const errors = result.sync?.errors?.length || 0
+    const experiment = result.experiment || {}
+    const promoted = result.pipeline?.promoted?.length || 0
+    const prepared = result.pipeline?.prepared?.title
+    const experimentNote = experiment.status === 'quest_created'
+      ? `，已把「${experiment.quest?.title || '当前阶段'}」放入委托板`
+      : experiment.status === 'waiting_on_quest' ? '，当前实验委托仍在进行中' : ''
+    const pipelineNote = promoted ? `，自动筛出 ${promoted} 条已核验机会` : ''
+    const preparedNote = prepared ? `，已准备「${prepared}」站内委托` : ''
+    setMessage(`安全巡检完成：新增 ${created} 条机会${errors ? `，${errors} 个来源失败` : ''}${pipelineNote}${preparedNote}${experimentNote}；未执行任何对外或资金动作`)
+  }
+  catch (error: any) { setMessage(error?.response?.data?.detail || '收益自动巡检失败') }
+  finally { workingKey.value = '' }
+}
+
 async function toggleSource(source: EarthEarningSource) {
   try { await EarthAPI.updateEarningSource(source.id, { enabled: !Boolean(source.enabled) }); await load() }
   catch (error: any) { setMessage(error?.response?.data?.detail || '信息源状态更新失败') }
@@ -293,7 +354,7 @@ onMounted(load)
         <div class="title-line"><h1>收益中枢</h1><span class="assist-state"><i /> 弥娅辅助已接入</span></div>
         <p>{{ data?.brief || '把能做的事变成一次可验证的收入实验。' }}</p>
       </div>
-      <button class="icon-button" type="button" title="刷新收益数据" :disabled="loading" @click="load">↻</button>
+      <div class="header-actions"><button class="secondary-button" type="button" :disabled="workingKey === 'automation'" @click="runAutomationCycle">{{ workingKey === 'automation' ? '巡检中…' : '运行安全巡检' }}</button><button class="icon-button" type="button" title="刷新收益数据" :disabled="loading" @click="load">↻</button></div>
     </header>
 
     <nav class="workspace-tabs" aria-label="收益工作区">
@@ -307,7 +368,7 @@ onMounted(load)
 
     <main class="workspace">
       <template v-if="activeTab === 'today'">
-        <section class="metrics" aria-label="收益概览">
+          <section class="metrics" aria-label="收益概览">
           <div><span>真实净收入</span><strong>¥{{ data?.totals.net_income?.toFixed(2) || '0.00' }}</strong></div>
           <div><span>实际时薪</span><strong>¥{{ data?.totals.effective_hourly_rate?.toFixed(2) || '0.00' }}</strong></div>
           <div><span>进行中实验</span><strong>{{ data?.totals.active_plan_count || 0 }}</strong></div>
@@ -350,6 +411,13 @@ onMounted(load)
             </aside>
           </section>
 
+          <section class="safety-strip" aria-label="弥娅自动化安全状态">
+            <div class="safety-mark" :class="safetyState.tone">◆</div>
+            <div class="safety-copy"><span>自动化安全状态</span><strong>{{ safetyState.label }}</strong><p>{{ safetyState.detail }}</p></div>
+            <div class="safety-boundary"><span>自动</span><b>{{ data?.automation?.automatic?.slice(0, 2).join(' · ') || '公开信息同步 · 站内整理' }}</b><span>需你确认</span><b>{{ data?.automation?.requires_confirmation?.slice(0, 2).join(' · ') || '发布 · 联系' }}</b></div>
+            <button class="text-button" type="button" @click="activeTab = 'settings'">查看安全设置 →</button>
+          </section>
+
           <section class="route-section">
             <div class="section-heading"><div><span class="section-kicker">LOW-COST EXPERIMENTS</span><h2>推荐的第一笔收入路线</h2></div><div class="heading-actions"><label class="goal-control">本轮目标 <span>¥</span><input v-model.number="goalAmount" type="number" min="201" step="10"></label><button class="primary-button" :disabled="workingKey === 'first-income'" @click="startFirstIncomeExperiment">{{ workingKey === 'first-income' ? '初始化中…' : '启动 ¥250+ 首单实验' }}</button></div></div>
             <div class="route-grid">
@@ -371,7 +439,7 @@ onMounted(load)
         <div v-if="visibleOpportunities.length" class="opportunity-list">
           <article v-for="item in visibleOpportunities" :key="item.id" class="opportunity-row">
             <div class="opportunity-score"><strong>{{ Math.round(item.fit_score || 0) }}</strong><span>匹配</span></div>
-            <div class="opportunity-main"><div class="opportunity-title"><h3>{{ item.title }}</h3><span :class="`verification ${item.verification_status || 'unverified'}`">{{ { unverified: '待核验', checking: '核验中', verified: '已核验', rejected: '未通过' }[item.verification_status || 'unverified'] }}</span></div><p>{{ item.description || '暂无描述，建议先打开来源核对需求和付款条件。' }}</p><small>{{ item.source || '手动收录' }} · {{ item.kind }} · 预估 ¥{{ item.income_min }}-{{ item.income_max }} · {{ item.hours || '?' }}h<span v-if="item.deadline"> · 截止 {{ item.deadline }}</span></small><div class="reason-line">{{ item.fit_reasons?.join(' · ') }}</div></div>
+            <div class="opportunity-main"><div class="opportunity-title"><h3>{{ item.title }}</h3><span :class="`verification ${item.verification_status || 'unverified'}`">{{ { unverified: '待核验', checking: '核验中', verified: '已核验', rejected: '未通过' }[item.verification_status || 'unverified'] }}</span></div><p>{{ item.description || '暂无描述，建议先打开来源核对需求和付款条件。' }}</p><small>{{ item.source || '手动收录' }} · {{ item.kind }} · 预估 ¥{{ item.income_min }}-{{ item.income_max }} · {{ item.hours || '?' }}h<span v-if="item.deadline"> · 截止 {{ item.deadline }}</span></small><div class="reason-line">{{ item.fit_reasons?.join(' · ') }}</div><div v-if="item.scam_flags?.length" class="risk-flags"><span v-for="flag in item.scam_flags" :key="flag">⚠ {{ flag }}</span></div></div>
             <div class="opportunity-actions"><a v-if="item.url" :href="item.url" target="_blank" rel="noopener noreferrer">查看来源</a><select :value="item.verification_status || 'unverified'" @change="updateVerification(item, ($event.target as HTMLSelectElement).value as EarthEarningOpportunity['verification_status'])"><option value="unverified">待核验</option><option value="checking">核验中</option><option value="verified">核验通过</option><option value="rejected">核验未通过</option></select><select :value="item.status" @change="updateStatus(item, ($event.target as HTMLSelectElement).value as EarthEarningOpportunity['status'])"><option value="inbox">待评估</option><option value="shortlisted">候选</option><option value="applied">已尝试</option><option value="won">已成交</option><option value="closed">已关闭</option></select><button class="text-button" :disabled="!!item.quest_id" @click="convertToQuest(item)">{{ item.quest_id ? '已在委托板' : '转为委托' }}</button></div>
           </article>
         </div>
@@ -423,7 +491,7 @@ onMounted(load)
       <template v-else>
         <section class="section-heading"><div><span class="section-kicker">PROFILE & SOURCES</span><h2>档案与信息源</h2><p>这些设置决定弥娅如何筛选机会，不会触发任何外部操作。</p></div></section>
         <section class="settings-layout"><form class="settings-panel" @submit.prevent="savePreferences(true)"><h3>赚钱档案</h3><label><span>技能</span><input v-model="prefsForm.skills" placeholder="用逗号分隔"></label><label><span>可出售资源</span><input v-model="prefsForm.sellable_assets" placeholder="闲置物品、作品、模板、经验"></label><div class="model-selector"><span>可接受路线</span><button v-for="([key, label]) in modelOptions" :key="key" type="button" :class="{ selected: prefsForm.accepted_models.includes(key) }" @click="toggleModel(key)">{{ prefsForm.accepted_models.includes(key) ? '✓ ' : '' }}{{ label }}</button></div><div class="form-row"><label><span>每周时间</span><div class="input-unit"><input v-model.number="prefsForm.weekly_hours" type="number" min="0" step="0.5"><em>小时</em></div></label><label><span>阶段目标</span><div class="input-unit"><input v-model.number="prefsForm.target_amount" type="number" min="1" step="10"><em>元</em></div></label></div><div class="form-row"><label><span>最低期望时薪</span><input v-model.number="prefsForm.min_hourly_rate" type="number" min="0"></label><label><span>风险偏好</span><select v-model="prefsForm.risk_tolerance"><option value="low">低风险优先</option><option value="medium">可接受中风险</option><option value="high">愿意承担高风险</option></select></label></div><label><span>现实限制</span><textarea v-model="prefsForm.constraints"></textarea></label><button class="primary-button" :disabled="workingKey === 'preferences'">保存档案</button></form><div class="settings-panel"><div class="source-title"><div><h3>公开信息源</h3><p>仅支持 RSS / Atom；同步后仍需核验关键条件。</p></div><button class="secondary-button" :disabled="workingKey === 'sync'" @click="syncSources">同步全部</button></div><form class="source-form" @submit.prevent="addSource"><input v-model="sourceForm.name" placeholder="来源名称"><input v-model="sourceForm.url" type="url" placeholder="https://example.com/feed.xml" required><button>添加</button></form><div v-if="sources.length" class="source-list"><div v-for="source in sources" :key="source.id" class="source-row"><i :class="{ off: !Boolean(source.enabled) }" /><div><strong>{{ source.name }}</strong><span>{{ source.last_error || source.url }}</span></div><button @click="toggleSource(source)">{{ Boolean(source.enabled) ? '暂停' : '启用' }}</button><button class="danger" @click="deleteSource(source)">移除</button></div></div><div v-else class="empty-state"><b>还没有公开信息源</b><p>初版不会替你登录或抓取受限平台；可以先用手动情报和推荐路线开始。</p></div></div></section>
-        <section class="automation-boundary"><div><span>弥娅可以自动</span><p>{{ data?.automation?.automatic?.join(' · ') }}</p></div><div><span>必须由你确认</span><p>{{ data?.automation?.requires_confirmation?.join(' · ') }}</p></div><div><span>永久禁止自动化</span><p>{{ data?.automation?.blocked?.join(' · ') }}</p></div></section>
+        <section class="authorization-panel settings-panel"><div class="source-title"><div><h3>授权执行中心</h3><p>策略只负责评估，不会绕过审批直接执行。默认模拟模式。</p></div><span :class="['authorization-state', authorization?.emergency_stop ? 'stopped' : authorization?.enabled ? 'ready' : 'off']">{{ authorization?.emergency_stop ? '紧急停止' : authorization?.enabled ? '已启用' : '未启用' }}</span></div><form class="authorization-form" @submit.prevent="saveAuthorization"><label class="toggle-row"><input v-model="authorizationForm.enabled" type="checkbox"><span>允许白名单动作进入策略评估</span></label><label class="toggle-row"><input v-model="authorizationForm.simulation_only" type="checkbox"><span>仅模拟执行（推荐）</span></label><label class="toggle-row"><input v-model="authorizationForm.emergency_stop" type="checkbox"><span>紧急停止所有授权评估</span></label><div class="model-selector"><span>允许评估的动作类型</span><button v-for="([key, label]) in authorizationActionLabels" :key="key" type="button" :class="{ selected: authorizationForm.allowed_actions.includes(key) }" @click="toggleAuthorizationAction(key)">{{ authorizationForm.allowed_actions.includes(key) ? '✓ ' : '' }}{{ label }}</button></div><label><span>目标白名单（URL 前缀或目标标识，逗号分隔）</span><input v-model="authorizationForm.allowed_targets" placeholder="例如：https://example.com/opportunities"></label><div class="form-row"><label><span>单次金额上限</span><div class="input-unit"><input v-model.number="authorizationForm.max_single_amount" type="number" min="0" step="0.01"><em>元</em></div></label><label><span>每日动作上限</span><input v-model.number="authorizationForm.max_daily_actions" type="number" min="0" max="1000"></label></div><label><span>策略有效期（可选）</span><input v-model="authorizationForm.expires_at" type="datetime-local"></label><button class="primary-button" :disabled="workingKey === 'authorization'">{{ workingKey === 'authorization' ? '保存中…' : '保存授权策略' }}</button></form></section><section class="automation-boundary"><div><span>弥娅可以自动</span><p>{{ data?.automation?.automatic?.join(' · ') }}</p></div><div><span>必须由你确认</span><p>{{ data?.automation?.requires_confirmation?.join(' · ') }}</p></div><div><span>永久禁止自动化</span><p>{{ data?.automation?.blocked?.join(' · ') }}</p></div></section>
       </template>
     </main>
 
@@ -432,8 +500,11 @@ onMounted(load)
 </template>
 
 <style scoped>
+.safety-strip{display:flex;align-items:center;gap:.8rem;margin-top:.8rem;padding:.72rem .9rem;border:1px solid var(--line);background:rgba(9,20,28,.58)}.safety-mark{display:grid;place-items:center;width:27px;height:27px;border:1px solid currentColor;font-size:.7rem}.safety-mark.safe{color:var(--green)}.safety-mark.warn{color:var(--gold)}.safety-mark.danger{color:var(--red)}.safety-copy{min-width:145px}.safety-copy span,.safety-boundary span{display:block;color:rgba(238,245,244,.4);font-size:.55rem}.safety-copy strong{display:block;margin-top:.12rem;color:var(--gold);font-size:.72rem}.safety-copy p{margin:.12rem 0 0;color:rgba(238,245,244,.5);font-size:.58rem}.safety-boundary{display:grid;grid-template-columns:auto minmax(100px,1fr) auto minmax(100px,1fr);align-items:center;gap:.35rem .6rem;flex:1;margin-left:auto}.safety-boundary b{font-size:.58rem;color:rgba(238,245,244,.7);font-weight:500}.risk-flags{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.35rem}.risk-flags span{padding:.18rem .35rem;border:1px solid rgba(229,147,147,.3);color:var(--red);font-size:.55rem;background:rgba(229,147,147,.05)}
+.header-actions{display:flex;align-items:center;gap:.5rem;flex-shrink:0}
+.authorization-panel{margin-top:.8rem}.authorization-form{display:flex;flex-direction:column;gap:.7rem;margin-top:.8rem}.toggle-row{display:flex;align-items:center;gap:.55rem;color:rgba(238,245,244,.65);font-size:.68rem}.toggle-row input{width:auto}.authorization-state{padding:.2rem .45rem;border:1px solid var(--line);font-size:.58rem}.authorization-state.ready{color:var(--green);border-color:rgba(159,227,192,.35)}.authorization-state.stopped{color:var(--red);border-color:rgba(229,147,147,.35)}
 .earning-view{--gold:#e8d5a3;--green:#9fe3c0;--red:#e59393;--line:rgba(162,245,238,.14);height:100%;overflow:auto;box-sizing:border-box;color:var(--miya-text,#eef5f4);background:rgba(5,12,18,.95);letter-spacing:0}.earning-header{max-width:1240px;margin:auto;padding:1.55rem 1.4rem 1rem;display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}.eyebrow,.section-kicker{font-size:.6rem;color:var(--earth-accent-light,#a2f5ee);letter-spacing:.12em}.title-line{display:flex;align-items:center;gap:.9rem}.title-line h1{margin:.22rem 0;font-size:1.65rem;font-weight:560;letter-spacing:0}.title-block p{margin:0;color:rgba(238,245,244,.58);font-size:.78rem}.assist-state{font-size:.62rem;color:var(--green);display:flex;align-items:center;gap:.35rem}.assist-state i{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}button,input,select,textarea{font:inherit;letter-spacing:0}.icon-button{width:34px;height:34px;padding:0;border:1px solid var(--line);background:rgba(120,207,209,.06);color:var(--earth-accent-light,#a2f5ee);cursor:pointer}.workspace-tabs{position:sticky;top:0;z-index:20;display:flex;max-width:1240px;margin:auto;padding:0 1.4rem;border-bottom:1px solid var(--line);background:rgba(5,12,18,.94);backdrop-filter:blur(14px)}.workspace-tabs button{position:relative;height:42px;padding:0 1rem;border:0;background:transparent;color:rgba(238,245,244,.5);cursor:pointer;font-size:.72rem}.workspace-tabs button span{margin-right:.35rem}.workspace-tabs button b{margin-left:.35rem;padding:.08rem .28rem;border-radius:8px;background:rgba(229,147,147,.14);color:var(--red);font-size:.55rem}.workspace-tabs button.active{color:var(--earth-accent-light,#a2f5ee)}.workspace-tabs button.active::after{content:'';position:absolute;left:.7rem;right:.7rem;bottom:-1px;height:2px;background:var(--earth-accent-light,#a2f5ee)}.notice{position:sticky;top:48px;z-index:19;max-width:1180px;margin:.7rem auto 0;padding:.58rem .75rem;display:flex;justify-content:space-between;border:1px solid rgba(232,213,163,.25);background:rgba(32,30,23,.96);color:var(--gold);font-size:.7rem}.notice button{border:0;background:transparent;color:inherit;cursor:pointer}.workspace{max-width:1240px;margin:auto;padding:1rem 1.4rem 2.5rem;box-sizing:border-box}.metrics{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);background:rgba(9,20,28,.58)}.metrics div{padding:.85rem 1rem;border-right:1px solid var(--line)}.metrics div:last-child{border-right:0}.metrics span,.plan-goal span{display:block;color:rgba(238,245,244,.45);font-size:.62rem}.metrics strong{display:block;margin-top:.22rem;font-size:1.25rem;color:var(--gold);font-weight:560}.onboarding-band{margin-top:1rem;display:grid;grid-template-columns:minmax(260px,.8fr) minmax(360px,1.2fr);gap:2rem;padding:1.5rem;border:1px solid var(--line);background:rgba(9,20,28,.62)}.onboarding-copy h2,.section-heading h2,.panel-heading h2,.miya-brief h2,.route-section h2{margin:.28rem 0;font-size:1.05rem;font-weight:560}.onboarding-copy p,.section-heading p{max-width:480px;margin:.5rem 0;color:rgba(238,245,244,.58);font-size:.74rem;line-height:1.65}.profile-form,.drawer-form,.settings-panel,.income-form{display:flex;flex-direction:column;gap:.7rem}label>span,.model-selector>span{display:block;margin-bottom:.3rem;color:rgba(238,245,244,.55);font-size:.62rem}input,select,textarea{width:100%;box-sizing:border-box;border:1px solid rgba(162,245,238,.18);border-radius:2px;background:rgba(0,0,0,.24);color:inherit;padding:.58rem .65rem;font-size:.72rem;outline:none}input:focus,select:focus,textarea:focus{border-color:rgba(162,245,238,.52)}textarea{min-height:72px;resize:vertical}.form-row{display:flex;gap:.65rem}.form-row>label{flex:1;min-width:0}.form-row.compact>label{min-width:110px}.input-unit{position:relative}.input-unit input{padding-right:3rem}.input-unit em{position:absolute;right:.65rem;top:50%;transform:translateY(-50%);font-size:.6rem;color:rgba(238,245,244,.4);font-style:normal}.primary-button,.secondary-button,.route-button{border:1px solid rgba(162,245,238,.38);background:rgba(120,207,209,.13);color:var(--earth-accent-light,#a2f5ee);padding:.62rem .85rem;cursor:pointer;font-size:.7rem}.primary-button{background:var(--earth-accent-deep,#4f9fa5);color:#061015;border-color:transparent;font-weight:650}.primary-button:disabled,.secondary-button:disabled,.route-button:disabled,.text-button:disabled{opacity:.45;cursor:default}.today-layout{display:grid;grid-template-columns:1.5fr .75fr;gap:.8rem;margin-top:.8rem}.focus-panel,.miya-brief,.route-card,.plan-panel,.income-form,.result-ledger,.settings-panel{border:1px solid var(--line);background:rgba(9,20,28,.58)}.focus-panel{padding:1rem}.panel-heading,.section-heading{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start}.plan-tag{padding:.24rem .45rem;border:1px solid rgba(232,213,163,.24);color:var(--gold);font-size:.58rem}.next-action{display:flex;gap:.8rem;margin:1rem 0;padding:.9rem 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.action-index{font-size:1.25rem;color:rgba(162,245,238,.35)}.next-action strong{font-size:.9rem}.next-action p,.miya-brief p,.route-card p,.step-row p,.plan-panel header p{margin:.3rem 0 0;color:rgba(238,245,244,.55);font-size:.7rem;line-height:1.55}.focus-progress{display:flex;align-items:center;gap:.8rem;margin-bottom:.8rem}.focus-progress>span{flex:1;height:3px;background:rgba(162,245,238,.1)}.focus-progress i,.plan-progress i{display:block;height:100%;background:var(--gold)}.focus-progress small{font-size:.58rem;color:rgba(238,245,244,.4)}.miya-brief{display:flex;gap:.8rem;padding:1rem;border-left:2px solid var(--earth-accent-light,#a2f5ee)}.miya-mark{display:grid;place-items:center;flex:0 0 30px;height:30px;border:1px solid rgba(162,245,238,.4);color:var(--earth-accent-light,#a2f5ee);font-size:.75rem}.route-section{margin-top:1.25rem}.section-heading{margin-bottom:.75rem}.goal-control{display:flex;align-items:center;gap:.25rem;color:rgba(238,245,244,.5);font-size:.65rem}.goal-control span{color:var(--gold)}.goal-control input{width:72px;padding:.35rem}.route-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.65rem}.route-card{display:flex;flex-direction:column;min-height:255px;padding:.9rem}.route-top{display:flex;align-items:center;justify-content:space-between}.route-icon{font-size:1.15rem;color:var(--earth-accent-light,#a2f5ee)}.fit-score{font-size:.58rem;color:var(--green)}.route-card h3{margin:.6rem 0 .15rem;font-size:.88rem}.route-card dl{display:flex;margin:.8rem 0}.route-card dl div{flex:1}.route-card dt{font-size:.55rem;color:rgba(238,245,244,.38)}.route-card dd{margin:.16rem 0 0;font-size:.65rem;color:var(--gold)}.route-card small{display:block;margin-bottom:.8rem;color:rgba(159,227,192,.72);font-size:.58rem;line-height:1.45}.route-button{margin-top:auto}.radar-heading{align-items:center}.heading-actions{display:flex;gap:.5rem}.heading-actions select{width:auto;min-width:110px}.pipeline-strip{display:grid;grid-template-columns:repeat(5,1fr);border:1px solid var(--line);margin-bottom:.8rem}.pipeline-strip div{padding:.65rem;text-align:center;border-right:1px solid var(--line)}.pipeline-strip div:last-child{border-right:0}.pipeline-strip strong{display:block;color:var(--gold)}.pipeline-strip span{font-size:.58rem;color:rgba(238,245,244,.45)}.opportunity-list{border-top:1px solid var(--line)}.opportunity-row{display:grid;grid-template-columns:58px minmax(0,1fr) 130px;gap:.85rem;padding:.9rem .4rem;border-bottom:1px solid var(--line)}.opportunity-score{text-align:center}.opportunity-score strong{display:block;color:var(--gold);font-size:1.15rem}.opportunity-score span{font-size:.55rem;color:rgba(238,245,244,.38)}.opportunity-title{display:flex;align-items:center;gap:.55rem}.opportunity-title h3{margin:0;font-size:.82rem}.verification{padding:.15rem .38rem;border:1px solid rgba(238,245,244,.14);font-size:.55rem;color:rgba(238,245,244,.5)}.verification.verified{color:var(--green);border-color:rgba(159,227,192,.3)}.verification.rejected{color:var(--red)}.opportunity-main p{margin:.35rem 0;color:rgba(238,245,244,.58);font-size:.68rem;line-height:1.5}.opportunity-main small{color:rgba(238,245,244,.4);font-size:.58rem}.reason-line{margin-top:.28rem;color:rgba(159,227,192,.72);font-size:.58rem}.opportunity-actions{display:flex;flex-direction:column;gap:.32rem;align-items:stretch}.opportunity-actions a,.text-button{border:0;background:transparent;color:var(--earth-accent-light,#a2f5ee);font-size:.6rem;text-decoration:none;cursor:pointer;padding:.25rem;text-align:center}.opportunity-actions select{padding:.35rem;font-size:.6rem}.large-empty{padding:3rem 1rem;text-align:center;border:1px solid var(--line);color:rgba(238,245,244,.48)}.large-empty>span{font-size:1.5rem;color:rgba(162,245,238,.45)}.large-empty h3{margin:.6rem 0 .2rem;font-size:.88rem;color:rgba(238,245,244,.8)}.large-empty p,.empty-state p{margin:.3rem 0 .8rem;font-size:.68rem}.utility-drawer{margin-top:.8rem;border:1px solid var(--line);background:rgba(9,20,28,.4)}.utility-drawer summary{padding:.75rem .9rem;color:rgba(162,245,238,.72);font-size:.68rem;cursor:pointer}.drawer-form{padding:0 .9rem .9rem}.plan-list{display:flex;flex-direction:column;gap:.7rem}.plan-panel{padding:1rem}.plan-panel.muted{opacity:.55}.plan-panel header{display:flex;justify-content:space-between;gap:1rem}.plan-panel header>div:first-child{min-width:0}.plan-panel header span{font-size:.56rem;color:rgba(162,245,238,.62)}.plan-panel h3{margin:.25rem 0;font-size:.92rem}.plan-goal{text-align:right;white-space:nowrap}.plan-goal strong{display:block;color:var(--gold);font-size:1.1rem}.plan-progress{height:3px;margin:.8rem 0;background:rgba(162,245,238,.1)}.step-row{display:grid;grid-template-columns:26px minmax(0,1fr) 90px;align-items:center;gap:.65rem;padding:.55rem 0;border-top:1px solid rgba(162,245,238,.08)}.step-check{width:25px;height:25px;padding:0;border:1px solid rgba(162,245,238,.22);border-radius:50%;background:transparent;color:rgba(162,245,238,.7);font-size:.6rem;cursor:pointer}.step-check.done{background:rgba(159,227,192,.13);color:var(--green)}.step-row strong{font-size:.72rem}.step-row p{margin:.15rem 0}.crossed{text-decoration:line-through;color:rgba(238,245,244,.38)}.inline-form{display:flex;gap:.4rem;margin-top:.6rem}.inline-form input{flex:1}.inline-form button,.add-link,.source-row button,.source-form button{border:0;background:transparent;color:var(--earth-accent-light,#a2f5ee);font-size:.62rem;cursor:pointer}.add-link{padding:.6rem 0}.review-layout,.settings-layout{display:grid;grid-template-columns:.8fr 1.2fr;gap:.8rem}.income-form,.result-ledger,.settings-panel{padding:1rem}.income-form h3,.result-ledger h3,.settings-panel h3{margin:0 0 .8rem;font-size:.86rem}.money-input{position:relative}.money-input span{position:absolute;left:.8rem;top:50%;transform:translateY(-50%);color:var(--gold)}.money-input input{padding-left:1.8rem;font-size:1.25rem;color:var(--gold)}.result-ledger header,.source-title{display:flex;justify-content:space-between;align-items:flex-start}.result-ledger header>span,.source-title p{font-size:.58rem;color:rgba(238,245,244,.38)}.ledger-row{display:grid;grid-template-columns:100px minmax(0,1fr) auto;gap:.7rem;align-items:center;padding:.7rem 0;border-top:1px solid var(--line)}.ledger-row strong{display:block;color:var(--gold)}.ledger-row span,.ledger-row small{font-size:.57rem;color:rgba(238,245,244,.4)}.ledger-row p{font-size:.68rem}.empty-state{padding:1.2rem 0;color:rgba(238,245,244,.48)}.empty-state b{font-size:.72rem;color:rgba(238,245,244,.72)}.model-selector button{margin:0 .35rem .35rem 0;padding:.4rem .55rem;border:1px solid rgba(162,245,238,.14);background:transparent;color:rgba(238,245,244,.55);font-size:.62rem;cursor:pointer}.model-selector button.selected{border-color:rgba(159,227,192,.34);color:var(--green);background:rgba(159,227,192,.06)}.source-title h3{margin-bottom:.2rem}.source-title p{margin:0}.source-form{display:grid;grid-template-columns:.7fr 1.3fr auto;gap:.4rem;margin:.8rem 0}.source-form button{padding:0 .55rem;border:1px solid rgba(162,245,238,.22)}.source-row{display:grid;grid-template-columns:8px minmax(0,1fr) auto auto;gap:.5rem;align-items:center;padding:.55rem 0;border-top:1px solid var(--line)}.source-row i{width:6px;height:6px;border-radius:50%;background:var(--green)}.source-row i.off{background:rgba(238,245,244,.3)}.source-row strong,.source-row span{display:block}.source-row strong{font-size:.68rem}.source-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.56rem;color:rgba(238,245,244,.38)}.source-row .danger{color:var(--red)}.automation-boundary{display:grid;grid-template-columns:1fr 1fr;margin-top:.8rem;border:1px solid var(--line)}.automation-boundary div{padding:.8rem}.automation-boundary div+div{border-left:1px solid var(--line)}.automation-boundary span{font-size:.6rem;color:var(--earth-accent-light,#a2f5ee)}.automation-boundary p{margin:.3rem 0;font-size:.65rem;color:rgba(238,245,244,.52);line-height:1.5}footer{max-width:1212px;margin:auto;padding:0 1.4rem 1.2rem;color:rgba(238,245,244,.32);font-size:.58rem}
 .offer-section,.approval-section{margin:0 0 .9rem}.subsection-heading{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:.55rem}.subsection-heading h3{margin:.2rem 0 0;font-size:.9rem}.subsection-heading>span{font-size:.58rem;color:rgba(238,245,244,.42)}.offer-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}.offer-card{border:1px solid var(--line);background:rgba(9,20,28,.58);padding:.9rem}.offer-card header{display:flex;justify-content:space-between;gap:1rem}.offer-card header span,.offer-card small{font-size:.56rem;color:rgba(238,245,244,.42)}.offer-card h3{margin:.2rem 0;font-size:.88rem}.offer-card header strong{color:var(--gold);font-size:1.15rem}.offer-card>p{font-size:.68rem;color:rgba(238,245,244,.58);line-height:1.5}.offer-card dl{margin:.7rem 0}.offer-card dt{font-size:.56rem;color:var(--earth-accent-light,#a2f5ee)}.offer-card dd{margin:.18rem 0 .55rem;font-size:.65rem;color:rgba(238,245,244,.55);line-height:1.5}.approval-section{margin-top:1.2rem}.boundary-note{padding:.65rem .75rem;border-left:2px solid var(--gold);background:rgba(232,213,163,.06);color:rgba(238,245,244,.62);font-size:.65rem;line-height:1.55}.approval-list{border-top:1px solid var(--line)}.approval-row{display:grid;grid-template-columns:minmax(0,1fr) 145px;gap:.8rem;padding:.8rem .25rem;border-bottom:1px solid var(--line)}.approval-main header{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}.approval-main header strong{font-size:.75rem}.approval-main header small{color:rgba(238,245,244,.4);font-size:.56rem}.approval-main p{white-space:pre-wrap;margin:.45rem 0;color:rgba(238,245,244,.62);font-size:.66rem;line-height:1.55}.approval-main code{display:block;overflow:hidden;text-overflow:ellipsis;color:rgba(162,245,238,.5);font-size:.55rem}.approval-status{padding:.15rem .35rem;border:1px solid rgba(238,245,244,.16);font-size:.55rem}.approval-status.pending{color:var(--gold);border-color:rgba(232,213,163,.35)}.approval-status.approved{color:var(--green);border-color:rgba(159,227,192,.35)}.approval-status.revoked,.approval-status.expired{color:var(--red)}.approval-actions{display:flex;flex-direction:column;justify-content:center;gap:.35rem}.text-button.danger{color:var(--red)}.automation-boundary{grid-template-columns:repeat(3,1fr)}
 @media(max-width:980px){.route-grid{grid-template-columns:repeat(2,1fr)}.today-layout,.review-layout,.settings-layout{grid-template-columns:1fr}.onboarding-band{grid-template-columns:1fr}.opportunity-row{grid-template-columns:48px minmax(0,1fr)}.opportunity-actions{grid-column:2;flex-direction:row;flex-wrap:wrap}.opportunity-actions select{width:auto}.ledger-row{grid-template-columns:90px 1fr}.ledger-row small{grid-column:2}.automation-boundary{grid-template-columns:1fr}.automation-boundary div+div{border-left:0;border-top:1px solid var(--line)}}
-@media(max-width:700px){.earning-header{padding:1rem .8rem .7rem}.workspace{padding:.8rem .8rem 2rem}.workspace-tabs{padding:0 .35rem}.workspace-tabs button{flex:1;padding:0 .2rem}.workspace-tabs button span{display:none}.metrics{grid-template-columns:1fr 1fr}.metrics div:nth-child(2){border-right:0}.metrics div:nth-child(-n+2){border-bottom:1px solid var(--line)}.route-grid,.offer-grid{grid-template-columns:1fr}.form-row{flex-wrap:wrap}.form-row>label{min-width:140px}.section-heading,.radar-heading{flex-direction:column}.heading-actions{width:100%;flex-wrap:wrap}.heading-actions select,.heading-actions button{flex:1}.pipeline-strip{grid-template-columns:repeat(5,minmax(56px,1fr));overflow:auto}.plan-panel header{flex-direction:column}.plan-goal{text-align:left}.step-row{grid-template-columns:26px minmax(0,1fr)}.step-row>.text-button{grid-column:2;text-align:left;padding-left:0}.source-form{grid-template-columns:1fr}.approval-row{grid-template-columns:1fr}.approval-actions{flex-direction:row;flex-wrap:wrap;justify-content:flex-start}.title-line{align-items:flex-start;flex-direction:column;gap:.15rem}.assist-state{margin-bottom:.3rem}}
+@media(max-width:700px){.earning-header{padding:1rem .8rem .7rem}.workspace{padding:.8rem .8rem 2rem}.workspace-tabs{padding:0 .35rem}.workspace-tabs button{flex:1;padding:0 .2rem}.workspace-tabs button span{display:none}.metrics{grid-template-columns:1fr 1fr}.metrics div:nth-child(2){border-right:0}.metrics div:nth-child(-n+2){border-bottom:1px solid var(--line)}.safety-strip{align-items:flex-start;flex-wrap:wrap}.safety-copy{flex:1}.safety-boundary{order:3;width:100%;margin-left:0;grid-template-columns:auto 1fr}.safety-strip>.text-button{margin-left:auto}.route-grid,.offer-grid{grid-template-columns:1fr}.form-row{flex-wrap:wrap}.form-row>label{min-width:140px}.section-heading,.radar-heading{flex-direction:column}.heading-actions{width:100%;flex-wrap:wrap}.heading-actions select,.heading-actions button{flex:1}.pipeline-strip{grid-template-columns:repeat(5,minmax(56px,1fr));overflow:auto}.plan-panel header{flex-direction:column}.plan-goal{text-align:left}.step-row{grid-template-columns:26px minmax(0,1fr)}.step-row>.text-button{grid-column:2;text-align:left;padding-left:0}.source-form{grid-template-columns:1fr}.approval-row{grid-template-columns:1fr}.approval-actions{flex-direction:row;flex-wrap:wrap;justify-content:flex-start}.title-line{align-items:flex-start;flex-direction:column;gap:.15rem}.assist-state{margin-bottom:.3rem}}
 </style>

@@ -178,6 +178,7 @@ export interface EarthEarningGuidance {
   totals: { net_income: number, opportunity_count: number, active_plan_count: number, active_offer_count: number, pending_approval_count: number, approved_action_count: number, total_hours: number, effective_hourly_rate: number }
   preferences: EarthEarningPreferences
   automation: { automatic: string[], requires_confirmation: string[], blocked: string[] }
+  authorization?: { policy: EarthEarningAuthorizationPolicy, audit: EarthEarningAuthorizationAudit[] }
   boundary: string
 }
 
@@ -193,6 +194,30 @@ export interface EarthEarningPreferences {
   min_hourly_rate: number
   risk_tolerance: 'low' | 'medium' | 'high'
   updated_at?: string
+}
+
+export interface EarthEarningAuthorizationPolicy {
+  id: number
+  enabled: boolean
+  simulation_only: boolean
+  allowed_actions: EarthEarningActionDraft['action_type'][]
+  allowed_targets: string[]
+  max_single_amount: number
+  max_daily_actions: number
+  expires_at: string
+  emergency_stop: boolean
+  updated_at?: string
+}
+
+export interface EarthEarningAuthorizationAudit {
+  id: number
+  action_type: string
+  target: string
+  amount: number
+  decision: 'allow' | 'deny'
+  reason: string
+  simulation: boolean
+  created_at: string
 }
 
 export interface EarthEarningRoute {
@@ -1157,6 +1182,37 @@ export class EarthApiClient extends ApiClient {
   // ── v18: 现实收益情报与计划 ──
   async earningGuidance(): Promise<EarthEarningGuidance> {
     return this.instance.get('/api/earth/earning/guidance')
+  }
+
+  async earningAuthorization(): Promise<EarthEarningAuthorizationPolicy> {
+    return this.instance.get('/api/earth/earning/authorization')
+  }
+
+  async updateEarningAuthorization(data: Partial<EarthEarningAuthorizationPolicy>): Promise<EarthEarningAuthorizationPolicy> {
+    return this.instance.put('/api/earth/earning/authorization', data)
+  }
+
+  async evaluateEarningAuthorization(data: { action_type: string, target?: string, amount?: number }): Promise<{ allowed: boolean, decision: 'allow' | 'deny', reason: string, simulation_only: boolean, action_type: string, target: string, amount: number }> {
+    return this.instance.post('/api/earth/earning/authorization/evaluate', data)
+  }
+
+  async earningAuthorizationAudit(limit = 100): Promise<EarthEarningAuthorizationAudit[]> {
+    return this.instance.get('/api/earth/earning/authorization/audit', { params: { limit } })
+  }
+
+  async runEarningAutomationCycle(): Promise<{
+    success: boolean
+    started_at: string
+    finished_at: string
+    sync: { created_count?: number, skipped?: number, errors?: unknown[] }
+    pipeline?: { promoted?: number[], prepared?: { title?: string } | null, actions?: string[] }
+    experiment?: { status?: string, quest?: { title?: string } | null }
+    guidance: EarthEarningGuidance
+    actions: string[]
+    requires_confirmation: string[]
+    blocked: string[]
+  }> {
+    return this.instance.post('/api/earth/earning/automation/run')
   }
 
   async earningRoutes(): Promise<EarthEarningRoute[]> {

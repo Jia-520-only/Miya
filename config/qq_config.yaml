@@ -529,3 +529,5 @@ earth_online:
     max_actions_per_cycle: 6       # 每周期最多写操作数 (防刷屏)
     notify_player: true            # 允许弥娅把运营结果主动发给玩家
     quiet_hours: [0, 1, 2, 3, 4, 5, 6]  # 静默小时, 这些时段不巡检
+    earning_auto_sync: true        # 自主周期同步公开收益信息源（不执行外部动作）
+    earning_sync_interval_minutes: 120  # 收益信息源最低同步间隔

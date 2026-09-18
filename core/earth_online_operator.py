@@ -42,6 +42,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "max_actions_per_cycle": 6,  # 每周期最多写操作数 (防刷屏)
     "notify_player": True,       # 允许把运营结果主动说给玩家听
     "quiet_hours": [0, 1, 2, 3, 4, 5, 6],  # 这些小时不巡检
+    "earning_auto_sync": True,       # 自主周期是否同步公开收益信息源
+    "earning_sync_interval_minutes": 120,  # 收益信息源最低同步间隔
 }
 
 OPERATOR_SYSTEM_PROMPT = """你是弥娅，"地球online"的唯一策划、系统小精灵兼生活助手。这个模块是你把玩家(佳)的现实生活游戏化的单人世界——所有任务、物品、角色、货币、活动都来自他的真实生活，而你是这个世界全权的主人：读任何数据、增删查改任何实体、开任何活动，都不需要请示。
@@ -58,6 +60,7 @@ OPERATOR_SYSTEM_PROMPT = """你是弥娅，"地球online"的唯一策划、系�
 - 任务奖励要和难度匹配；绝不凭空捏造现实数据。地图事实分为 observed（设备/数据源观测）、confirmed（佳明确确认）和 unverified（对话候选）。unverified 只能请佳确认，不能当作他真实去过；天气未同步就是未同步，过期数据必须说明过期。
 - 需要了解任意地点天气时可主动调用 earth_query_weather；一次性查询不等于佳的位置，也不能替他修改默认天气地点或保存地点档案。引用结果时说清天气服务实际解析到的地点、数据源与观测时间。
 - 收益中枢是现实收入实验，不是虚拟奖励。你可以主动读取 earth_earning_brief、整理站内计划和提醒下一步；只有佳已明确选择路线时才创建收入实验。不得承诺收益，不得代替佳对外发布、联系客户、提交申请、上传资料、接受订单、付款或交易。
+- 对话审批必须使用明确指令：只有佳原话包含“同意 #编号/批准 #编号”时才调用 earth_approve_earning_action；“撤销 #编号/拒绝 #编号”才调用 earth_revoke_earning_action。不要把“好的”“可以”“嗯”等模糊回复当作授权。
 - 如果近期动态显示你刚刚运营过、或现状确实无事可做，直接返回 SKIP。
 - 若事实确实值得让佳知道，把候选放进:
   [玩家消息]基于事实的候选内容[/玩家消息] (没有就不写，长度≤120字；不要指定语气，最终表达由统一主动层和当前人格决定)
@@ -77,7 +80,7 @@ class MiyaEarthOperatorOrgan(MiyaOrgan):
         self._store_override = None  # 测试/嵌入场景注入独立存档
         self.state_path = STATE_PATH
         self._config: Dict[str, Any] = dict(DEFAULT_CONFIG)
-        self._state: Dict[str, Any] = {"last_cycle_at": "", "last_morning_date": "", "cycles": 0}
+        self._state: Dict[str, Any] = {"last_cycle_at": "", "last_morning_date": "", "last_earning_sync_at": "", "last_earning_automation": {}, "cycles": 0}
         self._last_tick_check: float = 0.0
         self._running: bool = False
         self._load_config()
@@ -145,12 +148,14 @@ class MiyaEarthOperatorOrgan(MiyaOrgan):
                 "地球online 自主运营器官已就绪 (interval=%smin, morning=%s点)",
                 self._config.get("interval_minutes"), self._config.get("morning_hour"),
             )
+        elif self._config.get("enabled"):
+            logger.info("地球online 自主运营器官以无模型安全模式运行 (收益维护仍会执行)")
         else:
-            logger.info("地球online 自主运营器官休眠 (未启用或缺少 AI 客户端)")
+            logger.info("地球online 自主运营器官休眠 (未启用)")
 
     def on_soul_state(self, state: MiyaSoulState) -> None:
         """心跳线程回调: 只做时间判断，实际工作调度到事件循环"""
-        if not self._config.get("enabled") or not self._ai_client or self._running:
+        if not self._config.get("enabled") or self._running:
             return
         try:
             from core.earth_online_store import earth_online_enabled
@@ -200,13 +205,31 @@ class MiyaEarthOperatorOrgan(MiyaOrgan):
 
     async def run_cycle(self, mode: str = "patrol") -> Dict[str, Any]:
         """一次自主运营周期: 汇总数据 → 带工具唤醒弥娅 → 提取玩家消息"""
-        if not self._ai_client:
-            self._running = False
-            return {"success": False, "message": "缺少 AI 客户端"}
         started_at = datetime.now()
         result: Dict[str, Any] = {"mode": mode, "started_at": started_at.isoformat(), "actions": []}
         try:
+            # 收益维护属于安全的本地状态机，不应依赖 LLM。这样即使模型暂时
+            # 不可用，后台仍会同步公开信息、推进已启动实验并准备站内委托。
+            result["earning_automation"] = await self._run_earning_automation_if_due(started_at)
+            if not self._ai_client:
+                result["actions"] = [
+                    "后台收益安全巡检",
+                ] if result["earning_automation"].get("status") == "completed" else []
+                result["skip"] = not bool(result["actions"])
+                result.update({
+                    "last_cycle_actions": len(result["actions"]),
+                    "last_cycle_skip": bool(result["skip"]),
+                    "last_notification_candidate": "",
+                    "last_notification_sent": False,
+                    "cycles": int(self._state.get("cycles", 0)) + 1,
+                    "last_cycle_at": started_at.isoformat(),
+                })
+                self._state.update({key: value for key, value in result.items() if key.startswith("last_") or key == "cycles"})
+                self._save_state()
+                result["success"] = True
+                return result
             from core.ai_client import AIMessage
+
 
             # v17.3 关怀时机: 规则层只负责"发现现在值得关心"，不生成内容。
             # 委托由弥娅在下面的周期里现场创作 (earth_issue_care_commission)；她沉默时才用模板兜底。
@@ -352,6 +375,46 @@ class MiyaEarthOperatorOrgan(MiyaOrgan):
         finally:
             self._running = False
         return result
+
+    async def _run_earning_automation_if_due(self, now: datetime) -> Dict[str, Any]:
+        """按配置限频运行公开收益信息同步，失败不阻断自主运营。"""
+        if not bool(self._config.get("earning_auto_sync", True)):
+            return {"status": "disabled"}
+        last_raw = str(self._state.get("last_earning_sync_at") or "")
+        try:
+            elapsed = (now - datetime.fromisoformat(last_raw)).total_seconds() if last_raw else float("inf")
+        except (TypeError, ValueError):
+            elapsed = float("inf")
+        interval = max(1, int(self._config.get("earning_sync_interval_minutes", 120))) * 60
+        if elapsed < interval:
+            return {"status": "throttled", "last_synced_at": last_raw, "next_in_seconds": int(interval - elapsed)}
+        try:
+            cycle = await asyncio.to_thread(self._store().run_earning_automation_cycle)
+            finished_at = str(cycle.get("finished_at") or now.isoformat())
+            self._state["last_earning_sync_at"] = finished_at
+            sync = cycle.get("sync") or {}
+            experiment = cycle.get("experiment") or {}
+            pipeline = cycle.get("pipeline") or {}
+            result = {
+                "status": "completed",
+                "finished_at": finished_at,
+                "created_count": int(sync.get("created_count") or 0),
+                "skipped": int(sync.get("skipped") or 0),
+                "error_count": len(sync.get("errors") or []),
+                "experiment_status": str(experiment.get("status") or "unknown"),
+                "experiment_created": bool(experiment.get("created")),
+                "experiment_quest": str((experiment.get("quest") or {}).get("title") or ""),
+                "promoted_count": len(pipeline.get("promoted") or []),
+                "prepared_opportunity": str((pipeline.get("prepared") or {}).get("title") or ""),
+                "experiment_count": len(cycle.get("experiments") or {}),
+            }
+            self._state["last_earning_automation"] = result
+            return result
+        except Exception as exc:
+            logger.warning("收益自动巡检失败，本周期继续运行: %s", exc)
+            result = {"status": "failed", "error": str(exc)[:300]}
+            self._state["last_earning_automation"] = result
+            return result
 
     # ── 上下文汇总 (游戏数据 + 记忆 + 上次运营间隔内的新动态) ──
 
@@ -613,11 +676,9 @@ class MiyaEarthOperatorOrgan(MiyaOrgan):
 
     def _collect_actions_since(self, started_at: datetime) -> List[str]:
         try:
-            from core.earth_online_store import get_earth_store
-
             iso = started_at.isoformat()
             actions = [
-                f"{a.get('summary', '')}" for a in get_earth_store().list_activity(limit=30)
+                f"{a.get('summary', '')}" for a in self._store().list_activity(limit=30)
                 if str(a.get("created_at", "")) >= iso
             ]
             return actions

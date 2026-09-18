@@ -87,6 +87,35 @@ def test_morning_cycle_runs_tools_sends_message_and_persists_state():
     assert saved["cycles"] == 1
 
 
+def test_earning_auto_sync_runs_before_llm_and_is_recorded():
+    """自主周期会运行限频的安全收益巡检，并把结果留在周期记录中。"""
+    store, organ, _, _ = _build_organ("SKIP")
+    calls = []
+
+    def fake_cycle():
+        calls.append(True)
+        return {"success": True, "finished_at": datetime.now().isoformat(), "sync": {"created_count": 2, "skipped": 1, "errors": []}}
+
+    store.run_earning_automation_cycle = fake_cycle
+    result = asyncio.run(organ.run_cycle("patrol"))
+
+    assert result["success"] is True
+    assert result["earning_automation"]["status"] == "completed"
+    assert result["earning_automation"]["created_count"] == 2
+    assert len(calls) == 1
+    assert organ._state["last_earning_sync_at"]
+
+
+def test_earning_auto_sync_can_be_disabled():
+    _, organ, _, _ = _build_organ("SKIP")
+    organ._config["earning_auto_sync"] = False
+
+    result = asyncio.run(organ.run_cycle("patrol"))
+
+    assert result["success"] is True
+    assert result["earning_automation"]["status"] == "disabled"
+
+
 def test_skip_cycle_sends_nothing():
     _, organ, spine, _ = _build_organ("SKIP")
 

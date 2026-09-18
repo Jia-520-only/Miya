@@ -23,6 +23,7 @@
 - battle_pass_claims 每周纪行领取记录 (v17)
 - earning_opportunities / earning_plans / income_records 现实收益情报、计划与收入流水 (v18)
 - earning_offers / earning_action_drafts 可售服务与逐次审批的外部动作草稿 (v18.2)
+- earning_authorization_policy / earning_authorization_audit 受控授权策略与评估审计 (v19)
 """
 
 import json
@@ -551,6 +552,18 @@ DEFAULT_TEMPLATES: Dict[str, Any] = {
 
 class EarthOnlineStore:
     """地球online 数据库访问层"""
+
+    @staticmethod
+    def _season_of(value: datetime) -> str:
+        """返回稳定的季节键，供世界状态和自主运营上下文复用。"""
+        month = int(value.month)
+        if month in (3, 4, 5):
+            return "spring"
+        if month in (6, 7, 8):
+            return "summer"
+        if month in (9, 10, 11):
+            return "autumn"
+        return "winter"
 
     def __init__(self, db_path: str = DB_PATH):
         # v17: 镜像/模板/图片/备份目录一律跟随 db 所在目录推导。
@@ -1221,8 +1234,43 @@ class EarthOnlineStore:
                 """
             )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_earning_actions_status ON earning_action_drafts(status, updated_at)")
+            # v19: 受控授权策略与评估审计。策略默认关闭且只允许模拟执行。
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS earning_authorization_policy (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    enabled INTEGER NOT NULL DEFAULT 0,
+                    simulation_only INTEGER NOT NULL DEFAULT 1,
+                    allowed_actions TEXT NOT NULL DEFAULT '[]',
+                    allowed_targets TEXT NOT NULL DEFAULT '[]',
+                    max_single_amount REAL NOT NULL DEFAULT 0,
+                    max_daily_actions INTEGER NOT NULL DEFAULT 0,
+                    expires_at TEXT NOT NULL DEFAULT '',
+                    emergency_stop INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS earning_authorization_audit (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    action_type TEXT NOT NULL,
+                    target TEXT NOT NULL DEFAULT '',
+                    amount REAL NOT NULL DEFAULT 0,
+                    decision TEXT NOT NULL,
+                    reason TEXT NOT NULL DEFAULT '',
+                    simulation INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
             cur.execute(
                 "INSERT OR IGNORE INTO earning_preferences (id, updated_at) VALUES (1, ?)",
+                (datetime.now().isoformat(),),
+            )
+            cur.execute(
+                "INSERT OR IGNORE INTO earning_authorization_policy (id, updated_at) VALUES (1, ?)",
                 (datetime.now().isoformat(),),
             )
 
@@ -2124,6 +2172,8 @@ class EarthOnlineStore:
             "earning_preferences": self.get_earning_preferences(),
             "earning_offers": self.list_earning_offers(),
             "earning_action_drafts": self.list_earning_actions(limit=2000),
+            "earning_authorization_policy": self.get_earning_authorization_policy(),
+            "earning_authorization_audit": self.list_earning_authorization_audit(limit=2000),
             "earning_plans": self.list_earning_plans(),
             "earning_plan_steps": self.list_earning_plan_steps(),
             "income_records": self.list_income_records(limit=2000),
@@ -2427,6 +2477,17 @@ class EarthOnlineStore:
                             json.dumps(prefs.get("sellable_assets", []), ensure_ascii=False),
                             str(prefs.get("constraints", "")), str(prefs.get("primary_route", "")),
                             str(prefs.get("updated_at", now)),
+                        ),
+                    )
+                if isinstance(data.get("earning_authorization_policy"), dict):
+                    policy = data["earning_authorization_policy"]
+                    conn.execute(
+                        "UPDATE earning_authorization_policy SET enabled = ?, simulation_only = ?, allowed_actions = ?, allowed_targets = ?, max_single_amount = ?, max_daily_actions = ?, expires_at = ?, emergency_stop = ?, updated_at = ? WHERE id = 1",
+                        (
+                            1 if policy.get("enabled") else 0, 1 if policy.get("simulation_only", True) else 0,
+                            json.dumps(policy.get("allowed_actions", []), ensure_ascii=False), json.dumps(policy.get("allowed_targets", []), ensure_ascii=False),
+                            max(0.0, float(policy.get("max_single_amount", 0) or 0)), max(0, int(policy.get("max_daily_actions", 0) or 0)),
+                            str(policy.get("expires_at", "")), 1 if policy.get("emergency_stop") else 0, str(policy.get("updated_at", now)),
                         ),
                     )
                 if "earning_plans" in data:
@@ -5690,6 +5751,140 @@ class EarthOnlineStore:
             finally: conn.close()
         self._write_mirror(); return self.get_earning_preferences()
 
+    # ── v19: 受控授权执行中心 ─────────────────────
+
+    @staticmethod
+    def _authorization_defaults() -> Dict[str, Any]:
+        return {
+            "id": 1,
+            "enabled": False,
+            "simulation_only": True,
+            "allowed_actions": [],
+            "allowed_targets": [],
+            "max_single_amount": 0.0,
+            "max_daily_actions": 0,
+            "expires_at": "",
+            "emergency_stop": False,
+            "updated_at": "",
+        }
+
+    def get_earning_authorization_policy(self) -> Dict[str, Any]:
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT * FROM earning_authorization_policy WHERE id = 1").fetchone()
+            if not row:
+                return self._authorization_defaults()
+            policy = dict(row)
+            for key in ("allowed_actions", "allowed_targets"):
+                try:
+                    policy[key] = json.loads(policy.get(key) or "[]")
+                except (TypeError, ValueError):
+                    policy[key] = []
+            policy["enabled"] = bool(policy.get("enabled"))
+            policy["simulation_only"] = bool(policy.get("simulation_only"))
+            policy["emergency_stop"] = bool(policy.get("emergency_stop"))
+            return policy
+        finally:
+            conn.close()
+
+    def update_earning_authorization_policy(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        data = data if isinstance(data, dict) else {}
+        current = self.get_earning_authorization_policy()
+        actions = data.get("allowed_actions", current.get("allowed_actions", []))
+        targets = data.get("allowed_targets", current.get("allowed_targets", []))
+        allowed_action_set = {"proposal", "publish", "contact", "upload", "accept_order"}
+        if not isinstance(actions, list):
+            actions = []
+        actions = [str(value).strip().lower() for value in actions if str(value).strip().lower() in allowed_action_set]
+        if not isinstance(targets, list):
+            targets = []
+        targets = [str(value).strip()[:500] for value in targets if str(value).strip()][:50]
+        try:
+            max_amount = max(0.0, float(data.get("max_single_amount", 0) or 0))
+        except (TypeError, ValueError):
+            max_amount = 0.0
+        try:
+            max_daily = max(0, min(1000, int(data.get("max_daily_actions", 0) or 0)))
+        except (TypeError, ValueError):
+            max_daily = 0
+        expires_at = str(data.get("expires_at", "") or "")[:40]
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE earning_authorization_policy SET enabled = ?, simulation_only = ?, allowed_actions = ?, allowed_targets = ?, max_single_amount = ?, max_daily_actions = ?, expires_at = ?, emergency_stop = ?, updated_at = ? WHERE id = 1",
+                    (
+                        1 if data.get("enabled", current.get("enabled")) else 0,
+                        1 if data.get("simulation_only", current.get("simulation_only", True)) else 0,
+                        json.dumps(actions, ensure_ascii=False), json.dumps(targets, ensure_ascii=False),
+                        max_amount if "max_single_amount" in data else float(current.get("max_single_amount") or 0),
+                        max_daily if "max_daily_actions" in data else int(current.get("max_daily_actions") or 0),
+                        expires_at if "expires_at" in data else str(current.get("expires_at") or ""),
+                        1 if data.get("emergency_stop", current.get("emergency_stop")) else 0, now,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_earning_authorization_policy()
+
+    def list_earning_authorization_audit(self, limit: int = 100) -> List[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            rows = conn.execute("SELECT * FROM earning_authorization_audit ORDER BY id DESC LIMIT ?", (max(1, min(500, int(limit))),)).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def evaluate_earning_authorization(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """评估动作是否满足策略；只返回决定，不执行动作。"""
+        data = data if isinstance(data, dict) else {}
+        action_type = str(data.get("action_type", "")).strip().lower()
+        target = str(data.get("target", "")).strip()[:1000]
+        try:
+            amount = max(0.0, float(data.get("amount", 0) or 0))
+        except (TypeError, ValueError):
+            amount = 0.0
+        policy = self.get_earning_authorization_policy()
+        decision, reason = "deny", "授权策略未开启"
+        financial = {"payment", "transfer", "withdraw", "refund", "payout", "checkout"}
+        if action_type in financial:
+            reason = "金融动作永久禁止通过收益授权中心"
+        elif policy.get("emergency_stop"):
+            reason = "紧急停止已启用"
+        elif not policy.get("enabled"):
+            reason = "授权策略未开启"
+        elif policy.get("expires_at") and policy["expires_at"] <= datetime.now().isoformat():
+            reason = "授权策略已过期"
+        elif action_type not in set(policy.get("allowed_actions") or []):
+            reason = "动作类型不在白名单"
+        elif not target or not any(target == item or target.startswith(item.rstrip("/") + "/") for item in (policy.get("allowed_targets") or [])):
+            reason = "目标不在白名单"
+        elif amount > float(policy.get("max_single_amount") or 0):
+            reason = "超过单次金额上限"
+        else:
+            today = datetime.now().date().isoformat()
+            conn = self._connect()
+            try:
+                used = conn.execute("SELECT COUNT(*) AS c FROM earning_authorization_audit WHERE decision = 'allow' AND created_at >= ?", (today,)).fetchone()["c"]
+            finally:
+                conn.close()
+            if used >= int(policy.get("max_daily_actions") or 0):
+                reason = "超过每日动作次数上限"
+            else:
+                decision, reason = "allow", "通过授权策略评估"
+        simulation = bool(policy.get("simulation_only", True))
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("INSERT INTO earning_authorization_audit (action_type, target, amount, decision, reason, simulation, created_at) VALUES (?,?,?,?,?,?,?)", (action_type, target, amount, decision, reason, 1 if simulation else 0, datetime.now().isoformat()))
+                conn.commit()
+            finally:
+                conn.close()
+        return {"allowed": decision == "allow", "decision": decision, "reason": reason, "simulation_only": simulation, "action_type": action_type, "target": target, "amount": amount}
+
     # ── v18.2: 可售服务与外部动作审批 ────────────────
 
     def list_earning_offers(self, status: str = "") -> List[Dict[str, Any]]:
@@ -6211,6 +6406,9 @@ class EarthOnlineStore:
         if "position" in data:
             try: updates["position"] = max(0, int(data["position"] or 0))
             except (TypeError, ValueError): pass
+        if "quest_id" in data:
+            try: updates["quest_id"] = int(data["quest_id"]) if data["quest_id"] else None
+            except (TypeError, ValueError): updates["quest_id"] = None
         if "status" in data: updates["status"] = self._normalise_earning_status(data["status"], ("pending", "doing", "done", "skipped"), "pending")
         if not updates: return step
         if updates.get("status") == "done": updates["completed_at"] = datetime.now().isoformat()
@@ -6258,6 +6456,73 @@ class EarthOnlineStore:
             row = conn.execute("SELECT * FROM earning_plans WHERE id = ?", (int(plan_id),)).fetchone()
             return self._earning_plan_with_steps(dict(row)) if row else None
         finally: conn.close()
+
+    def advance_earning_experiment(self, route_key: str = "automation_tool") -> Dict[str, Any]:
+        """推进一个已启动的收益实验，只创建站内委托，不执行外部动作。
+
+        这是收益自动化的状态机入口：同一阶段已有未结束委托时保持幂等；
+        当前阶段完成后，把下一阶段置为 doing 并生成唯一对应的委托。
+        没有明确启动实验时返回 no_active_experiment，不会替玩家擅自开局。
+        """
+        route_key = str(route_key or "automation_tool").strip()[:40]
+        plans = [plan for plan in self.list_earning_plans(status="active") if str(plan.get("route_key") or "") == route_key and int(plan.get("is_sprint") or 0)]
+        if not plans:
+            return {"status": "no_active_experiment", "route_key": route_key, "created": False}
+
+        # 只维护最早仍在进行的实验，避免多个实验同时向委托板堆积动作。
+        plan = sorted(plans, key=lambda item: (str(item.get("updated_at") or ""), int(item.get("id") or 0)))[0]
+        steps = list(plan.get("steps") or [])
+        current = next((step for step in steps if step.get("status") not in {"done", "skipped"}), None)
+        if not current:
+            return {"status": "completed", "route_key": route_key, "created": False, "plan": plan}
+
+        quest = self.get_quest(int(current["quest_id"])) if current.get("quest_id") else None
+        if quest and quest.get("status") in {"pending", "ongoing"}:
+            stalled_hours = 0.0
+            try:
+                stalled_hours = max(0.0, (datetime.now() - datetime.fromisoformat(str(current.get("updated_at") or ""))).total_seconds() / 3600)
+            except (TypeError, ValueError):
+                pass
+            return {
+                "status": "waiting_on_quest",
+                "route_key": route_key,
+                "created": False,
+                "stalled": stalled_hours >= 24,
+                "stalled_hours": round(stalled_hours, 1),
+                "plan": plan,
+                "step": current,
+                "quest": quest,
+            }
+        if quest and quest.get("status") in {"failed", "cancelled"}:
+            # 失败/取消后保留原记录，清空关联以便弥娅重新生成一个可执行步骤。
+            self.update_earning_plan_step(int(current["id"]), {"quest_id": None, "status": "doing"})
+            current = self.get_earning_plan_step(int(current["id"])) or current
+        elif current.get("quest_id") and not quest:
+            self.update_earning_plan_step(int(current["id"]), {"quest_id": None, "status": "doing"})
+            current = self.get_earning_plan_step(int(current["id"])) or current
+
+        if current.get("status") != "doing":
+            self.update_earning_plan_step(int(current["id"]), {"status": "doing"})
+            current = self.get_earning_plan_step(int(current["id"])) or current
+
+        converted = self.convert_earning_plan_step_to_quest(int(current["id"]))
+        if not converted.get("success"):
+            return {
+                "status": "blocked",
+                "route_key": route_key,
+                "created": False,
+                "plan": self.get_earning_plan(int(plan["id"])),
+                "step": current,
+                "message": converted.get("message", "无法生成收益委托"),
+            }
+        return {
+            "status": "quest_created",
+            "route_key": route_key,
+            "created": True,
+            "plan": self.get_earning_plan(int(plan["id"])),
+            "step": self.get_earning_plan_step(int(current["id"])),
+            "quest": converted.get("quest"),
+        }
 
     def create_earning_plan(self, data: Dict[str, Any]) -> Dict[str, Any]:
         data = data if isinstance(data, dict) else {}; title = str(data.get("title", "")).strip()[:200]
@@ -6395,12 +6660,128 @@ class EarthOnlineStore:
             row = conn.execute("SELECT * FROM income_records WHERE id = ?", (int(record_id),)).fetchone(); return dict(row) if row else None
         finally: conn.close()
 
+    def run_earning_automation_cycle(self) -> Dict[str, Any]:
+        """运行一次安全的收益自动巡检。
+
+        该入口处理公开 RSS/Atom 信息源，并推进已明确启动的收益实验。
+        它不会创建外部动作、发送消息、上传资料、接单或执行任何资金操作。
+        """
+        started_at = datetime.now().isoformat()
+        sync = self.sync_earning_sources()
+        # 先建立一次排序快照，再推进所有已明确启动的实验。旧版本只推进
+        # automation_tool，导致 digital_product / resale 等路线在后台永远停住。
+        guidance = self.earning_guidance()
+        pipeline = self._advance_safe_earning_pipeline(guidance)
+        guidance = self.earning_guidance()
+        routes = {
+            str(plan.get("route_key") or "")
+            for plan in guidance.get("plans", [])
+            if plan.get("status") == "active" and int(plan.get("is_sprint") or 0) and str(plan.get("route_key") or "")
+        }
+        experiments = {route: self.advance_earning_experiment(route) for route in sorted(routes)}
+        # 保持兼容：前端和旧调用方仍可从 experiment 读取自动化工具路线。
+        experiment = experiments.get("automation_tool") or {
+            "status": "no_active_experiment", "route_key": "automation_tool", "created": False,
+        }
+        actions = ["公开信息同步", "去重与初筛", "收益排序刷新", "安全推进已核验机会"]
+        actions.extend(pipeline.get("actions", []))
+        for route, state in experiments.items():
+            if state.get("status") == "quest_created":
+                actions.append(f"推进 {route} 收益实验并生成当前委托")
+            elif state.get("status") == "waiting_on_quest":
+                actions.append(f"检查 {route} 收益实验当前委托")
+        guidance = self.earning_guidance()
+        return {
+            "success": True,
+            "started_at": started_at,
+            "finished_at": datetime.now().isoformat(),
+            "sync": sync,
+            "experiment": experiment,
+            "experiments": experiments,
+            "pipeline": pipeline,
+            "guidance": guidance,
+            "actions": actions,
+            "requires_confirmation": guidance.get("automation", {}).get("requires_confirmation", []),
+            "blocked": guidance.get("automation", {}).get("blocked", []),
+        }
+
+    def _advance_safe_earning_pipeline(self, guidance: Dict[str, Any]) -> Dict[str, Any]:
+        """推进不需要外部账号/资金权限的收益流水线。
+
+        公开情报只在已核验、无风险标记且与玩家档案匹配时自动进入
+        ``shortlisted``，并最多准备一张站内委托。发布、联系、接单、付款
+        等动作仍然不会由此方法触发。
+        """
+        actions: List[str] = []
+        promoted: List[int] = []
+        prepared: Optional[Dict[str, Any]] = None
+        if not guidance.get("profile_ready"):
+            return {"promoted": promoted, "prepared": prepared, "actions": actions}
+
+        for item in guidance.get("opportunities", []):
+            if len(promoted) >= 3 or item.get("status") != "inbox":
+                continue
+            flags = item.get("scam_flags") or []
+            if item.get("verification_status") != "verified" or flags:
+                continue
+            if float(item.get("fit_score") or 0) < 40:
+                continue
+            updated = self.update_earning_opportunity(int(item["id"]), {"status": "shortlisted"})
+            if updated:
+                promoted.append(int(item["id"]))
+        if promoted:
+            actions.append(f"将 {len(promoted)} 条已核验机会移入候选")
+
+        # 只准备一张委托，避免后台把任务板刷满；已有 quest_id 的机会天然幂等。
+        candidate = next(
+            (item for item in self.earning_guidance().get("opportunities", [])
+             if item.get("status") == "shortlisted" and not item.get("quest_id")
+             and item.get("verification_status") == "verified" and not (item.get("scam_flags") or [])),
+            None,
+        )
+        if candidate:
+            converted = self.convert_earning_opportunity_to_quest(int(candidate["id"]))
+            if converted.get("success"):
+                prepared = converted.get("quest") or {}
+                actions.append("为最高匹配机会生成站内执行委托")
+        return {"promoted": promoted, "prepared": prepared, "actions": actions}
+
+    @staticmethod
+    def _infer_earning_scam_flags(item: Dict[str, Any]) -> List[str]:
+        """从公开情报文本中标出需要人工核验的高风险措辞。
+
+        这是提示器，不是裁决器：它不会自动关闭机会，也不会把关键词当成事实，
+        只会降低排序并要求玩家打开来源核对。
+        """
+        text = " ".join(
+            str(item.get(key) or "")
+            for key in ("title", "description", "requirements", "source")
+        ).lower()
+        patterns = (
+            ("要求先交费/押金", ("先交费", "押金", "保证金", "培训费", "报名费", "入会费")),
+            ("承诺高收益", ("稳赚", "保本", "日入", "月入过万", "高额回报", "零风险")),
+            ("疑似刷单或拉人头", ("刷单", "拉人头", "发展下线", "多级分销")),
+            ("要求验证码或代收款", ("验证码", "代收款", "借卡", "借账户", "支付密码")),
+            ("引导私下转账", ("私下转账", "先转账", "个人收款码", "加密货币付款")),
+        )
+        raw_flags = item.get("scam_flags") or []
+        if isinstance(raw_flags, str):
+            try:
+                raw_flags = json.loads(raw_flags)
+            except (TypeError, ValueError):
+                raw_flags = [raw_flags] if raw_flags.strip() else []
+        flags = [str(flag) for flag in (raw_flags if isinstance(raw_flags, list) else []) if str(flag).strip()]
+        for label, keywords in patterns:
+            if any(keyword in text for keyword in keywords) and label not in flags:
+                flags.append(label)
+        return flags[:8]
+
     def earning_guidance(self) -> Dict[str, Any]:
         opportunities = self.list_earning_opportunities(limit=200); plans = self.list_earning_plans(); records = self.list_income_records(limit=200); prefs = self.get_earning_preferences(); ranked = []
         offers = self.list_earning_offers(); actions = self.list_earning_actions(limit=100)
         skills = [str(value).lower() for value in prefs.get("skills", [])]; preferred_kinds = [str(value).lower() for value in prefs.get("preferred_kinds", [])]
         for raw in opportunities:
-            item = dict(raw); hours = float(item.get("hours") or 0); lo = float(item.get("income_min") or 0); hi = float(item.get("income_max") or 0); text = f"{item.get('title', '')} {item.get('description', '')} {item.get('kind', '')}".lower(); item["hourly_estimate"] = round((lo + hi) / 2 / hours, 2) if hours > 0 else 0
+            item = dict(raw); item["scam_flags"] = self._infer_earning_scam_flags(item); hours = float(item.get("hours") or 0); lo = float(item.get("income_min") or 0); hi = float(item.get("income_max") or 0); text = f"{item.get('title', '')} {item.get('description', '')} {item.get('kind', '')}".lower(); item["hourly_estimate"] = round((lo + hi) / 2 / hours, 2) if hours > 0 else 0
             score = item["hourly_estimate"] * ({"low": 1, "medium": .7, "high": .4}.get(item.get("risk"), .5)) + ({"high": 10, "medium": 4}.get(item.get("confidence"), 0)); reasons = []
             if preferred_kinds and any(kind in text for kind in preferred_kinds): score += 15; reasons.append("符合偏好类型")
             if skills and any(skill in text for skill in skills): score += 25; reasons.append("与已填写技能相关")
@@ -6460,9 +6841,13 @@ class EarthOnlineStore:
                 "effective_hourly_rate": round(net_income / total_hours, 2) if total_hours > 0 else 0,
             },
             "automation": {
-                "automatic": ["公开信息同步", "去重与初筛", "生成草稿", "站内提醒", "收益复盘"],
+                "automatic": ["公开信息同步", "去重与初筛", "核验机会安全入选", "推进已启动的收益实验", "生成当前站内委托", "站内提醒", "收益复盘"],
                 "requires_confirmation": ["对外发布", "联系客户", "提交申请", "上传资料", "接受订单"],
                 "blocked": ["付款", "转账", "提现", "退款", "自动输入验证码或支付密码"],
+            },
+            "authorization": {
+                "policy": self.get_earning_authorization_policy(),
+                "audit": self.list_earning_authorization_audit(limit=20),
             },
             "boundary": "建议不保证收益；外部动作必须逐项审批且当前仍由你人工执行。付款、转账、提现、退款和金融凭据输入不开放给弥娅。",
         }

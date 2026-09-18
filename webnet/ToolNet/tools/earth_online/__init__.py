@@ -2927,6 +2927,61 @@ class EarthOnlineSubmitEarningAction(_EarthBase):
             return f"提交审批草稿失败: {e}"
 
 
+class EarthOnlineApproveEarningAction(_EarthBase):
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_approve_earning_action",
+            "description": "用户明确回复同意/批准指定编号后批准草稿；不发送、不执行",
+            "parameters": {"type": "object", "properties": {"action_id": {"type": "integer"}, "confirmation": {"type": "string"}}, "required": ["action_id", "confirmation"]},
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        import re
+
+        action_id = int(args.get("action_id", 0))
+        confirmation = str(args.get("confirmation", "")).strip()
+        if not re.fullmatch(rf"(?:同意|批准)\s*#?{action_id}", confirmation, re.IGNORECASE):
+            return f"未批准草稿 #{action_id}：请明确回复“同意 #{action_id}”或“批准 #{action_id}”。"
+        try:
+            action = self._store().get_earning_action(action_id)
+            if not action:
+                return f"审批草稿 #{action_id} 不存在。"
+            if action.get("status") != "pending":
+                return f"审批草稿 #{action_id} 当前状态为 {action.get('status')}，不能批准。"
+            approved = self._store().approve_earning_action(action_id, str(action.get("content_hash") or ""))
+            return f"已批准审批草稿 #{approved['id']}，有效 30 分钟；批准不等于发送，仍不会自动执行。"
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"批准审批草稿失败: {e}"
+
+
+class EarthOnlineRevokeEarningAction(_EarthBase):
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_revoke_earning_action",
+            "description": "用户明确回复撤销/拒绝指定编号后撤销草稿",
+            "parameters": {"type": "object", "properties": {"action_id": {"type": "integer"}, "confirmation": {"type": "string"}}, "required": ["action_id", "confirmation"]},
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        import re
+
+        action_id = int(args.get("action_id", 0))
+        confirmation = str(args.get("confirmation", "")).strip()
+        if not re.fullmatch(rf"(?:撤销|拒绝)\s*#?{action_id}", confirmation, re.IGNORECASE):
+            return f"未撤销草稿 #{action_id}：请明确回复“撤销 #{action_id}”或“拒绝 #{action_id}”。"
+        try:
+            action = self._store().revoke_earning_action(action_id)
+            return f"审批草稿 #{action['id']} 已撤销，不会发送或执行。"
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"撤销审批草稿失败: {e}"
+
+
 def get_earth_online_tools():
     """获取所有地球online 工具实例"""
     return [
@@ -3027,4 +3082,6 @@ def get_earth_online_tools():
         EarthOnlineListEarningActions(),
         EarthOnlineCreateEarningAction(),
         EarthOnlineSubmitEarningAction(),
+        EarthOnlineApproveEarningAction(),
+        EarthOnlineRevokeEarningAction(),
     ]

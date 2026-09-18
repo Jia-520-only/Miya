@@ -9,6 +9,7 @@
 - 玩家状态 (等级/经验/地球币)
 """
 
+import asyncio
 import logging
 import os
 import uuid
@@ -540,7 +541,29 @@ class EarthOnlineRoutes:
 
         @self.router.post("/earning/sync")
         async def sync_earning_sources(source_id: Optional[int] = None):
-            return self.store.sync_earning_sources(source_id=source_id)
+            # RSS/Atom 拉取可能等待网络；不要阻塞 FastAPI 的事件循环。
+            return await asyncio.to_thread(self.store.sync_earning_sources, source_id=source_id)
+
+        @self.router.post("/earning/automation/run")
+        async def run_earning_automation_cycle():
+            """运行一次不触碰外部账户或资金的收益自动巡检。"""
+            return await asyncio.to_thread(self.store.run_earning_automation_cycle)
+
+        @self.router.get("/earning/authorization")
+        async def earning_authorization_policy():
+            return self.store.get_earning_authorization_policy()
+
+        @self.router.put("/earning/authorization")
+        async def update_earning_authorization_policy(request: Dict[str, Any] = None):
+            return self.store.update_earning_authorization_policy(request or {})
+
+        @self.router.post("/earning/authorization/evaluate")
+        async def evaluate_earning_authorization(request: Dict[str, Any] = None):
+            return self.store.evaluate_earning_authorization(request or {})
+
+        @self.router.get("/earning/authorization/audit")
+        async def earning_authorization_audit(limit: int = 100):
+            return self.store.list_earning_authorization_audit(limit=limit)
 
         @self.router.post("/earning/opportunities")
         async def create_earning_opportunity(request: Dict[str, Any] = None):
