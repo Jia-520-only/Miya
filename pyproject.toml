@@ -254,6 +254,12 @@ extend-ignore = [
     "UP042",   # str+Enum 兼容行为；迁移 StrEnum 需评估序列化差异
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# These legacy compatibility handlers intentionally keep compact one-line branches;
+# changing them wholesale would create a noisy, behavior-sensitive formatting diff.
+"core/earth_online_store.py" = ["E701", "E702"]
+"core/web_api/earth_online.py" = ["E701"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["core", "utils", "config"]
 

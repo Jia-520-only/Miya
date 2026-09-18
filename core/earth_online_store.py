@@ -4071,13 +4071,13 @@ class EarthOnlineStore:
         radius = max(100, min(5000, int(radius_m)))
         result_limit = max(1, min(80, int(limit)))
         selectors = (
-            'nwr(around:{radius},{lat:.7f},{lng:.7f})["name"]["amenity"];'
-            'nwr(around:{radius},{lat:.7f},{lng:.7f})["name"]["shop"];'
-            'nwr(around:{radius},{lat:.7f},{lng:.7f})["name"]["tourism"];'
-            'nwr(around:{radius},{lat:.7f},{lng:.7f})["name"]["leisure"];'
-            'nwr(around:{radius},{lat:.7f},{lng:.7f})["name"]["public_transport"];'
-            'nwr(around:{radius},{lat:.7f},{lng:.7f})["name"]["railway"~"station|halt"];'
-        ).format(radius=radius, lat=lat, lng=lng)
+            f'nwr(around:{radius},{lat:.7f},{lng:.7f})["name"]["amenity"];'
+            f'nwr(around:{radius},{lat:.7f},{lng:.7f})["name"]["shop"];'
+            f'nwr(around:{radius},{lat:.7f},{lng:.7f})["name"]["tourism"];'
+            f'nwr(around:{radius},{lat:.7f},{lng:.7f})["name"]["leisure"];'
+            f'nwr(around:{radius},{lat:.7f},{lng:.7f})["name"]["public_transport"];'
+            f'nwr(around:{radius},{lat:.7f},{lng:.7f})["name"]["railway"~"station|halt"];'
+        )
         query = f"[out:json][timeout:12];({selectors});out center {result_limit};"
         try:
             body = urlencode({"data": query}).encode("utf-8")
