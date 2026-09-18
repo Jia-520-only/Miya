@@ -2841,6 +2841,101 @@ class EarthOnlineListEarningOffers(_EarthBase):
             return f"读取可售服务失败: {e}"
 
 
+class EarthOnlineListDigitalResources(_EarthBase):
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_list_digital_resources",
+            "description": "查看数字资源候选、来源和授权核验状态；只读，不自动下载或销售",
+            "parameters": {"type": "object", "properties": {"status": {"type": "string"}, "rights_status": {"type": "string"}}, "required": []},
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            resources = self._store().list_digital_resources(status=str(args.get("status", "") or ""), rights_status=str(args.get("rights_status", "") or ""))
+            if not resources:
+                return "数字资源库目前为空。"
+            lines = ["【数字资源库】"]
+            for item in resources[:30]:
+                flags = f" · 风险: {','.join(item.get('risk_flags') or [])}" if item.get("risk_flags") else ""
+                lines.append(f"#{item['id']} [{item['status']}/{item['rights_status']}] {item['title']} · {item['license_type']}{flags}")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"读取数字资源失败: {e}"
+
+
+class EarthOnlineAddDigitalResource(_EarthBase):
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_add_digital_resource",
+            "description": "收录公开来源数字资源候选；不自动下载、不自动认定版权、不发布",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"}, "source_url": {"type": "string"}, "source_name": {"type": "string"},
+                    "license_type": {"type": "string", "enum": ["original", "resale_license", "open_license", "public_domain", "unknown"]},
+                    "rights_note": {"type": "string"}, "content_uri": {"type": "string"},
+                }, "required": ["title"],
+            },
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            item = self._store().create_digital_resource(dict(args))
+            return f"数字资源候选 #{item['id']} 已收录：{item['title']}。当前待核验，不会自动发布或销售。"
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"收录数字资源失败: {e}"
+
+
+class EarthOnlineCreateDigitalProduct(_EarthBase):
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_create_digital_product",
+            "description": "用已授权核验的资源建立数字商品草稿；不发布闲鱼",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"}, "description": {"type": "string"},
+                    "resource_ids": {"type": "array", "items": {"type": "integer"}},
+                    "price": {"type": "number"}, "cost_estimate": {"type": "number"}, "delivery_note": {"type": "string"},
+                }, "required": ["title", "description", "resource_ids"],
+            },
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            item = self._store().create_digital_product(dict(args))
+            return f"数字商品 #{item['id']} 已建立：{item['title']}。仍需人工核对后准备闲鱼草稿。"
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"建立数字商品失败: {e}"
+
+
+class EarthOnlinePrepareXianyuListing(_EarthBase):
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_prepare_xianyu_listing",
+            "description": "为数字商品生成闲鱼发布草稿；不登录、不发布、不发送、不交易",
+            "parameters": {"type": "object", "properties": {"product_id": {"type": "integer"}}, "required": ["product_id"]},
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            result = self._store().prepare_xianyu_listing(int(args.get("product_id", 0)))
+            action = result.get("action") or {}
+            return f"闲鱼发布草稿 #{action.get('id')} 已准备：{result.get('product', {}).get('title')}。仅为站内草稿，仍需人工发布。"
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"准备闲鱼草稿失败: {e}"
+
+
 class EarthOnlineListEarningActions(_EarthBase):
     @property
     def config(self) -> Dict[str, Any]:
@@ -3078,6 +3173,10 @@ def get_earth_online_tools():
         EarthOnlineEarningBrief(),
         EarthOnlineCreateEarningSprint(),
         EarthOnlineStartFirstIncomeExperiment(),
+        EarthOnlineListDigitalResources(),
+        EarthOnlineAddDigitalResource(),
+        EarthOnlineCreateDigitalProduct(),
+        EarthOnlinePrepareXianyuListing(),
         EarthOnlineListEarningOffers(),
         EarthOnlineListEarningActions(),
         EarthOnlineCreateEarningAction(),

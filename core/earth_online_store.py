@@ -36,6 +36,7 @@ import sqlite3
 import threading
 import ipaddress
 import hashlib
+import secrets
 import re
 import urllib.error
 import urllib.request
@@ -1234,6 +1235,84 @@ class EarthOnlineStore:
                 """
             )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_earning_actions_status ON earning_action_drafts(status, updated_at)")
+            # v21: 合法数字资源与商品工坊。资源只允许进入站内审核/商品草稿，
+            # 不保存平台凭据，也不执行闲鱼登录、发布、收款或交易。
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS earning_digital_resources (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    source_url TEXT DEFAULT '',
+                    source_name TEXT DEFAULT '',
+                    license_type TEXT NOT NULL DEFAULT 'unknown',
+                    rights_status TEXT NOT NULL DEFAULT 'pending',
+                    rights_note TEXT DEFAULT '',
+                    content_uri TEXT DEFAULT '',
+                    checksum TEXT DEFAULT '',
+                    version TEXT DEFAULT '1.0',
+                    risk_flags TEXT NOT NULL DEFAULT '[]',
+                    status TEXT NOT NULL DEFAULT 'candidate',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_digital_resources_status ON earning_digital_resources(status, rights_status, updated_at)")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS earning_digital_products (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    resource_ids TEXT NOT NULL DEFAULT '[]',
+                    platform TEXT NOT NULL DEFAULT 'xianyu',
+                    price REAL NOT NULL DEFAULT 0,
+                    cost_estimate REAL NOT NULL DEFAULT 0,
+                    delivery_mode TEXT NOT NULL DEFAULT 'expiring_link',
+                    delivery_note TEXT DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'draft',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_digital_products_status ON earning_digital_products(status, updated_at)")
+            # v22: 订单与限时交付。订单状态只由用户/本地流程推进，不接收平台自动回调。
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS earning_digital_orders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    product_id INTEGER NOT NULL,
+                    external_order_ref TEXT DEFAULT '',
+                    amount REAL NOT NULL DEFAULT 0,
+                    cost REAL NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'awaiting_payment',
+                    payment_confirmed_at TEXT DEFAULT '',
+                    note TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (product_id) REFERENCES earning_digital_products(id)
+                )
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_digital_orders_status ON earning_digital_orders(status, updated_at)")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS earning_digital_deliveries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    order_id INTEGER NOT NULL,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    expires_at TEXT NOT NULL,
+                    max_downloads INTEGER NOT NULL DEFAULT 3,
+                    download_count INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    issued_at TEXT NOT NULL,
+                    last_accessed_at TEXT DEFAULT '',
+                    FOREIGN KEY (order_id) REFERENCES earning_digital_orders(id)
+                )
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_digital_deliveries_order ON earning_digital_deliveries(order_id, status, expires_at)")
             # v19: 受控授权策略与评估审计。策略默认关闭且只允许模拟执行。
             cur.execute(
                 """
@@ -2172,6 +2251,10 @@ class EarthOnlineStore:
             "earning_preferences": self.get_earning_preferences(),
             "earning_offers": self.list_earning_offers(),
             "earning_action_drafts": self.list_earning_actions(limit=2000),
+            "earning_digital_resources": self.list_digital_resources(),
+            "earning_digital_products": self.list_digital_products(),
+            "earning_digital_orders": self.list_digital_orders(),
+            "earning_digital_deliveries": self.list_digital_deliveries(include_tokens=False),
             "earning_authorization_policy": self.get_earning_authorization_policy(),
             "earning_authorization_audit": self.list_earning_authorization_audit(limit=2000),
             "earning_plans": self.list_earning_plans(),
@@ -2464,6 +2547,58 @@ class EarthOnlineStore:
                     conn.execute("DELETE FROM earning_sources")
                     for source in data.get("earning_sources", []):
                         conn.execute("INSERT INTO earning_sources (id, name, url, kind, enabled, last_synced_at, last_error, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)", (int(source.get("id", 0)) if source.get("id") else None, str(source.get("name", "")), str(source.get("url", "")), str(source.get("kind", "rss")), 1 if source.get("enabled", 1) else 0, str(source.get("last_synced_at", "")), str(source.get("last_error", "")), str(source.get("created_at", now)), str(source.get("updated_at", now))))
+                if "earning_digital_resources" in data:
+                    conn.execute("DELETE FROM earning_digital_resources")
+                    for item in data.get("earning_digital_resources", []):
+                        conn.execute(
+                            "INSERT INTO earning_digital_resources (id, title, source_url, source_name, license_type, rights_status, rights_note, content_uri, checksum, version, risk_flags, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                            (
+                                int(item.get("id", 0)) if item.get("id") else None, str(item.get("title", "")), str(item.get("source_url", "")),
+                                str(item.get("source_name", "")), str(item.get("license_type", "unknown")), str(item.get("rights_status", "pending")),
+                                str(item.get("rights_note", "")), str(item.get("content_uri", "")), str(item.get("checksum", "")), str(item.get("version", "1.0")),
+                                json.dumps(item.get("risk_flags", []), ensure_ascii=False), str(item.get("status", "candidate")),
+                                str(item.get("created_at", now)), str(item.get("updated_at", now)),
+                            ),
+                        )
+                if "earning_digital_products" in data:
+                    conn.execute("DELETE FROM earning_digital_products")
+                    for item in data.get("earning_digital_products", []):
+                        conn.execute(
+                            "INSERT INTO earning_digital_products (id, title, description, resource_ids, platform, price, cost_estimate, delivery_mode, delivery_note, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                            (
+                                int(item.get("id", 0)) if item.get("id") else None, str(item.get("title", "")), str(item.get("description", "")),
+                                json.dumps(item.get("resource_ids", []), ensure_ascii=False), str(item.get("platform", "xianyu")),
+                                float(item.get("price", 0) or 0), float(item.get("cost_estimate", 0) or 0), str(item.get("delivery_mode", "expiring_link")),
+                                str(item.get("delivery_note", "")), str(item.get("status", "draft")), str(item.get("created_at", now)), str(item.get("updated_at", now)),
+                            ),
+                        )
+                if "earning_digital_orders" in data:
+                    conn.execute("DELETE FROM earning_digital_orders")
+                    for item in data.get("earning_digital_orders", []):
+                        conn.execute(
+                            "INSERT INTO earning_digital_orders (id, product_id, external_order_ref, amount, cost, status, payment_confirmed_at, note, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                            (
+                                int(item.get("id", 0)) if item.get("id") else None, int(item.get("product_id", 0)),
+                                str(item.get("external_order_ref", "")), float(item.get("amount", 0) or 0), float(item.get("cost", 0) or 0),
+                                str(item.get("status", "awaiting_payment")), str(item.get("payment_confirmed_at", "")),
+                                str(item.get("note", "")), str(item.get("created_at", now)), str(item.get("updated_at", now)),
+                            ),
+                        )
+                if "earning_digital_deliveries" in data:
+                    conn.execute("DELETE FROM earning_digital_deliveries")
+                    for item in data.get("earning_digital_deliveries", []):
+                        token_hash = str(item.get("token_hash", ""))
+                        if not token_hash:
+                            continue
+                        conn.execute(
+                            "INSERT INTO earning_digital_deliveries (id, order_id, token_hash, expires_at, max_downloads, download_count, status, issued_at, last_accessed_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                            (
+                                int(item.get("id", 0)) if item.get("id") else None, int(item.get("order_id", 0)), token_hash,
+                                str(item.get("expires_at", "")), max(1, int(item.get("max_downloads", 3) or 3)),
+                                max(0, int(item.get("download_count", 0) or 0)), str(item.get("status", "active")),
+                                str(item.get("issued_at", now)), str(item.get("last_accessed_at", "")),
+                            ),
+                        )
                 if isinstance(data.get("earning_preferences"), dict):
                     prefs = data["earning_preferences"]
                     conn.execute(
@@ -5838,6 +5973,469 @@ class EarthOnlineStore:
         finally:
             conn.close()
 
+    # ── v21: 合法数字资源与商品工坊 ─────────────────
+
+    @staticmethod
+    def _decode_string_list(value: Any) -> List[str]:
+        if isinstance(value, list):
+            return [str(item) for item in value if str(item).strip()]
+        if isinstance(value, str):
+            try:
+                decoded = json.loads(value)
+            except (TypeError, ValueError):
+                decoded = []
+            if isinstance(decoded, list):
+                return [str(item) for item in decoded if str(item).strip()]
+        return []
+
+    def list_digital_resources(self, status: str = "", rights_status: str = "") -> List[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            clauses: List[str] = []
+            params: List[Any] = []
+            if status:
+                clauses.append("status = ?")
+                params.append(str(status))
+            if rights_status:
+                clauses.append("rights_status = ?")
+                params.append(str(rights_status))
+            where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+            rows = conn.execute(
+                f"SELECT * FROM earning_digital_resources{where} ORDER BY updated_at DESC, id DESC",
+                params,
+            ).fetchall()
+            result = []
+            for row in rows:
+                item = dict(row)
+                item["risk_flags"] = self._decode_string_list(item.get("risk_flags"))
+                result.append(item)
+            return result
+        finally:
+            conn.close()
+
+    def get_digital_resource(self, resource_id: int) -> Optional[Dict[str, Any]]:
+        resources = self.list_digital_resources()
+        return next((item for item in resources if int(item["id"]) == int(resource_id)), None)
+
+    @staticmethod
+    def _resource_risk_flags(data: Dict[str, Any]) -> List[str]:
+        supplied = data.get("risk_flags") if isinstance(data.get("risk_flags"), list) else []
+        flags = [str(item).strip()[:200] for item in supplied if str(item).strip()]
+        text = " ".join(str(data.get(key) or "") for key in ("title", "source_name", "rights_note")).lower()
+        patterns = (
+            ("疑似破解或绕过授权", ("破解", "crack", "激活码", "绕过授权")),
+            ("疑似未经授权转载", ("盗版", "泄露", "内部资料", "搬运")),
+            ("可能包含账号或凭据", ("账号密码", "共享账号", "cookie", "token")),
+        )
+        for label, keywords in patterns:
+            if any(keyword in text for keyword in keywords) and label not in flags:
+                flags.append(label)
+        return flags[:12]
+
+    def create_digital_resource(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        data = data if isinstance(data, dict) else {}
+        title = str(data.get("title") or "").strip()[:200]
+        if not title:
+            raise ValueError("资源名称不能为空")
+        source_url = str(data.get("source_url") or "").strip()[:1000]
+        if source_url and not source_url.lower().startswith(("http://", "https://")):
+            raise ValueError("资源来源必须是公开的 http/https 地址")
+        license_type = self._normalise_earning_status(
+            data.get("license_type"),
+            ("original", "resale_license", "open_license", "public_domain", "unknown"),
+            "unknown",
+        )
+        rights_status = self._normalise_earning_status(
+            data.get("rights_status"), ("pending", "verified", "rejected"), "pending"
+        )
+        status = self._normalise_earning_status(
+            data.get("status"), ("candidate", "approved", "rejected", "archived"), "candidate"
+        )
+        flags = self._resource_risk_flags(data)
+        if rights_status == "verified" and (license_type == "unknown" or flags):
+            raise ValueError("存在未知授权或风险信号，不能标记为授权已核验")
+        if status == "approved" and rights_status != "verified":
+            raise ValueError("只有授权已核验的资源才能进入可售资源库")
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute(
+                    "INSERT INTO earning_digital_resources (title, source_url, source_name, license_type, rights_status, rights_note, content_uri, checksum, version, risk_flags, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        title, source_url, str(data.get("source_name") or "")[:200], license_type,
+                        rights_status, str(data.get("rights_note") or "")[:3000],
+                        str(data.get("content_uri") or "")[:1000], str(data.get("checksum") or "")[:128],
+                        str(data.get("version") or "1.0")[:80], json.dumps(flags, ensure_ascii=False),
+                        status, now, now,
+                    ),
+                )
+                resource_id = int(cur.lastrowid)
+                self._log_activity(conn, "earning", "▣", f"收录数字资源候选: {title}", "等待授权核验")
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_digital_resource(resource_id) or {}
+
+    def update_digital_resource(self, resource_id: int, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        current = self.get_digital_resource(resource_id)
+        if not current:
+            return None
+        merged = {**current, **(data if isinstance(data, dict) else {})}
+        license_type = self._normalise_earning_status(
+            merged.get("license_type"),
+            ("original", "resale_license", "open_license", "public_domain", "unknown"),
+            "unknown",
+        )
+        rights_status = self._normalise_earning_status(
+            merged.get("rights_status"), ("pending", "verified", "rejected"), "pending"
+        )
+        status = self._normalise_earning_status(
+            merged.get("status"), ("candidate", "approved", "rejected", "archived"), "candidate"
+        )
+        flags = self._resource_risk_flags(merged)
+        if rights_status == "verified" and (license_type == "unknown" or flags):
+            raise ValueError("存在未知授权或风险信号，不能标记为授权已核验")
+        if status == "approved" and rights_status != "verified":
+            raise ValueError("只有授权已核验的资源才能进入可售资源库")
+        source_url = str(merged.get("source_url") or "").strip()[:1000]
+        if source_url and not source_url.lower().startswith(("http://", "https://")):
+            raise ValueError("资源来源必须是公开的 http/https 地址")
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE earning_digital_resources SET title=?, source_url=?, source_name=?, license_type=?, rights_status=?, rights_note=?, content_uri=?, checksum=?, version=?, risk_flags=?, status=?, updated_at=? WHERE id=?",
+                    (
+                        str(merged.get("title") or current["title"])[:200], source_url,
+                        str(merged.get("source_name") or "")[:200], license_type, rights_status,
+                        str(merged.get("rights_note") or "")[:3000], str(merged.get("content_uri") or "")[:1000],
+                        str(merged.get("checksum") or "")[:128], str(merged.get("version") or "1.0")[:80],
+                        json.dumps(flags, ensure_ascii=False), status, now, int(resource_id),
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_digital_resource(resource_id)
+
+    def list_digital_products(self, status: str = "") -> List[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            if status:
+                rows = conn.execute(
+                    "SELECT * FROM earning_digital_products WHERE status = ? ORDER BY updated_at DESC, id DESC",
+                    (str(status),),
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM earning_digital_products ORDER BY updated_at DESC, id DESC").fetchall()
+            result = []
+            for row in rows:
+                item = dict(row)
+                item["resource_ids"] = [int(value) for value in self._decode_string_list(item.get("resource_ids")) if str(value).isdigit()]
+                result.append(item)
+            return result
+        finally:
+            conn.close()
+
+    def get_digital_product(self, product_id: int) -> Optional[Dict[str, Any]]:
+        return next((item for item in self.list_digital_products() if int(item["id"]) == int(product_id)), None)
+
+    def _validated_product_resources(self, resource_ids: Any) -> List[int]:
+        if not isinstance(resource_ids, list):
+            raise ValueError("数字商品必须选择至少一个已审核资源")
+        ids = list(dict.fromkeys(int(value) for value in resource_ids if str(value).isdigit()))
+        if not ids:
+            raise ValueError("数字商品必须选择至少一个已审核资源")
+        resources = [self.get_digital_resource(value) for value in ids]
+        if any(resource is None for resource in resources):
+            raise ValueError("数字商品包含不存在的资源")
+        if any(resource.get("rights_status") != "verified" or resource.get("status") != "approved" for resource in resources if resource):
+            raise ValueError("商品只能使用授权已核验且审核通过的资源")
+        return ids
+
+    def create_digital_product(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        data = data if isinstance(data, dict) else {}
+        title = str(data.get("title") or "").strip()[:200]
+        if not title:
+            raise ValueError("商品标题不能为空")
+        resource_ids = self._validated_product_resources(data.get("resource_ids"))
+        status = self._normalise_earning_status(data.get("status"), ("draft", "ready", "paused", "retired"), "draft")
+        platform = self._normalise_earning_status(data.get("platform"), ("xianyu", "manual"), "xianyu")
+        try:
+            price = max(0.0, float(data.get("price") or 0))
+            cost = max(0.0, float(data.get("cost_estimate") or 0))
+        except (TypeError, ValueError):
+            raise ValueError("商品价格和成本必须是有效数字")
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute(
+                    "INSERT INTO earning_digital_products (title, description, resource_ids, platform, price, cost_estimate, delivery_mode, delivery_note, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        title, str(data.get("description") or "")[:12000], json.dumps(resource_ids), platform,
+                        price, cost, "expiring_link", str(data.get("delivery_note") or "")[:3000], status, now, now,
+                    ),
+                )
+                product_id = int(cur.lastrowid)
+                self._log_activity(conn, "earning", "▣", f"建立数字商品: {title}", f"拟定价格 ¥{price:.2f}")
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_digital_product(product_id) or {}
+
+    def prepare_xianyu_listing(self, product_id: int) -> Dict[str, Any]:
+        product = self.get_digital_product(product_id)
+        if not product:
+            raise ValueError("数字商品不存在")
+        self._validated_product_resources(product.get("resource_ids"))
+        if product.get("status") not in {"ready", "draft"}:
+            raise ValueError("只有草稿或待发布商品可以准备闲鱼文案")
+        target = f"xianyu:product:{int(product_id)}"
+        existing = next(
+            (action for action in self.list_earning_actions(limit=500)
+             if action.get("action_type") == "publish" and action.get("target") == target
+             and action.get("status") in {"draft", "pending", "approved"}),
+            None,
+        )
+        if existing:
+            return {"success": True, "created": False, "product": product, "action": existing}
+        resources = [self.get_digital_resource(value) for value in product["resource_ids"]]
+        source_note = "、".join(str(item.get("license_type")) for item in resources if item)
+        content = (
+            f"{product['description'].strip()}\n\n"
+            f"交付方式：付款由卖家人工确认后提供限时链接。\n"
+            f"授权说明：所含资源均已在弥娅资源库核验（{source_note}）。\n"
+            f"交付说明：{product.get('delivery_note') or '不提供账号共享，不包含破解、盗版或未授权内容。'}"
+        ).strip()
+        action = self.create_earning_action({
+            "action_type": "publish",
+            "target": target,
+            "title": product["title"],
+            "content": content,
+            "amount": product["price"],
+            "risk": "low",
+        })
+        return {"success": True, "created": True, "product": product, "action": action}
+
+    def prepare_ready_digital_product_draft(self) -> Dict[str, Any]:
+        """为一个待发布数字商品生成站内闲鱼草稿，绝不执行外部发布。"""
+        for product in self.list_digital_products(status="ready"):
+            prepared = self.prepare_xianyu_listing(int(product["id"]))
+            if prepared.get("created"):
+                return prepared
+        return {"success": True, "created": False, "message": "没有需要准备的新商品草稿"}
+
+    def list_digital_orders(self, status: str = "") -> List[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            if status:
+                rows = conn.execute(
+                    "SELECT * FROM earning_digital_orders WHERE status = ? ORDER BY updated_at DESC, id DESC",
+                    (str(status),),
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM earning_digital_orders ORDER BY updated_at DESC, id DESC").fetchall()
+            result = []
+            for row in rows:
+                item = dict(row)
+                item["product"] = self.get_digital_product(int(item["product_id"]))
+                result.append(item)
+            return result
+        finally:
+            conn.close()
+
+    def get_digital_order(self, order_id: int) -> Optional[Dict[str, Any]]:
+        return next((item for item in self.list_digital_orders() if int(item["id"]) == int(order_id)), None)
+
+    def create_digital_order(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """手动登记订单。创建订单不代表已收款，也不会触发交付。"""
+        data = data if isinstance(data, dict) else {}
+        product_id = int(data.get("product_id") or 0)
+        product = self.get_digital_product(product_id)
+        if not product:
+            raise ValueError("数字商品不存在")
+        try:
+            amount = max(0.0, float(data.get("amount", product.get("price", 0)) or 0))
+            cost = max(0.0, float(data.get("cost", product.get("cost_estimate", 0)) or 0))
+        except (TypeError, ValueError):
+            raise ValueError("订单金额和成本必须是有效数字")
+        if amount <= 0:
+            raise ValueError("订单金额必须大于 0")
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute(
+                    "INSERT INTO earning_digital_orders (product_id, external_order_ref, amount, cost, status, note, created_at, updated_at) VALUES (?,?,?,?,'awaiting_payment',?,?,?)",
+                    (product_id, str(data.get("external_order_ref") or "")[:200], amount, cost, str(data.get("note") or "")[:2000], now, now),
+                )
+                order_id = int(cur.lastrowid)
+                self._log_activity(conn, "earning", "◇", f"登记数字商品订单 #{order_id}", f"等待人工确认付款 ¥{amount:.2f}")
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_digital_order(order_id) or {}
+
+    def confirm_digital_order_payment(self, order_id: int, confirmation: str) -> Dict[str, Any]:
+        """由用户明确确认真实到账。这里只改状态，不访问支付平台。"""
+        order = self.get_digital_order(order_id)
+        if not order:
+            raise ValueError("数字商品订单不存在")
+        if order.get("status") != "awaiting_payment":
+            raise ValueError("只有待付款订单可以确认到账")
+        expected = f"确认订单 #{int(order_id)} 已收款"
+        if str(confirmation or "").strip() != expected:
+            raise ValueError(f"请明确输入“{expected}”")
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE earning_digital_orders SET status='paid', payment_confirmed_at=?, updated_at=? WHERE id=?",
+                    (now, now, int(order_id)),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_digital_order(order_id) or {}
+
+    def list_digital_deliveries(self, order_id: Optional[int] = None, include_tokens: bool = False) -> List[Dict[str, Any]]:
+        """令牌只保存哈希；include_tokens 仅为兼容参数，永远不会返回明文令牌。"""
+        del include_tokens
+        conn = self._connect()
+        try:
+            if order_id is None:
+                rows = conn.execute("SELECT * FROM earning_digital_deliveries ORDER BY issued_at DESC, id DESC").fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM earning_digital_deliveries WHERE order_id = ? ORDER BY issued_at DESC, id DESC",
+                    (int(order_id),),
+                ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def issue_digital_delivery(self, order_id: int, expires_hours: int = 72, max_downloads: int = 3) -> Dict[str, Any]:
+        """为已人工确认收款的订单签发一次明文令牌；数据库只保存 SHA-256。"""
+        order = self.get_digital_order(order_id)
+        if not order:
+            raise ValueError("数字商品订单不存在")
+        if order.get("status") not in {"paid", "delivered"}:
+            raise ValueError("只有已人工确认收款的订单才能生成交付令牌")
+        product = order.get("product") or {}
+        resources = [self.get_digital_resource(value) for value in product.get("resource_ids", [])]
+        if not resources or any(not item or item.get("rights_status") != "verified" or item.get("status") != "approved" for item in resources):
+            raise ValueError("商品资源授权状态已变化，暂停交付")
+        hours = max(1, min(24 * 30, int(expires_hours or 72)))
+        downloads = max(1, min(100, int(max_downloads or 3)))
+        token = secrets.token_urlsafe(32)
+        digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        now_dt = datetime.now()
+        expires_at = (now_dt + timedelta(hours=hours)).isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE earning_digital_deliveries SET status='revoked' WHERE order_id=? AND status='active'",
+                    (int(order_id),),
+                )
+                cur = conn.execute(
+                    "INSERT INTO earning_digital_deliveries (order_id, token_hash, expires_at, max_downloads, status, issued_at) VALUES (?,?,?,?,'active',?)",
+                    (int(order_id), digest, expires_at, downloads, now_dt.isoformat()),
+                )
+                delivery_id = int(cur.lastrowid)
+                conn.execute(
+                    "UPDATE earning_digital_orders SET status='delivered', updated_at=? WHERE id=?",
+                    (now_dt.isoformat(), int(order_id)),
+                )
+                self._log_activity(conn, "earning", "▣", f"生成订单 #{order_id} 限时交付令牌", f"{hours} 小时有效 · 最多 {downloads} 次")
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return {
+            "success": True,
+            "delivery_id": delivery_id,
+            "order_id": int(order_id),
+            "token": token,
+            "expires_at": expires_at,
+            "max_downloads": downloads,
+            "resource_manifest": [
+                {"id": int(item["id"]), "title": item["title"], "content_uri": item.get("content_uri", ""), "checksum": item.get("checksum", ""), "version": item.get("version", "")}
+                for item in resources if item
+            ],
+            "warning": "明文令牌只显示这一次；请通过你确认的渠道交给买家。",
+        }
+
+    def redeem_digital_delivery(self, token: str) -> Dict[str, Any]:
+        """验证并消费一次交付令牌，返回已审核资源清单。"""
+        digest = hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute("SELECT * FROM earning_digital_deliveries WHERE token_hash = ?", (digest,)).fetchone()
+                if not row:
+                    return {"success": False, "message": "交付令牌无效"}
+                delivery = dict(row)
+                if delivery.get("status") != "active":
+                    return {"success": False, "message": "交付令牌已失效或撤销"}
+                if str(delivery.get("expires_at") or "") <= now:
+                    conn.execute("UPDATE earning_digital_deliveries SET status='expired' WHERE id=?", (int(delivery["id"]),))
+                    conn.commit()
+                    return {"success": False, "message": "交付令牌已过期"}
+                if int(delivery.get("download_count") or 0) >= int(delivery.get("max_downloads") or 0):
+                    conn.execute("UPDATE earning_digital_deliveries SET status='exhausted' WHERE id=?", (int(delivery["id"]),))
+                    conn.commit()
+                    return {"success": False, "message": "交付令牌使用次数已耗尽"}
+                order = self.get_digital_order(int(delivery["order_id"]))
+                product = (order or {}).get("product") or {}
+                resources = [self.get_digital_resource(value) for value in product.get("resource_ids", [])]
+                if not order or any(not item or item.get("rights_status") != "verified" or item.get("status") != "approved" for item in resources):
+                    return {"success": False, "message": "订单或资源授权状态异常，交付已暂停"}
+                count = int(delivery.get("download_count") or 0) + 1
+                status = "exhausted" if count >= int(delivery.get("max_downloads") or 0) else "active"
+                conn.execute(
+                    "UPDATE earning_digital_deliveries SET download_count=?, status=?, last_accessed_at=? WHERE id=?",
+                    (count, status, now, int(delivery["id"])),
+                )
+                conn.commit()
+                return {
+                    "success": True, "order_id": int(order["id"]), "product": product,
+                    "remaining_downloads": max(0, int(delivery["max_downloads"]) - count),
+                    "resources": [
+                        {"title": item["title"], "content_uri": item.get("content_uri", ""), "checksum": item.get("checksum", ""), "version": item.get("version", "")}
+                        for item in resources if item
+                    ],
+                }
+            finally:
+                conn.close()
+
+    def revoke_digital_delivery(self, delivery_id: int) -> Dict[str, Any]:
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute(
+                    "UPDATE earning_digital_deliveries SET status='revoked', last_accessed_at=? WHERE id=? AND status='active'",
+                    (now, int(delivery_id)),
+                )
+                conn.commit()
+                if cur.rowcount == 0:
+                    raise ValueError("活跃交付令牌不存在")
+            finally:
+                conn.close()
+        self._write_mirror()
+        return {"success": True, "delivery_id": int(delivery_id), "status": "revoked"}
+
     def evaluate_earning_authorization(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """评估动作是否满足策略；只返回决定，不执行动作。"""
         data = data if isinstance(data, dict) else {}
@@ -6683,8 +7281,11 @@ class EarthOnlineStore:
         experiment = experiments.get("automation_tool") or {
             "status": "no_active_experiment", "route_key": "automation_tool", "created": False,
         }
+        product_draft = self.prepare_ready_digital_product_draft()
         actions = ["公开信息同步", "去重与初筛", "收益排序刷新", "安全推进已核验机会"]
         actions.extend(pipeline.get("actions", []))
+        if product_draft.get("created"):
+            actions.append("为已审核数字商品生成闲鱼发布草稿")
         for route, state in experiments.items():
             if state.get("status") == "quest_created":
                 actions.append(f"推进 {route} 收益实验并生成当前委托")
@@ -6699,6 +7300,7 @@ class EarthOnlineStore:
             "experiment": experiment,
             "experiments": experiments,
             "pipeline": pipeline,
+            "digital_product": product_draft,
             "guidance": guidance,
             "actions": actions,
             "requires_confirmation": guidance.get("automation", {}).get("requires_confirmation", []),
@@ -6779,6 +7381,10 @@ class EarthOnlineStore:
     def earning_guidance(self) -> Dict[str, Any]:
         opportunities = self.list_earning_opportunities(limit=200); plans = self.list_earning_plans(); records = self.list_income_records(limit=200); prefs = self.get_earning_preferences(); ranked = []
         offers = self.list_earning_offers(); actions = self.list_earning_actions(limit=100)
+        digital_resources = self.list_digital_resources()
+        digital_products = self.list_digital_products()
+        digital_orders = self.list_digital_orders()
+        digital_deliveries = self.list_digital_deliveries()
         skills = [str(value).lower() for value in prefs.get("skills", [])]; preferred_kinds = [str(value).lower() for value in prefs.get("preferred_kinds", [])]
         for raw in opportunities:
             item = dict(raw); item["scam_flags"] = self._infer_earning_scam_flags(item); hours = float(item.get("hours") or 0); lo = float(item.get("income_min") or 0); hi = float(item.get("income_max") or 0); text = f"{item.get('title', '')} {item.get('description', '')} {item.get('kind', '')}".lower(); item["hourly_estimate"] = round((lo + hi) / 2 / hours, 2) if hours > 0 else 0
@@ -6811,6 +7417,8 @@ class EarthOnlineStore:
         pipeline = {key: sum(1 for item in opportunities if item.get("status") == key) for key in ("inbox", "shortlisted", "applied", "won", "closed")}
         routes = self.earning_routes()
         active_offers = [offer for offer in offers if offer.get("status") == "active"]
+        approved_resources = [resource for resource in digital_resources if resource.get("status") == "approved" and resource.get("rights_status") == "verified"]
+        ready_products = [product for product in digital_products if product.get("status") == "ready"]
         pending_actions = [action for action in actions if action.get("status") == "pending"]
         approved_actions = [action for action in actions if action.get("status") == "approved"]
         profile_ready = bool(prefs.get("skills") or prefs.get("sellable_assets") or active_offers) and float(prefs.get("weekly_hours") or 0) > 0
@@ -6831,25 +7439,30 @@ class EarthOnlineStore:
         return {
             "opportunities": ranked[:30], "plans": plans[:20], "income_records": records[:30], "preferences": prefs,
             "offers": offers[:20], "action_drafts": actions[:50],
+            "digital_resources": digital_resources[:50], "digital_products": digital_products[:30],
+            "digital_orders": digital_orders[:50], "digital_deliveries": digital_deliveries[:50],
             "routes": routes, "profile_ready": profile_ready, "brief": brief, "focus_plan": focus_plan, "next_action": next_step,
             "pipeline": pipeline,
             "totals": {
                 "net_income": net_income, "opportunity_count": len(opportunities),
                 "active_plan_count": len(active_plans), "active_offer_count": len(active_offers),
                 "pending_approval_count": len(pending_actions), "approved_action_count": len(approved_actions),
+                "approved_resource_count": len(approved_resources), "ready_product_count": len(ready_products),
+                "awaiting_payment_count": sum(1 for order in digital_orders if order.get("status") == "awaiting_payment"),
+                "active_delivery_count": sum(1 for delivery in digital_deliveries if delivery.get("status") == "active"),
                 "total_hours": round(total_hours, 2),
                 "effective_hourly_rate": round(net_income / total_hours, 2) if total_hours > 0 else 0,
             },
             "automation": {
-                "automatic": ["公开信息同步", "去重与初筛", "核验机会安全入选", "推进已启动的收益实验", "生成当前站内委托", "站内提醒", "收益复盘"],
-                "requires_confirmation": ["对外发布", "联系客户", "提交申请", "上传资料", "接受订单"],
+                "automatic": ["公开信息同步", "去重与初筛", "核验机会安全入选", "推进已启动的收益实验", "生成当前站内委托", "为已审核数字商品生成闲鱼发布草稿", "站内提醒", "收益复盘"],
+                "requires_confirmation": ["对外发布", "联系客户", "提交申请", "上传资料", "接受订单", "确认付款后交付"],
                 "blocked": ["付款", "转账", "提现", "退款", "自动输入验证码或支付密码"],
             },
             "authorization": {
                 "policy": self.get_earning_authorization_policy(),
                 "audit": self.list_earning_authorization_audit(limit=20),
             },
-            "boundary": "建议不保证收益；外部动作必须逐项审批且当前仍由你人工执行。付款、转账、提现、退款和金融凭据输入不开放给弥娅。",
+            "boundary": "建议不保证收益；资源必须有可核验授权。弥娅可自动整理资源和生成闲鱼草稿，但外部发布、收款确认、交付和交易仍由你人工执行。付款、转账、提现、退款和金融凭据输入不开放给弥娅。",
         }
 
     # ── 汇总 (弥娅/前端一键读取) ────────────────────

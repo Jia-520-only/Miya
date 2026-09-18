@@ -3,6 +3,8 @@ import os
 import pathlib
 import tempfile
 
+import pytest
+
 from core.earth_online_store import EarthOnlineStore
 
 
@@ -1276,3 +1278,38 @@ def test_earth_bridge_delivers_and_remembers(monkeypatch):
     perception, role = memory.stored[0]
     assert role == "assistant" and perception["response"].startswith("[地球online]")
     assert perception["_meta"]["source"] == "earth_online"
+
+
+def test_digital_resource_requires_verified_rights_before_product():
+    """数字商品只能引用授权已核验且审核通过的资源。"""
+    store, _ = _build_store()
+    candidate = store.create_digital_resource({"title": "待核验资源", "license_type": "unknown"})
+    with pytest.raises(ValueError):
+        store.create_digital_product({"title": "商品", "description": "说明", "resource_ids": [candidate["id"]]})
+    verified = store.create_digital_resource({
+        "title": "开放许可资源", "source_url": "https://example.test/license",
+        "license_type": "open_license", "rights_status": "verified", "rights_note": "公开许可证", "status": "approved",
+    })
+    product = store.create_digital_product({"title": "商品", "description": "说明", "resource_ids": [verified["id"]], "status": "ready"})
+    assert product["resource_ids"] == [verified["id"]]
+
+
+def test_digital_order_payment_confirmation_and_expiring_delivery():
+    """订单必须人工确认收款，交付令牌只保存哈希并受次数限制。"""
+    store, _ = _build_store()
+    resource = store.create_digital_resource({
+        "title": "可交付资源", "license_type": "original", "rights_status": "verified", "status": "approved",
+        "content_uri": "https://example.test/file",
+    })
+    product = store.create_digital_product({"title": "商品", "description": "说明", "resource_ids": [resource["id"]], "price": 12, "status": "ready"})
+    order = store.create_digital_order({"product_id": product["id"], "amount": 12})
+    with pytest.raises(ValueError):
+        store.issue_digital_delivery(order["id"])
+    paid = store.confirm_digital_order_payment(order["id"], f"确认订单 #{order['id']} 已收款")
+    assert paid["status"] == "paid"
+    delivery = store.issue_digital_delivery(order["id"], expires_hours=1, max_downloads=1)
+    assert delivery["token"] not in store.export_json()["earning_digital_deliveries"][0]["token_hash"]
+    redeemed = store.redeem_digital_delivery(delivery["token"])
+    assert redeemed["success"] is True and redeemed["remaining_downloads"] == 0
+    exhausted = store.redeem_digital_delivery(delivery["token"])
+    assert exhausted["success"] is False

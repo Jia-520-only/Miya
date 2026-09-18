@@ -1724,6 +1724,58 @@ class EarthOnlineTools:
         except Exception as e:
             return f"读取可售服务失败: {e}"
 
+    async def earth_list_digital_resources(self, status: str = "", rights_status: str = "") -> str:
+        """查看数字资源候选与授权核验状态；只读。"""
+        try:
+            resources = self._get_store().list_digital_resources(status=status, rights_status=rights_status)
+            if not resources:
+                return "数字资源库目前为空。"
+            lines = ["【数字资源库】"]
+            for item in resources[:30]:
+                flags = f" · 风险: {','.join(item.get('risk_flags') or [])}" if item.get("risk_flags") else ""
+                lines.append(f"#{item['id']} [{item['status']}/{item['rights_status']}] {item['title']} · {item['license_type']}{flags}")
+            lines.append("只有来源、许可证和风险都核验通过的资源才能组成可售商品。")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"读取数字资源失败: {e}"
+
+    async def earth_add_digital_resource(self, title: str, source_url: str = "", source_name: str = "", license_type: str = "unknown", rights_note: str = "", content_uri: str = "") -> str:
+        """收录一个公开来源的数字资源候选，不自动下载、不自动认定版权。"""
+        try:
+            item = self._get_store().create_digital_resource({
+                "title": title, "source_url": source_url, "source_name": source_name,
+                "license_type": license_type, "rights_note": rights_note, "content_uri": content_uri,
+            })
+            return f"数字资源候选 #{item['id']} 已收录：{item['title']}。当前状态为待核验，不会自动发布或销售。"
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"收录数字资源失败: {e}"
+
+    async def earth_create_digital_product(self, title: str, description: str, resource_ids: list, price: float = 0, cost_estimate: float = 0, delivery_note: str = "") -> str:
+        """用已核验资源建立数字商品草稿；不发布闲鱼。"""
+        try:
+            item = self._get_store().create_digital_product({
+                "title": title, "description": description, "resource_ids": resource_ids,
+                "price": price, "cost_estimate": cost_estimate, "delivery_note": delivery_note,
+            })
+            return f"数字商品 #{item['id']} 已建立：{item['title']}。请在收益中枢核对后再准备闲鱼发布草稿。"
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"建立数字商品失败: {e}"
+
+    async def earth_prepare_xianyu_listing(self, product_id: int) -> str:
+        """为数字商品生成闲鱼发布草稿；不登录、不发布、不发送。"""
+        try:
+            result = self._get_store().prepare_xianyu_listing(int(product_id))
+            action = result.get("action") or {}
+            return f"闲鱼发布草稿 #{action.get('id')} 已准备：{result.get('product', {}).get('title')}。当前仅为站内草稿，仍需你人工发布。"
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"准备闲鱼草稿失败: {e}"
+
     async def earth_list_earning_actions(self, status: str = "") -> str:
         """查看外部动作草稿与审批状态，不执行动作。"""
         try:
@@ -2984,6 +3036,53 @@ EARTH_TOOLS_SCHEMA: List[Dict[str, Any]] = [
                 },
                 "required": [],
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_list_digital_resources",
+            "description": "查看数字资源候选、来源和授权核验状态；只读，不自动下载或销售",
+            "parameters": {"type": "object", "properties": {"status": {"type": "string"}, "rights_status": {"type": "string"}}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_add_digital_resource",
+            "description": "收录公开来源数字资源候选；不自动下载、不自动认定版权、不发布",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"}, "source_url": {"type": "string"}, "source_name": {"type": "string"},
+                    "license_type": {"type": "string", "enum": ["original", "resale_license", "open_license", "public_domain", "unknown"]},
+                    "rights_note": {"type": "string"}, "content_uri": {"type": "string"},
+                },
+                "required": ["title"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_create_digital_product",
+            "description": "用已授权核验的资源建立数字商品草稿；不发布闲鱼",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"}, "description": {"type": "string"}, "resource_ids": {"type": "array", "items": {"type": "integer"}},
+                    "price": {"type": "number"}, "cost_estimate": {"type": "number"}, "delivery_note": {"type": "string"},
+                },
+                "required": ["title", "description", "resource_ids"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_prepare_xianyu_listing",
+            "description": "为数字商品生成闲鱼发布草稿；不登录、不发布、不发送、不交易",
+            "parameters": {"type": "object", "properties": {"product_id": {"type": "integer"}}, "required": ["product_id"]},
         },
     },
     {

@@ -9,6 +9,9 @@ import EarthAPI, {
   type EarthEarningPreferences,
   type EarthEarningRoute,
   type EarthEarningSource,
+  type EarthDigitalProduct,
+  type EarthDigitalOrder,
+  type EarthDigitalResource,
 } from '@/api/earth'
 
 type WorkspaceTab = 'today' | 'radar' | 'workbench' | 'review' | 'settings'
@@ -65,6 +68,8 @@ const opportunityForm = ref({
 })
 const planForm = ref({ title: '', goal_amount: 100, target_date: '', notes: '' })
 const incomeForm = ref<{ amount: number, cost: number, hours: number, note: string, opportunity_id: number | null }>({ amount: 0, cost: 0, hours: 0, note: '', opportunity_id: null })
+const resourceForm = ref({ title: '', source_url: '', source_name: '', license_type: 'open_license' as EarthDigitalResource['license_type'], rights_note: '', content_uri: '' })
+const orderForm = ref({ product_id: null as number | null, external_order_ref: '', amount: 0, cost: 0, note: '' })
 const actionForm = ref<{
   action_type: EarthEarningActionDraft['action_type'], offer_id: number | null, opportunity_id: number | null,
   target: string, title: string, content: string, amount: number,
@@ -333,6 +338,67 @@ async function runAutomationCycle() {
   finally { workingKey.value = '' }
 }
 
+async function prepareDigitalProduct(product: EarthDigitalProduct) {
+  workingKey.value = `digital-${product.id}`
+  try {
+    const result = await EarthAPI.prepareXianyuListing(product.id)
+    await load()
+    setMessage(result.created ? `已为「${product.title}」生成闲鱼发布草稿；仍需你人工发布` : '该商品已有闲鱼发布草稿')
+  }
+  catch (error: any) { setMessage(error?.response?.data?.detail || '闲鱼草稿准备失败') }
+  finally { workingKey.value = '' }
+}
+
+async function addDigitalResource() {
+  if (!resourceForm.value.title.trim()) return
+  workingKey.value = 'resource-add'
+  try {
+    await EarthAPI.addDigitalResource(resourceForm.value)
+    resourceForm.value = { title: '', source_url: '', source_name: '', license_type: 'open_license', rights_note: '', content_uri: '' }
+    await load(); setMessage('资源候选已收录，等待授权核验')
+  }
+  catch (error: any) { setMessage(error?.response?.data?.detail || '资源收录失败') }
+  finally { workingKey.value = '' }
+}
+
+async function verifyDigitalResource(resource: EarthDigitalResource, verified: boolean) {
+  try {
+    await EarthAPI.updateDigitalResource(resource.id, { rights_status: verified ? 'verified' : 'rejected', status: verified ? 'approved' : 'rejected' })
+    await load(); setMessage(verified ? `已核验「${resource.title}」授权` : `已拒绝「${resource.title}」`)
+  }
+  catch (error: any) { setMessage(error?.response?.data?.detail || '资源审核失败') }
+}
+
+async function addDigitalOrder() {
+  if (!orderForm.value.product_id) return
+  workingKey.value = 'order-add'
+  try {
+    await EarthAPI.addDigitalOrder({ ...orderForm.value, product_id: orderForm.value.product_id })
+    orderForm.value = { product_id: null, external_order_ref: '', amount: 0, cost: 0, note: '' }
+    await load(); setMessage('订单已登记；请核对真实到账后再确认付款')
+  }
+  catch (error: any) { setMessage(error?.response?.data?.detail || '订单登记失败') }
+  finally { workingKey.value = '' }
+}
+
+async function confirmOrder(order: EarthDigitalOrder) {
+  const confirmation = window.prompt(`仅在闲鱼后台确认真实到账后输入：确认订单 #${order.id} 已收款`, `确认订单 #${order.id} 已收款`)
+  if (!confirmation) return
+  try {
+    await EarthAPI.confirmDigitalOrderPayment(order.id, confirmation)
+    await load(); setMessage(`订单 #${order.id} 已标记为已付款；现在可以生成一次性交付令牌`)
+  }
+  catch (error: any) { setMessage(error?.response?.data?.detail || '付款确认失败') }
+}
+
+async function issueDelivery(order: EarthDigitalOrder) {
+  try {
+    const result = await EarthAPI.issueDigitalDelivery(order.id)
+    await load(); window.alert(`交付令牌（只显示这一次）：\n${result.token}\n\n有效至：${result.expires_at}\n请通过你确认的渠道交给买家。`)
+  }
+  catch (error: any) { setMessage(error?.response?.data?.detail || '生成交付令牌失败') }
+}
+
 async function toggleSource(source: EarthEarningSource) {
   try { await EarthAPI.updateEarningSource(source.id, { enabled: !Boolean(source.enabled) }); await load() }
   catch (error: any) { setMessage(error?.response?.data?.detail || '信息源状态更新失败') }
@@ -449,6 +515,30 @@ onMounted(load)
 
       <template v-else-if="activeTab === 'workbench'">
         <section class="section-heading"><div><span class="section-kicker">EXECUTION WORKBENCH</span><h2>执行工坊</h2><p>计划是收入实验，委托板负责每天执行；对外动作进入审批箱，不会自动发送。</p></div><button class="primary-button" :disabled="workingKey === 'first-income'" @click="startFirstIncomeExperiment">{{ workingKey === 'first-income' ? '初始化中…' : '启动首单实验' }}</button></section>
+        <section class="automation-boundary digital-workshop">
+          <div><span>数字资源工坊</span><p>弥娅只会使用授权已核验且审核通过的资源。公开来源不等于拥有转售权。</p><strong>已审核资源 {{ data?.totals?.approved_resource_count || 0 }} · 待发布商品 {{ data?.totals?.ready_product_count || 0 }}</strong></div>
+          <div><span>闲鱼边界</span><p>系统只生成发布草稿，不登录、不发布、不私信、不确认收款，也不执行交易。</p><strong>发布前请你核对授权、价格和交付说明</strong></div>
+        </section>
+        <section v-if="data?.digital_products?.length" class="plan-list digital-products">
+          <article v-for="product in data.digital_products" :key="product.id" class="plan-panel">
+            <header><div><span>数字商品 #{{ product.id }} · {{ product.status }}</span><h3>{{ product.title }}</h3></div><div class="plan-goal"><strong>¥{{ product.price.toFixed(2) }}</strong><small>{{ product.delivery_mode === 'expiring_link' ? '限时链接交付' : product.delivery_mode }}</small></div></header>
+            <p>{{ product.description }}</p>
+            <button v-if="product.status === 'ready'" class="secondary-button" :disabled="workingKey === `digital-${product.id}`" @click="prepareDigitalProduct(product)">{{ workingKey === `digital-${product.id}` ? '准备中…' : '生成闲鱼发布草稿' }}</button>
+            <span v-else class="verification">先完成资源审核</span>
+          </article>
+        </section>
+        <div v-else class="large-empty"><span>▣</span><h3>还没有数字商品</h3><p>先通过弥娅工具或接口收录资源，完成授权核验后再建立商品。</p></div>
+        <details class="utility-drawer"><summary>收录一个资源候选</summary><form class="drawer-form" @submit.prevent="addDigitalResource"><div class="form-row"><label><span>资源名称</span><input v-model="resourceForm.title" required></label><label><span>来源名称</span><input v-model="resourceForm.source_name"></label></div><div class="form-row"><label><span>公开来源 URL</span><input v-model="resourceForm.source_url" type="url"></label><label><span>许可证</span><select v-model="resourceForm.license_type"><option value="original">本人原创</option><option value="resale_license">转售授权</option><option value="open_license">开放许可证</option><option value="public_domain">公版</option><option value="unknown">未知</option></select></label></div><label><span>授权说明</span><textarea v-model="resourceForm.rights_note" placeholder="许可证链接、购买凭证或原创说明"></textarea></label><label><span>内容位置（不会上传）</span><input v-model="resourceForm.content_uri" placeholder="本地路径或你自己的网盘链接"></label><button class="primary-button" :disabled="workingKey === 'resource-add'">{{ workingKey === 'resource-add' ? '收录中…' : '收录并等待审核' }}</button></form></details>
+        <section v-if="data?.digital_resources?.length" class="plan-list digital-products">
+          <article v-for="resource in data.digital_resources" :key="resource.id" class="plan-panel">
+            <header><div><span>资源 #{{ resource.id }} · {{ resource.status }}/{{ resource.rights_status }}</span><h3>{{ resource.title }}</h3></div><span class="verification">{{ resource.license_type }}</span></header>
+            <p>{{ resource.source_name || '手动收录' }} · {{ resource.rights_note || '尚未填写授权说明' }}</p>
+            <div v-if="resource.risk_flags?.length" class="risk-flags"><span v-for="flag in resource.risk_flags" :key="flag">⚠ {{ flag }}</span></div>
+            <div class="approval-actions"><button class="secondary-button" :disabled="resource.rights_status === 'verified'" @click="verifyDigitalResource(resource, true)">授权已核验</button><button class="text-button danger" :disabled="resource.rights_status === 'rejected'" @click="verifyDigitalResource(resource, false)">拒绝使用</button></div>
+          </article>
+        </section>
+        <section v-if="data?.digital_products?.length" class="utility-drawer"><details><summary>登记闲鱼订单（仅人工确认到账）</summary><form class="drawer-form" @submit.prevent="addDigitalOrder"><div class="form-row"><label><span>商品</span><select v-model.number="orderForm.product_id" required><option :value="null">选择商品</option><option v-for="product in data.digital_products" :key="product.id" :value="product.id">{{ product.title }}</option></select></label><label><span>实收金额</span><input v-model.number="orderForm.amount" type="number" min="0.01" step="0.01" required></label><label><span>直接成本</span><input v-model.number="orderForm.cost" type="number" min="0" step="0.01"></label></div><div class="form-row"><label><span>闲鱼订单号</span><input v-model="orderForm.external_order_ref"></label><label><span>备注</span><input v-model="orderForm.note"></label></div><button class="primary-button" :disabled="workingKey === 'order-add'">登记待付款订单</button></form></details></section>
+        <section v-if="data?.digital_orders?.length" class="plan-list digital-products"><article v-for="order in data.digital_orders" :key="order.id" class="plan-panel"><header><div><span>订单 #{{ order.id }} · {{ order.status }}</span><h3>{{ order.product?.title || `商品 #${order.product_id}` }}</h3></div><div class="plan-goal"><strong>¥{{ order.amount.toFixed(2) }}</strong><small>{{ order.external_order_ref || '未填写平台订单号' }}</small></div></header><p>{{ order.note || '请在闲鱼后台核对真实到账后操作。' }}</p><div class="approval-actions"><button v-if="order.status === 'awaiting_payment'" class="secondary-button" @click="confirmOrder(order)">确认已收款</button><button v-if="order.status === 'paid'" class="primary-button" @click="issueDelivery(order)">生成限时交付令牌</button></div></article></section>
         <section class="offer-section">
           <div class="subsection-heading"><div><span class="section-kicker">SELLABLE OFFER</span><h3>可售服务</h3></div><span>{{ data?.totals.active_offer_count || 0 }} 个启用</span></div>
           <div v-if="data?.offers?.length" class="offer-grid">

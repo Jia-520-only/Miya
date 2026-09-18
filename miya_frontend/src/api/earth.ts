@@ -169,13 +169,17 @@ export interface EarthEarningGuidance {
   income_records: EarthIncomeRecord[]
   offers: EarthEarningOffer[]
   action_drafts: EarthEarningActionDraft[]
+  digital_resources: EarthDigitalResource[]
+  digital_products: EarthDigitalProduct[]
+  digital_orders: EarthDigitalOrder[]
+  digital_deliveries: EarthDigitalDelivery[]
   routes: EarthEarningRoute[]
   profile_ready: boolean
   brief: string
   focus_plan?: EarthEarningPlan | null
   next_action?: EarthEarningPlanStep | null
   pipeline: Record<EarthEarningOpportunity['status'], number>
-  totals: { net_income: number, opportunity_count: number, active_plan_count: number, active_offer_count: number, pending_approval_count: number, approved_action_count: number, total_hours: number, effective_hourly_rate: number }
+  totals: { net_income: number, opportunity_count: number, active_plan_count: number, active_offer_count: number, pending_approval_count: number, approved_action_count: number, approved_resource_count?: number, ready_product_count?: number, awaiting_payment_count?: number, active_delivery_count?: number, total_hours: number, effective_hourly_rate: number }
   preferences: EarthEarningPreferences
   automation: { automatic: string[], requires_confirmation: string[], blocked: string[] }
   authorization?: { policy: EarthEarningAuthorizationPolicy, audit: EarthEarningAuthorizationAudit[] }
@@ -254,6 +258,64 @@ export interface EarthEarningSource {
   last_error?: string
   created_at?: string
   updated_at?: string
+}
+
+export interface EarthDigitalResource {
+  id: number
+  title: string
+  source_url: string
+  source_name: string
+  license_type: 'original' | 'resale_license' | 'open_license' | 'public_domain' | 'unknown'
+  rights_status: 'pending' | 'verified' | 'rejected'
+  rights_note: string
+  content_uri: string
+  checksum: string
+  version: string
+  risk_flags: string[]
+  status: 'candidate' | 'approved' | 'rejected' | 'archived'
+  created_at?: string
+  updated_at?: string
+}
+
+export interface EarthDigitalProduct {
+  id: number
+  title: string
+  description: string
+  resource_ids: number[]
+  platform: 'xianyu' | 'manual'
+  price: number
+  cost_estimate: number
+  delivery_mode: 'expiring_link' | string
+  delivery_note: string
+  status: 'draft' | 'ready' | 'paused' | 'retired'
+  created_at?: string
+  updated_at?: string
+}
+
+export interface EarthDigitalOrder {
+  id: number
+  product_id: number
+  external_order_ref: string
+  amount: number
+  cost: number
+  status: 'awaiting_payment' | 'paid' | 'delivered' | 'completed' | 'cancelled' | 'refund_requested' | 'refunded'
+  payment_confirmed_at: string
+  note: string
+  product?: EarthDigitalProduct | null
+  created_at?: string
+  updated_at?: string
+}
+
+export interface EarthDigitalDelivery {
+  id: number
+  order_id: number
+  token_hash: string
+  expires_at: string
+  max_downloads: number
+  download_count: number
+  status: 'active' | 'expired' | 'exhausted' | 'revoked'
+  issued_at: string
+  last_accessed_at: string
 }
 
 export interface EarthRealPlace {
@@ -1211,8 +1273,61 @@ export class EarthApiClient extends ApiClient {
     actions: string[]
     requires_confirmation: string[]
     blocked: string[]
+    digital_product?: { success: boolean, created: boolean, product?: EarthDigitalProduct, action?: EarthEarningActionDraft }
   }> {
     return this.instance.post('/api/earth/earning/automation/run')
+  }
+
+  async digitalResources(params?: { status?: string, rights_status?: string }): Promise<EarthDigitalResource[]> {
+    return this.instance.get('/api/earth/earning/digital-resources', { params })
+  }
+
+  async addDigitalResource(data: Partial<EarthDigitalResource>): Promise<EarthDigitalResource> {
+    return this.instance.post('/api/earth/earning/digital-resources', data)
+  }
+
+  async updateDigitalResource(id: number, data: Partial<EarthDigitalResource>): Promise<EarthDigitalResource> {
+    return this.instance.put(`/api/earth/earning/digital-resources/${id}`, data)
+  }
+
+  async digitalProducts(status = ''): Promise<EarthDigitalProduct[]> {
+    return this.instance.get('/api/earth/earning/digital-products', { params: status ? { status } : undefined })
+  }
+
+  async addDigitalProduct(data: Partial<EarthDigitalProduct>): Promise<EarthDigitalProduct> {
+    return this.instance.post('/api/earth/earning/digital-products', data)
+  }
+
+  async prepareXianyuListing(id: number): Promise<{ success: boolean, created: boolean, product: EarthDigitalProduct, action?: EarthEarningActionDraft, message?: string }> {
+    return this.instance.post(`/api/earth/earning/digital-products/${id}/prepare-xianyu`)
+  }
+
+  async digitalOrders(status = ''): Promise<EarthDigitalOrder[]> {
+    return this.instance.get('/api/earth/earning/digital-orders', { params: status ? { status } : undefined })
+  }
+
+  async addDigitalOrder(data: { product_id: number, external_order_ref?: string, amount?: number, cost?: number, note?: string }): Promise<EarthDigitalOrder> {
+    return this.instance.post('/api/earth/earning/digital-orders', data)
+  }
+
+  async confirmDigitalOrderPayment(id: number, confirmation: string): Promise<EarthDigitalOrder> {
+    return this.instance.post(`/api/earth/earning/digital-orders/${id}/confirm-payment`, { confirmation })
+  }
+
+  async digitalDeliveries(orderId?: number): Promise<EarthDigitalDelivery[]> {
+    return this.instance.get('/api/earth/earning/digital-deliveries', { params: orderId ? { order_id: orderId } : undefined })
+  }
+
+  async issueDigitalDelivery(id: number, expiresHours = 72, maxDownloads = 3): Promise<{ success: boolean, delivery_id: number, order_id: number, token: string, expires_at: string, max_downloads: number, resource_manifest: Array<{ id: number, title: string, content_uri: string, checksum: string, version: string }>, warning: string }> {
+    return this.instance.post(`/api/earth/earning/digital-orders/${id}/deliveries`, { expires_hours: expiresHours, max_downloads: maxDownloads })
+  }
+
+  async redeemDigitalDelivery(token: string): Promise<{ success: boolean, order_id: number, product: EarthDigitalProduct, remaining_downloads: number, resources: Array<{ title: string, content_uri: string, checksum: string, version: string }> }> {
+    return this.instance.post('/api/earth/earning/digital-deliveries/redeem', { token })
+  }
+
+  async revokeDigitalDelivery(id: number): Promise<{ success: boolean, delivery_id: number, status: string }> {
+    return this.instance.post(`/api/earth/earning/digital-deliveries/${id}/revoke`)
   }
 
   async earningRoutes(): Promise<EarthEarningRoute[]> {

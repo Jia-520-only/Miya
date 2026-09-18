@@ -549,6 +549,93 @@ class EarthOnlineRoutes:
             """运行一次不触碰外部账户或资金的收益自动巡检。"""
             return await asyncio.to_thread(self.store.run_earning_automation_cycle)
 
+        # v21: 合法数字资源与商品工坊。所有闲鱼动作仍只生成站内草稿。
+        @self.router.get("/earning/digital-resources")
+        async def digital_resources(status: str = "", rights_status: str = ""):
+            return self.store.list_digital_resources(status=status, rights_status=rights_status)
+
+        @self.router.post("/earning/digital-resources")
+        async def create_digital_resource(request: Dict[str, Any] = None):
+            try:
+                return self.store.create_digital_resource(request or {})
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.put("/earning/digital-resources/{resource_id}")
+        async def update_digital_resource(resource_id: int, request: Dict[str, Any] = None):
+            try:
+                result = self.store.update_digital_resource(resource_id, request or {})
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            if result is None:
+                raise HTTPException(status_code=404, detail="数字资源不存在")
+            return result
+
+        @self.router.get("/earning/digital-products")
+        async def digital_products(status: str = ""):
+            return self.store.list_digital_products(status=status)
+
+        @self.router.post("/earning/digital-products")
+        async def create_digital_product(request: Dict[str, Any] = None):
+            try:
+                return self.store.create_digital_product(request or {})
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.post("/earning/digital-products/{product_id}/prepare-xianyu")
+        async def prepare_xianyu_listing(product_id: int):
+            try:
+                return self.store.prepare_xianyu_listing(product_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.get("/earning/digital-orders")
+        async def digital_orders(status: str = ""):
+            return self.store.list_digital_orders(status=status)
+
+        @self.router.post("/earning/digital-orders")
+        async def create_digital_order(request: Dict[str, Any] = None):
+            try:
+                return self.store.create_digital_order(request or {})
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.post("/earning/digital-orders/{order_id}/confirm-payment")
+        async def confirm_digital_order_payment(order_id: int, request: Dict[str, Any] = None):
+            try:
+                return self.store.confirm_digital_order_payment(order_id, str((request or {}).get("confirmation", "")))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.get("/earning/digital-deliveries")
+        async def digital_deliveries(order_id: Optional[int] = None):
+            return self.store.list_digital_deliveries(order_id=order_id)
+
+        @self.router.post("/earning/digital-orders/{order_id}/deliveries")
+        async def issue_digital_delivery(order_id: int, request: Dict[str, Any] = None):
+            try:
+                payload = request or {}
+                return self.store.issue_digital_delivery(
+                    order_id, expires_hours=int(payload.get("expires_hours", 72) or 72),
+                    max_downloads=int(payload.get("max_downloads", 3) or 3),
+                )
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.post("/earning/digital-deliveries/redeem")
+        async def redeem_digital_delivery(request: Dict[str, Any] = None):
+            result = self.store.redeem_digital_delivery(str((request or {}).get("token", "")))
+            if not result.get("success"):
+                raise HTTPException(status_code=400, detail=result.get("message", "交付失败"))
+            return result
+
+        @self.router.post("/earning/digital-deliveries/{delivery_id}/revoke")
+        async def revoke_digital_delivery(delivery_id: int):
+            try:
+                return self.store.revoke_digital_delivery(delivery_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+
         @self.router.get("/earning/authorization")
         async def earning_authorization_policy():
             return self.store.get_earning_authorization_policy()
