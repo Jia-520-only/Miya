@@ -170,6 +170,13 @@ class PlatformToolsManager:
         "earth_claim_battle_pass",
         "earth_issue_care_commission",
         "earth_redeem_service",
+        # v21: 数字资源工坊（弥娅在任意平台都能整理资源、建立商品草稿）
+        "earth_list_digital_resources",
+        "earth_scout_digital_resources",
+        "earth_stage_delivery_file",
+        "earth_add_digital_resource",
+        "earth_create_digital_product",
+        "earth_prepare_xianyu_listing",
         # v18: 收益中枢站内准备与审批草稿（没有批准、发送或资金动作）
         "earth_earning_brief",
         "earth_create_earning_sprint",
@@ -180,6 +187,21 @@ class PlatformToolsManager:
         "earth_submit_earning_action",
         "earth_approve_earning_action",
         "earth_revoke_earning_action",
+        # v24: 网盘分发中枢（全平台可用：只生成草稿与复盘，不发布）
+        "earth_distribution_report",
+        "earth_list_dist_channels",
+        "earth_list_dist_targets",
+        "earth_list_dist_packages",
+        "earth_list_dist_materials",
+        "earth_upsert_dist_channel",
+        "earth_upsert_dist_target",
+        "earth_create_dist_package",
+        "earth_bind_dist_share",
+        "earth_generate_dist_materials",
+        "earth_promote_dist_material",
+        "earth_mark_dist_material_published",
+        "earth_record_dist_metrics",
+        "earth_run_distribution_cycle",
     ]
 
     # 平台特定工具映射

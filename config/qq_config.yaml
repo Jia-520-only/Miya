@@ -465,6 +465,7 @@ earth_online:
   enabled: true                    # 功能总开关
   database_path: "data/earthonline.db"
   image_dir: "data/earthonline/images"
+  allow_proxy_fake_ip: true        # 代理 fake-ip 模式(Clash 等)放行: 所有域名都被解析到 198.18.x.x，不放开则信息源同步与资源发现全被误判成内网地址。字面内网/本机地址仍然一律拒绝
   initial_currency: 100            # 初始地球币
   level_exp_base: 100              # 每级所需基础经验: level * base
   attrs:
@@ -531,3 +532,86 @@ earth_online:
     quiet_hours: [0, 1, 2, 3, 4, 5, 6]  # 静默小时, 这些时段不巡检
     earning_auto_sync: true        # 自主周期同步公开收益信息源（不执行外部动作）
     earning_sync_interval_minutes: 120  # 收益信息源最低同步间隔
+  earning_scout:                   # 弥娅主动去公开授权源找"可合法转售"的虚拟资源 (v23)
+    enabled: true                  # 总开关: 后台巡检与工具都会读它
+    auto_verify: true              # 只对可确定性判定的 CC0 / 公域自动核验入库
+    max_per_cycle: 2               # 单轮巡检最多新增资源条数 (超额留给下一轮)
+    daily_cap: 12                  # 每日新增上限 (含人工收录, 防止刷爆资源库)
+    per_query: 4                   # 每个检索词最多取回候选条数
+    providers:                     # 数据源 (全部无需 API Key)
+      - openverse                  # Openverse: license=cc0,pdm 过滤的图片
+      - gutenberg                   # Project Gutenberg 官方 OPDS 检索 (公版书)
+      - met_museum                 # 大都会博物馆 Open Access (CC0)
+    queries:                       # 每个数据源的检索词 (最多取前 3 条)
+      openverse:
+        - "vintage botanical illustration"
+        - "public domain vintage poster"
+        - "antique map"
+      gutenberg:
+        - "fairy tales"
+        - "classic literature"
+        - "poetry"
+      met_museum:
+        - "ukiyo-e"
+        - "botanical still life"
+        - "landscape painting"
+  delivery:                        # v23: 自建限时交付链接 (买家拿到的下载页由弥娅自己下发, 不再依赖网盘分享)
+    enabled: true                  # 公开交付页总开关 (关掉后所有交付链接立即失效)
+    allow_external_redirect: true  # 未落到本地交付区的资源允许用来源直链交付 (买家会看到来源链接)
+    max_file_mb: 200               # 单个交付文件大小上限 (准备交付文件时下载)
+    zip_max_mb: 500                # 打包下载总大小上限
+    rate_limit_per_minute: 30      # 单 IP 每分钟请求上限 (公开页是唯一无鉴权入口)
+    base_url: ""                   # 对外前缀, 留空则按请求 Host 推导; 用公网穿透时填穿透地址, 例: https://xxx.trycloudflare.com
+  distribution:                    # v24: 网盘分发中枢 (资源包 → 网盘分享承接 → 内容引流 → 转化回流 → 复盘加码)
+    enabled: true                  # 总开关: 后台巡检与工具都会读它
+    require_verified_rights: true  # 只有授权已核验且已进入可售资源库的资源能进资源包 (合规闸门, 不建议关)
+    auto_generate: true            # 自主巡检时为 ready 状态资源包自动生成投放物料草稿
+    auto_submit: true              # 自动把新物料提交到审批箱 (仍需你批准, 弥娅不会发布)
+    max_materials_per_cycle: 3     # 单轮巡检最多新增物料条数
+    max_submit_per_cycle: 2        # 单轮巡检最多提交审批条数
+    variants_per_target: 1         # 每个投放位默认生成几版文案 (自动巡检用; 工具可显式覆盖)
+    min_impressions_for_verdict: 200  # 复盘判定"加码/停投"所需的最小曝光量
+    min_clicks_for_verdict: 20     # 复盘判定所需的最小点击量
+    report_days: 30                # 分发复盘默认统计天数
+    default_channels:              # 分发平台预置 (首次运行自动入库; 推广链接留空, 由你自己填)
+      - key: quark                 # 例: 夸克网盘拉新
+        name: "夸克网盘"
+        kind: netdisk_cps
+        promo_url: ""              # 你的推广/邀请链接 (从平台官方后台复制)
+        promo_code: ""             # 邀请码或口令
+        settlement_cycle: ""       # 例: T+1 / 月结, 以平台后台为准
+        commission_note: ""        # 佣金口径备注, 例: 新用户首登 X 元 / 开通会员 Y%
+      - key: xunlei
+        name: "迅雷网盘"
+        kind: netdisk_cps
+        promo_url: ""
+        promo_code: ""
+        settlement_cycle: ""
+        commission_note: ""
+      - key: uc
+        name: "UC网盘"
+        kind: netdisk_cps
+        promo_url: ""
+        promo_code: ""
+        settlement_cycle: ""
+        commission_note: ""
+      - key: baidu
+        name: "百度网盘"
+        kind: netdisk_referral
+        promo_url: ""
+        promo_code: ""
+        settlement_cycle: ""
+        commission_note: ""
+      - key: aliyun
+        name: "阿里云盘"
+        kind: netdisk_referral
+        promo_url: ""
+        promo_code: ""
+        settlement_cycle: ""
+        commission_note: ""
+    default_targets: []            # 内容渠道投放位 (只填账号标识与主页, 绝不填密码/Cookie)
+                                   # 例: - platform: xiaohongshu
+                                   #       account_label: "小红书主号"
+                                   #       profile_url: "https://..."
+                                   #       audience_note: "学生党/办公效率人群"
+                                   #       daily_post_limit: 1

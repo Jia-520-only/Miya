@@ -13,13 +13,15 @@ import EarthAPI, {
   type EarthDigitalOrder,
   type EarthDigitalResource,
 } from '@/api/earth'
+import DistributionPanel from './DistributionPanel.vue'
 
-type WorkspaceTab = 'today' | 'radar' | 'workbench' | 'review' | 'settings'
+type WorkspaceTab = 'today' | 'radar' | 'workbench' | 'distribution' | 'review' | 'settings'
 
 const tabs: Array<{ id: WorkspaceTab, label: string, glyph: string }> = [
   { id: 'today', label: '今日', glyph: '◆' },
   { id: 'radar', label: '机会', glyph: '◇' },
   { id: 'workbench', label: '执行', glyph: '▣' },
+  { id: 'distribution', label: '网盘分发', glyph: '☁' },
   { id: 'review', label: '复盘', glyph: '◎' },
   { id: 'settings', label: '设置', glyph: '⚙' },
 ]
@@ -70,6 +72,8 @@ const planForm = ref({ title: '', goal_amount: 100, target_date: '', notes: '' }
 const incomeForm = ref<{ amount: number, cost: number, hours: number, note: string, opportunity_id: number | null }>({ amount: 0, cost: 0, hours: 0, note: '', opportunity_id: null })
 const resourceForm = ref({ title: '', source_url: '', source_name: '', license_type: 'open_license' as EarthDigitalResource['license_type'], rights_note: '', content_uri: '' })
 const orderForm = ref({ product_id: null as number | null, external_order_ref: '', amount: 0, cost: 0, note: '' })
+// v23: 自建交付链接只在签发那一刻可见明文令牌，收起即不再显示
+const lastDelivery = ref<{ url: string, token: string, expires_at: string, max_downloads: number } | null>(null)
 const actionForm = ref<{
   action_type: EarthEarningActionDraft['action_type'], offer_id: number | null, opportunity_id: number | null,
   target: string, title: string, content: string, amount: number,
@@ -361,6 +365,21 @@ async function addDigitalResource() {
   finally { workingKey.value = '' }
 }
 
+async function scoutDigitalResources() {
+  workingKey.value = 'resource-scout'
+  try {
+    const result = await EarthAPI.scoutDigitalResources({ limit: 4 })
+    await load()
+    if (result.skipped && result.message) { setMessage(result.message); return }
+    setMessage(
+      `资源发现完成：新增 ${result.created_count} 条（自动核验 ${result.auto_verified_count} 条 · 待你核验 ${result.pending_count} 条）`
+      + `，跳过重复 ${result.skipped_duplicate_count} 条，拒绝 ${result.blocked_count} 条。只收录 CC0/公版/开放许可。`,
+    )
+  }
+  catch (error: any) { setMessage(error?.response?.data?.detail || '资源发现失败') }
+  finally { workingKey.value = '' }
+}
+
 async function verifyDigitalResource(resource: EarthDigitalResource, verified: boolean) {
   try {
     await EarthAPI.updateDigitalResource(resource.id, { rights_status: verified ? 'verified' : 'rejected', status: verified ? 'approved' : 'rejected' })
@@ -391,12 +410,41 @@ async function confirmOrder(order: EarthDigitalOrder) {
   catch (error: any) { setMessage(error?.response?.data?.detail || '付款确认失败') }
 }
 
+async function stageResource(resource: EarthDigitalResource) {
+  workingKey.value = `stage-${resource.id}`
+  try {
+    const result = await EarthAPI.stageDeliveryFile(resource.id)
+    await load()
+    setMessage(result.staged
+      ? `「${resource.title}」已落到本地交付区（${result.manifest?.filename}）；此后交付由弥娅自己下发，买家看不到来源链接`
+      : '该资源已在本地交付区，无需重新下载')
+  }
+  catch (error: any) { setMessage(error?.response?.data?.detail || '准备交付文件失败') }
+  finally { workingKey.value = '' }
+}
+
 async function issueDelivery(order: EarthDigitalOrder) {
   try {
     const result = await EarthAPI.issueDigitalDelivery(order.id)
-    await load(); window.alert(`交付令牌（只显示这一次）：\n${result.token}\n\n有效至：${result.expires_at}\n请通过你确认的渠道交给买家。`)
+    await load()
+    lastDelivery.value = {
+      url: result.delivery_url || result.delivery_path,
+      token: result.token,
+      expires_at: result.expires_at,
+      max_downloads: result.max_downloads,
+    }
+    setMessage('自建交付链接已生成：复制给买家即可；链接本身就是凭证，请勿公开转发')
   }
-  catch (error: any) { setMessage(error?.response?.data?.detail || '生成交付令牌失败') }
+  catch (error: any) { setMessage(error?.response?.data?.detail || '生成交付链接失败') }
+}
+
+async function copyDeliveryLink() {
+  if (!lastDelivery.value) return
+  try {
+    await navigator.clipboard.writeText(lastDelivery.value.url)
+    setMessage('交付链接已复制到剪贴板')
+  }
+  catch { setMessage('复制失败，请手动选中链接文本') }
 }
 
 async function toggleSource(source: EarthEarningSource) {
@@ -518,6 +566,11 @@ onMounted(load)
         <section class="automation-boundary digital-workshop">
           <div><span>数字资源工坊</span><p>弥娅只会使用授权已核验且审核通过的资源。公开来源不等于拥有转售权。</p><strong>已审核资源 {{ data?.totals?.approved_resource_count || 0 }} · 待发布商品 {{ data?.totals?.ready_product_count || 0 }}</strong></div>
           <div><span>闲鱼边界</span><p>系统只生成发布草稿，不登录、不发布、不私信、不确认收款，也不执行交易。</p><strong>发布前请你核对授权、价格和交付说明</strong></div>
+          <div>
+            <span>让弥娅去找资源</span>
+            <p>去 Openverse / Project Gutenberg / 大都会博物馆等公开授权源检索，只收录 CC0、公有领域和开放许可；非商业许可与免版税素材库原样转售一律拒绝。</p>
+            <button class="secondary-button" type="button" :disabled="workingKey === 'resource-scout'" @click="scoutDigitalResources">{{ workingKey === 'resource-scout' ? '寻找中…' : '主动寻找可合法转售的资源' }}</button>
+          </div>
         </section>
         <section v-if="data?.digital_products?.length" class="plan-list digital-products">
           <article v-for="product in data.digital_products" :key="product.id" class="plan-panel">
@@ -534,11 +587,34 @@ onMounted(load)
             <header><div><span>资源 #{{ resource.id }} · {{ resource.status }}/{{ resource.rights_status }}</span><h3>{{ resource.title }}</h3></div><span class="verification">{{ resource.license_type }}</span></header>
             <p>{{ resource.source_name || '手动收录' }} · {{ resource.rights_note || '尚未填写授权说明' }}</p>
             <div v-if="resource.risk_flags?.length" class="risk-flags"><span v-for="flag in resource.risk_flags" :key="flag">⚠ {{ flag }}</span></div>
-            <div class="approval-actions"><button class="secondary-button" :disabled="resource.rights_status === 'verified'" @click="verifyDigitalResource(resource, true)">授权已核验</button><button class="text-button danger" :disabled="resource.rights_status === 'rejected'" @click="verifyDigitalResource(resource, false)">拒绝使用</button></div>
+            <div class="approval-actions">
+              <button class="secondary-button" :disabled="resource.rights_status === 'verified'" @click="verifyDigitalResource(resource, true)">授权已核验</button>
+              <button class="text-button danger" :disabled="resource.rights_status === 'rejected'" @click="verifyDigitalResource(resource, false)">拒绝使用</button>
+              <button
+                v-if="resource.rights_status === 'verified' && resource.status === 'approved'"
+                class="secondary-button"
+                :disabled="workingKey === `stage-${resource.id}`"
+                @click="stageResource(resource)"
+              >{{ resource.content_uri?.startsWith('delivery://') ? '✓ 交付区已就绪' : (workingKey === `stage-${resource.id}` ? '下载中…' : '准备本地交付文件') }}</button>
+            </div>
           </article>
         </section>
         <section v-if="data?.digital_products?.length" class="utility-drawer"><details><summary>登记闲鱼订单（仅人工确认到账）</summary><form class="drawer-form" @submit.prevent="addDigitalOrder"><div class="form-row"><label><span>商品</span><select v-model.number="orderForm.product_id" required><option :value="null">选择商品</option><option v-for="product in data.digital_products" :key="product.id" :value="product.id">{{ product.title }}</option></select></label><label><span>实收金额</span><input v-model.number="orderForm.amount" type="number" min="0.01" step="0.01" required></label><label><span>直接成本</span><input v-model.number="orderForm.cost" type="number" min="0" step="0.01"></label></div><div class="form-row"><label><span>闲鱼订单号</span><input v-model="orderForm.external_order_ref"></label><label><span>备注</span><input v-model="orderForm.note"></label></div><button class="primary-button" :disabled="workingKey === 'order-add'">登记待付款订单</button></form></details></section>
-        <section v-if="data?.digital_orders?.length" class="plan-list digital-products"><article v-for="order in data.digital_orders" :key="order.id" class="plan-panel"><header><div><span>订单 #{{ order.id }} · {{ order.status }}</span><h3>{{ order.product?.title || `商品 #${order.product_id}` }}</h3></div><div class="plan-goal"><strong>¥{{ order.amount.toFixed(2) }}</strong><small>{{ order.external_order_ref || '未填写平台订单号' }}</small></div></header><p>{{ order.note || '请在闲鱼后台核对真实到账后操作。' }}</p><div class="approval-actions"><button v-if="order.status === 'awaiting_payment'" class="secondary-button" @click="confirmOrder(order)">确认已收款</button><button v-if="order.status === 'paid'" class="primary-button" @click="issueDelivery(order)">生成限时交付令牌</button></div></article></section>
+        <section v-if="lastDelivery" class="automation-boundary digital-workshop">
+          <div>
+            <span>交付链接已生成（只显示这一次）</span>
+            <p>把这条链接发给买家即可，下载页由弥娅自己下发，不再经过网盘。链接本身就是凭证，请勿公开转发。</p>
+            <strong>有效至 {{ lastDelivery.expires_at.slice(0, 16).replace('T', ' ') }} · 剩余次数 {{ lastDelivery.max_downloads }}</strong>
+          </div>
+          <div>
+            <code class="delivery-link">{{ lastDelivery.url }}</code>
+            <div class="approval-actions">
+              <button class="primary-button" type="button" @click="copyDeliveryLink">复制交付链接</button>
+              <button class="text-button" type="button" @click="lastDelivery = null">收起</button>
+            </div>
+          </div>
+        </section>
+        <section v-if="data?.digital_orders?.length" class="plan-list digital-products"><article v-for="order in data.digital_orders" :key="order.id" class="plan-panel"><header><div><span>订单 #{{ order.id }} · {{ order.status }}</span><h3>{{ order.product?.title || `商品 #${order.product_id}` }}</h3></div><div class="plan-goal"><strong>¥{{ order.amount.toFixed(2) }}</strong><small>{{ order.external_order_ref || '未填写平台订单号' }}</small></div></header><p>{{ order.note || '请在闲鱼后台核对真实到账后操作。' }}</p><div class="approval-actions"><button v-if="order.status === 'awaiting_payment'" class="secondary-button" @click="confirmOrder(order)">确认已收款</button><button v-if="order.status === 'paid'" class="primary-button" @click="issueDelivery(order)">生成自建交付链接</button></div></article></section>
         <section class="offer-section">
           <div class="subsection-heading"><div><span class="section-kicker">SELLABLE OFFER</span><h3>可售服务</h3></div><span>{{ data?.totals.active_offer_count || 0 }} 个启用</span></div>
           <div v-if="data?.offers?.length" class="offer-grid">
@@ -573,6 +649,10 @@ onMounted(load)
         <details class="utility-drawer"><summary>建立自定义收益计划</summary><form class="drawer-form" @submit.prevent="addPlan"><label><span>计划名称</span><input v-model="planForm.title" required></label><div class="form-row"><label><span>目标金额</span><input v-model.number="planForm.goal_amount" type="number" min="0"></label><label><span>目标日期</span><input v-model="planForm.target_date" type="date"></label></div><label><span>说明</span><textarea v-model="planForm.notes"></textarea></label><button class="primary-button">建立计划</button></form></details>
       </template>
 
+      <template v-else-if="activeTab === 'distribution'">
+        <DistributionPanel />
+      </template>
+
       <template v-else-if="activeTab === 'review'">
         <section class="section-heading"><div><span class="section-kicker">REAL RESULTS</span><h2>收益复盘</h2><p>只记录真实到账、真实成本和实际投入时间，让下一轮推荐越来越准确。</p></div></section>
         <section class="review-layout"><form class="income-form" @submit.prevent="recordIncome"><h3>记录一笔真实收入</h3><div class="money-input"><span>¥</span><input v-model.number="incomeForm.amount" type="number" min="0.01" step="0.01" placeholder="0.00" required></div><div class="form-row"><label><span>直接成本</span><input v-model.number="incomeForm.cost" type="number" min="0" step="0.01"></label><label><span>实际耗时</span><div class="input-unit"><input v-model.number="incomeForm.hours" type="number" min="0" step="0.25"><em>小时</em></div></label></div><label><span>关联机会</span><select v-model.number="incomeForm.opportunity_id"><option :value="null">不关联机会</option><option v-for="item in data?.opportunities" :key="item.id" :value="item.id">{{ item.title }}</option></select></label><label><span>备注</span><input v-model="incomeForm.note" placeholder="平台、项目、客户或到账方式"></label><button class="primary-button">记入真实收益</button></form><div class="result-ledger"><header><h3>最近记录</h3><span>净收入 = 收入 - 直接成本</span></header><div v-if="data?.income_records?.length"><div v-for="record in data.income_records" :key="record.id" class="ledger-row"><div><strong>¥{{ (record.amount - record.cost).toFixed(2) }}</strong><span>净收入</span></div><p>{{ record.note || '未填写备注' }}</p><small>{{ record.recorded_at?.slice(0, 10) }} · {{ record.hours }}h · 成本 ¥{{ record.cost }}</small></div></div><div v-else class="empty-state"><b>还没有真实收入记录</b><p>第一次到账后再来这里。零收入不需要为了“完成任务”而记录。</p></div></div></section>
@@ -597,4 +677,5 @@ onMounted(load)
 .offer-section,.approval-section{margin:0 0 .9rem}.subsection-heading{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:.55rem}.subsection-heading h3{margin:.2rem 0 0;font-size:.9rem}.subsection-heading>span{font-size:.58rem;color:rgba(238,245,244,.42)}.offer-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}.offer-card{border:1px solid var(--line);background:rgba(9,20,28,.58);padding:.9rem}.offer-card header{display:flex;justify-content:space-between;gap:1rem}.offer-card header span,.offer-card small{font-size:.56rem;color:rgba(238,245,244,.42)}.offer-card h3{margin:.2rem 0;font-size:.88rem}.offer-card header strong{color:var(--gold);font-size:1.15rem}.offer-card>p{font-size:.68rem;color:rgba(238,245,244,.58);line-height:1.5}.offer-card dl{margin:.7rem 0}.offer-card dt{font-size:.56rem;color:var(--earth-accent-light,#a2f5ee)}.offer-card dd{margin:.18rem 0 .55rem;font-size:.65rem;color:rgba(238,245,244,.55);line-height:1.5}.approval-section{margin-top:1.2rem}.boundary-note{padding:.65rem .75rem;border-left:2px solid var(--gold);background:rgba(232,213,163,.06);color:rgba(238,245,244,.62);font-size:.65rem;line-height:1.55}.approval-list{border-top:1px solid var(--line)}.approval-row{display:grid;grid-template-columns:minmax(0,1fr) 145px;gap:.8rem;padding:.8rem .25rem;border-bottom:1px solid var(--line)}.approval-main header{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}.approval-main header strong{font-size:.75rem}.approval-main header small{color:rgba(238,245,244,.4);font-size:.56rem}.approval-main p{white-space:pre-wrap;margin:.45rem 0;color:rgba(238,245,244,.62);font-size:.66rem;line-height:1.55}.approval-main code{display:block;overflow:hidden;text-overflow:ellipsis;color:rgba(162,245,238,.5);font-size:.55rem}.approval-status{padding:.15rem .35rem;border:1px solid rgba(238,245,244,.16);font-size:.55rem}.approval-status.pending{color:var(--gold);border-color:rgba(232,213,163,.35)}.approval-status.approved{color:var(--green);border-color:rgba(159,227,192,.35)}.approval-status.revoked,.approval-status.expired{color:var(--red)}.approval-actions{display:flex;flex-direction:column;justify-content:center;gap:.35rem}.text-button.danger{color:var(--red)}.automation-boundary{grid-template-columns:repeat(3,1fr)}
 @media(max-width:980px){.route-grid{grid-template-columns:repeat(2,1fr)}.today-layout,.review-layout,.settings-layout{grid-template-columns:1fr}.onboarding-band{grid-template-columns:1fr}.opportunity-row{grid-template-columns:48px minmax(0,1fr)}.opportunity-actions{grid-column:2;flex-direction:row;flex-wrap:wrap}.opportunity-actions select{width:auto}.ledger-row{grid-template-columns:90px 1fr}.ledger-row small{grid-column:2}.automation-boundary{grid-template-columns:1fr}.automation-boundary div+div{border-left:0;border-top:1px solid var(--line)}}
 @media(max-width:700px){.earning-header{padding:1rem .8rem .7rem}.workspace{padding:.8rem .8rem 2rem}.workspace-tabs{padding:0 .35rem}.workspace-tabs button{flex:1;padding:0 .2rem}.workspace-tabs button span{display:none}.metrics{grid-template-columns:1fr 1fr}.metrics div:nth-child(2){border-right:0}.metrics div:nth-child(-n+2){border-bottom:1px solid var(--line)}.safety-strip{align-items:flex-start;flex-wrap:wrap}.safety-copy{flex:1}.safety-boundary{order:3;width:100%;margin-left:0;grid-template-columns:auto 1fr}.safety-strip>.text-button{margin-left:auto}.route-grid,.offer-grid{grid-template-columns:1fr}.form-row{flex-wrap:wrap}.form-row>label{min-width:140px}.section-heading,.radar-heading{flex-direction:column}.heading-actions{width:100%;flex-wrap:wrap}.heading-actions select,.heading-actions button{flex:1}.pipeline-strip{grid-template-columns:repeat(5,minmax(56px,1fr));overflow:auto}.plan-panel header{flex-direction:column}.plan-goal{text-align:left}.step-row{grid-template-columns:26px minmax(0,1fr)}.step-row>.text-button{grid-column:2;text-align:left;padding-left:0}.source-form{grid-template-columns:1fr}.approval-row{grid-template-columns:1fr}.approval-actions{flex-direction:row;flex-wrap:wrap;justify-content:flex-start}.title-line{align-items:flex-start;flex-direction:column;gap:.15rem}.assist-state{margin-bottom:.3rem}}
+.delivery-link{display:block;margin:.5rem 0;padding:.5rem .6rem;border:1px solid var(--line);background:rgba(120,207,209,.06);color:var(--earth-accent-light,#a2f5ee);font-size:.6rem;word-break:break-all}
 </style>

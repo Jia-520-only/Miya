@@ -2409,6 +2409,90 @@
             "story_type": "剧情类型分布",
             "checkin_card": "签到足迹",
             "achievement_card": "成就进度"
+        },
+        "distribution": {
+            "templates": {
+                "xiaohongshu": {
+                    "label": "小红书",
+                    "hooks": ["挖到宝了", "真心推荐", "别再一个个找了", "整理到凌晨的成果"],
+                    "title": "{hook}｜{topic}，{resource_count} 份一次给全",
+                    "body": "{hook} 🥹\n\n最近一直在整理「{topic}」，终于成型了：\n{resource_list}\n\n适合{audience}，拿到就能直接用，不用再东拼西凑。\n\n{share_hint}\n\n{topic}相关的问题也可以在这里问我～",
+                    "cta": "想要的话评论区留「{keyword}」，我看到就回。",
+                    "tags": ["#{keyword}", "#资源分享", "#效率工具", "#干货分享", "#自我提升"]
+                },
+                "zhihu": {
+                    "label": "知乎",
+                    "hooks": ["先把结论放前面", "这可能是最省时间的一份整理", "很多人卡在这一步"],
+                    "title": "{topic}：{resource_count} 份资料的整理思路与清单",
+                    "body": "{hook}。\n\n关于「{topic}」，我把能直接用的部分按场景重新梳理了一遍：\n{resource_list}\n\n为什么值得整理成一份：{share_note}\n\n适合{audience}。需要说明的是，这些资源适合解决通用问题，具体场景仍要自己判断。\n\n{share_hint}",
+                    "cta": "需要清单的话在评论区说明你的用途，我会按场景补充。",
+                    "tags": ["{keyword}", "资源整理", "效率", "经验分享"]
+                },
+                "tieba": {
+                    "label": "百度贴吧",
+                    "hooks": ["整理了一份", "分享一份自用清单", "有需要的自取"],
+                    "title": "【分享】{topic}，共 {resource_count} 份",
+                    "body": "{hook}，把「{topic}」整理好了：\n{resource_list}\n\n{share_hint}\n\n有需要的自取，用得上就好。",
+                    "cta": "需要的回帖留「{keyword}」。",
+                    "tags": ["{keyword}", "资源分享"]
+                },
+                "bilibili": {
+                    "label": "B站",
+                    "hooks": ["这期把资料全放出来了", "花了两天整理", "一条视频讲清"],
+                    "title": "{topic}｜{resource_count} 份资料一次讲清（含清单）",
+                    "body": "这期讲「{topic}」。\n\n视频里提到的资料我全部整理好了：\n{resource_list}\n\n{share_hint}\n\n简介和评论区都会放获取方式，适合{audience}。",
+                    "cta": "简介区自取，需要的扣「{keyword}」。",
+                    "tags": ["{keyword}", "资料分享", "干货", "学习"]
+                },
+                "douyin": {
+                    "label": "抖音",
+                    "hooks": ["直接说重点", "别划走", "这份清单能省你很多时间"],
+                    "title": "{topic}｜{resource_count} 份，拿走不谢",
+                    "body": "{hook}。\n\n「{topic}」我整理完了，一共 {resource_count} 份：\n{resource_list}\n\n{share_hint}",
+                    "cta": "评论区扣「{keyword}」，我发你。",
+                    "tags": ["#{keyword}", "#资源分享", "#干货"]
+                },
+                "kuaishou": {
+                    "label": "快手",
+                    "hooks": ["老铁们", "整了份实用的", "直接上干货"],
+                    "title": "{topic}，{resource_count} 份整理好了",
+                    "body": "{hook}，把「{topic}」整理成 {resource_count} 份：\n{resource_list}\n\n{share_hint}",
+                    "cta": "需要的评论区说一声。",
+                    "tags": ["{keyword}", "干货分享"]
+                },
+                "weibo": {
+                    "label": "微博",
+                    "hooks": ["整理好了", "转需", "分享一份"],
+                    "title": "{topic}｜{resource_count} 份资料整理",
+                    "body": "{hook}：「{topic}」共 {resource_count} 份。\n{resource_list}\n\n{share_hint}",
+                    "cta": "转需，评论区留「{keyword}」。",
+                    "tags": ["{keyword}", "资源分享"]
+                },
+                "gongzhonghao": {
+                    "label": "公众号",
+                    "hooks": ["这周整理了", "读者一直问的", "一次性讲清"],
+                    "title": "{topic}：{resource_count} 份资料与使用建议",
+                    "body": "{hook}「{topic}」。\n\n清单如下：\n{resource_list}\n\n适合{audience}。{share_note}\n\n{share_hint}",
+                    "cta": "后台回复「{keyword}」获取。",
+                    "tags": ["{keyword}", "资源整理"]
+                },
+                "xianyu": {
+                    "label": "闲鱼",
+                    "hooks": ["自用整理", "出一份", "整理好的"],
+                    "title": "{topic}（{resource_count} 份，含清单）",
+                    "body": "{hook}「{topic}」，共 {resource_count} 份：\n{resource_list}\n\n适合{audience}。\n\n{share_note}",
+                    "cta": "拍下后我直接发你完整资源包。",
+                    "tags": ["{keyword}"]
+                },
+                "other": {
+                    "label": "其他渠道",
+                    "hooks": ["整理了一份", "分享一份清单"],
+                    "title": "{hook}：{topic}（{resource_count} 份）",
+                    "body": "{hook}「{topic}」。\n\n{resource_list}\n\n适合{audience}。\n\n{share_hint}",
+                    "cta": "需要的话留言「{keyword}」。",
+                    "tags": ["{keyword}", "资源分享"]
+                }
+            }
         }
     }
 }

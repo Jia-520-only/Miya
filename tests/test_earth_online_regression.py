@@ -14,6 +14,26 @@ def _build_store():
     return EarthOnlineStore(db_path=db_path), temp_dir
 
 
+@pytest.fixture(autouse=True)
+def _stub_resource_scout(monkeypatch):
+    """收益自动巡检会调用开放许可资源发现器 (真实联网)。
+
+    这个回归文件全部跑在临时库上且不联网，所以统一替换成空结果；
+    发现器本身的规则与入库行为在 tests/test_earth_resource_scout.py 里单独覆盖。
+    """
+    monkeypatch.setattr(
+        EarthOnlineStore,
+        "scout_digital_resources",
+        lambda self, query="", provider="", limit=0, respect_limits=True: {
+            "success": True, "enabled": True, "skipped": "test_stub",
+            "created": [], "created_count": 0, "auto_verified_count": 0,
+            "pending_count": 0, "blocked": [], "blocked_count": 0,
+            "skipped_duplicate_count": 0, "skipped_license_count": 0,
+            "errors": [], "providers": {}, "scope": "", "daily_used": 0, "daily_cap": 0,
+        },
+    )
+
+
 def test_life_hub_exposes_reality_and_operator_status():
     store, temp_dir = _build_store()
     os.makedirs(store.data_dir, exist_ok=True)
@@ -884,6 +904,8 @@ def test_earning_automation_cycle_is_read_only_and_returns_safety_boundary():
     assert "公开信息同步" in result["actions"]
     assert "付款" in result["blocked"]
     assert result["guidance"]["action_drafts"] == []
+    # 资源发现器跑在同一轮巡检里，但对外动作仍然只有草稿。
+    assert result["resource_scout"]["created_count"] == 0
 
 
 def test_earning_automation_advances_started_automation_experiment_idempotently():
@@ -1075,6 +1097,47 @@ def test_public_feed_resolution_rejects_private_dns_answers(monkeypatch):
     )
     with pytest.raises(ValueError, match="内网"):
         EarthOnlineStore._fetch_public_feed("https://example.com/feed.xml")
+
+
+def test_proxy_fake_ip_range_is_only_allowed_when_explicitly_enabled(monkeypatch):
+    """代理 fake-ip 模式 (198.18.0.0/15) 必须显式开启才放行，字面内网地址永远拒绝。"""
+    import pytest
+
+    monkeypatch.setattr(
+        "core.earth_online_store.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [(2, 1, 6, "", ("198.18.0.56", 443))],
+    )
+    target = "https://api.openverse.org/v1/images/"
+
+    monkeypatch.setattr(EarthOnlineStore, "_proxy_fake_ip_allowed", staticmethod(lambda: False))
+    with pytest.raises(ValueError, match="内网"):
+        EarthOnlineStore._validate_public_feed_resolution(target)
+
+    monkeypatch.setattr(EarthOnlineStore, "_proxy_fake_ip_allowed", staticmethod(lambda: True))
+    assert EarthOnlineStore._validate_public_feed_resolution(target) == target
+
+    # 开关打开也不代表能访问字面内网/本机地址
+    with pytest.raises(ValueError):
+        EarthOnlineStore._public_feed_url("http://192.168.1.10/feed.xml")
+    with pytest.raises(ValueError):
+        EarthOnlineStore._public_feed_url("http://localhost:8000/feed.xml")
+
+
+def test_trusted_hosts_skip_dns_check_only_for_builtin_apis(monkeypatch):
+    """只有代码内置的公开 API 域名能跳过 DNS 私网校验，其他域名仍然走完整校验。"""
+    import pytest
+
+    monkeypatch.setattr(
+        "core.earth_online_store.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [(2, 1, 6, "", ("198.18.0.56", 443))],
+    )
+    monkeypatch.setattr(EarthOnlineStore, "_proxy_fake_ip_allowed", staticmethod(lambda: False))
+
+    with pytest.raises(ValueError, match="内网"):
+        EarthOnlineStore._validate_public_fetch_target("https://example.com/feed.xml", ())
+    assert EarthOnlineStore._validate_public_fetch_target(
+        "https://api.openverse.org/v1/images/", ("api.openverse.org",)
+    )
 
 
 # ── v17.2: 关怀委托引擎 (弥娅主动用委托介入生活) ──

@@ -11,6 +11,7 @@
 所有工具均为 async，返回给 LLM 的字符串描述。
 """
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -1724,6 +1725,62 @@ class EarthOnlineTools:
         except Exception as e:
             return f"读取可售服务失败: {e}"
 
+    async def earth_scout_digital_resources(self, query: str = "", provider: str = "", limit: int = 0) -> str:
+        """主动去公开授权源寻找可合法转售的虚拟资源，并把授权可确定性判定的部分自动核验入库。"""
+        try:
+            result = await asyncio.to_thread(
+                self._get_store().scout_digital_resources,
+                str(query or ""),
+                str(provider or ""),
+                int(limit or 0),
+                False,
+            )
+            if not result.get("success") and result.get("message"):
+                return str(result["message"])
+            lines = [
+                "【开放许可资源发现】"
+                f"新增 {result.get('created_count', 0)} 条 · "
+                f"自动核验 {result.get('auto_verified_count', 0)} 条 · "
+                f"待你核验 {result.get('pending_count', 0)} 条 · "
+                f"跳过重复 {result.get('skipped_duplicate_count', 0)} 条 · "
+                f"拒绝 {result.get('blocked_count', 0)} 条"
+            ]
+            for item in (result.get("created") or [])[:8]:
+                lines.append(
+                    f"#{item.get('id')} [{item.get('status')}/{item.get('rights_status')}] "
+                    f"{item.get('title')} · {item.get('license_type')}"
+                )
+            if not result.get("created"):
+                lines.append("本轮没有找到新的开放许可资源。")
+            for item in (result.get("blocked") or [])[:3]:
+                lines.append(f"已拒绝: {item.get('title')}（{item.get('reason')}）")
+            errors = result.get("errors") or []
+            if errors:
+                lines.append(f"{len(errors)} 个数据源本轮取回失败，已跳过，不影响其他来源。")
+            lines.append(str(result.get("scope") or ""))
+            lines.append("下一步可以用已核验的资源建立数字商品草稿，再生成闲鱼发布草稿；对外发布仍然必须由佳本人确认。")
+            return "\n".join(line for line in lines if line)
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"资源发现失败: {e}"
+
+    async def earth_stage_delivery_file(self, resource_id: int) -> str:
+        """把资源的外部直链下载到本地交付区，之后买家拿到的下载链接只指向弥娅自己。"""
+        try:
+            result = await asyncio.to_thread(self._get_store().stage_delivery_file, int(resource_id))
+            manifest = result.get("manifest") or {}
+            if not result.get("staged"):
+                return f"{result.get('message')}（{manifest.get('filename') or ''}）"
+            return (
+                f"资源 #{int(resource_id)} 已落到本地交付区：{manifest.get('filename')} · "
+                f"{manifest.get('size', 0)} 字节。此后交付由弥娅自己下发，买家不会再看到第三方网盘或来源链接。"
+            )
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"准备交付文件失败: {e}"
+
     async def earth_list_digital_resources(self, status: str = "", rights_status: str = "") -> str:
         """查看数字资源候选与授权核验状态；只读。"""
         try:
@@ -1864,6 +1921,431 @@ class EarthOnlineTools:
             return str(e)
         except Exception as e:
             return f"撤销审批草稿失败: {e}"
+
+    # ── v24: 网盘分发中枢 ────────────────────────────
+    # 边界: 只做站内登记、按渠道生成草稿与数据复盘；不发布、不发送、
+    # 不登录平台、不保存账号密码/Cookie。对外动作仍走逐次审批草稿。
+
+    @staticmethod
+    def _dist_int_list(value: Any) -> List[int]:
+        """把 "1,2,3" 或 [1,2,3] 统一转成 int 列表 (空值返回 [])。"""
+        raw = value if isinstance(value, (list, tuple)) else str(value or "").replace("，", ",").split(",")
+        result: List[int] = []
+        for item in raw:
+            text = str(item).strip()
+            if text.isdigit() and int(text) not in result:
+                result.append(int(text))
+        return result
+
+    @staticmethod
+    def _dist_text_list(value: Any) -> List[str]:
+        """把 "网盘,资料" 或 ["网盘","资料"] 统一转成字符串列表。"""
+        raw = value if isinstance(value, (list, tuple)) else str(value or "").replace("，", ",").split(",")
+        return [str(item).strip() for item in raw if str(item).strip()]
+
+    async def earth_distribution_report(self, days: int = 0) -> str:
+        """查看网盘分发复盘 (漏斗/逐物料判定/渠道排行/合规检查/下一步)。只读。"""
+        try:
+            report = self._get_store().distribution_report(int(days or 0))
+            funnel = report["funnel"]
+            counts = report["counts"]
+            lines = [
+                "【网盘分发复盘】",
+                f"窗口 {report['window_days']} 天 · 数据行 {counts['metric_rows']}",
+                (
+                    f"漏斗: 曝光 {funnel['impressions']} → 点击 {funnel['clicks']} → 转存 {funnel['transfers']}"
+                    f" → 拉新 {funnel['new_users']} → 会员单 {funnel['vip_orders']} (收藏 {funnel['saves']})"
+                ),
+                (
+                    f"收入 ¥{funnel['revenue']:.2f} · 成本 ¥{funnel['cost']:.2f} · 净额 ¥{funnel['net']:.2f}"
+                    f" · CTR {funnel['ctr']}% · 转存率 {funnel['transfer_rate']}%"
+                    f" · 拉新率 {funnel['new_user_rate']}% · 千次曝光收入 ¥{funnel['revenue_per_1k']:.2f}"
+                ),
+                (
+                    f"资源包 {counts['packages']} (可分发 {counts['ready_packages']}) · 物料 {counts['materials']}"
+                    f" (待审批 {counts['pending_approval']} / 已批准 {counts['approved']} / 已发布 {counts['published']})"
+                ),
+            ]
+            lines.append("逐物料判定:")
+            if report["materials"]:
+                for item in report["materials"][:10]:
+                    flags = f" · 风险自检: {'、'.join(item.get('risk_flags') or [])}" if item.get("risk_flags") else ""
+                    lines.append(
+                        f"- #{item['material_id']} [{item['platform']}/{item['status']}] {item['title'][:40]}"
+                        f" → {item['verdict']}: {item['advice']}"
+                        f" (曝光 {item['impressions']} · 点击 {item['clicks']} · 转存 {item['transfers']}"
+                        f" · 拉新 {item['new_users']} · 收入 ¥{item['revenue']:.2f}){flags}"
+                    )
+            else:
+                lines.append("- 窗口内还没有物料级转化数据。")
+            lines.append("渠道排行:")
+            if report["channels"]:
+                for item in report["channels"][:8]:
+                    lines.append(
+                        f"- {item['channel_name'] or ('平台 #' + str(item['channel_id']))}"
+                        f" · 曝光 {item['impressions']} / 点击 {item['clicks']} / 转存 {item['transfers']}"
+                        f" / 拉新 {item['new_users']} · 收入 ¥{item['revenue']:.2f} · 净额 ¥{item['net']:.2f}"
+                    )
+            elif report["platforms"]:
+                for item in report["platforms"][:8]:
+                    lines.append(
+                        f"- {item['platform']} · 曝光 {item['impressions']} / 点击 {item['clicks']}"
+                        f" / 转存 {item['transfers']} / 拉新 {item['new_users']} · 收入 ¥{item['revenue']:.2f}"
+                    )
+            else:
+                lines.append("- 窗口内还没有渠道转化数据。")
+            lines.append("合规检查:")
+            for item in report["compliance"]:
+                lines.append(f"- {item}")
+            lines.append("下一步建议:")
+            for item in report["suggestions"]:
+                lines.append(f"- {item}")
+            lines.append(str(report.get("boundary") or ""))
+            return "\n".join(line for line in lines if line)
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"读取分发复盘失败: {e}"
+
+    async def earth_list_dist_channels(self, enabled_only: bool = False) -> str:
+        """查看已登记的分发平台 (网盘/分销)。只读，不登录、不发送。"""
+        try:
+            channels = self._get_store().list_dist_channels(enabled_only=bool(enabled_only))
+            if not channels:
+                return "还没有登记任何分发平台。只登记公开推广链接，不要填账号密码或 Cookie。"
+            lines = ["【分发平台】"]
+            for item in channels[:30]:
+                lines.append(
+                    f"#{item['id']} [{'启用' if item.get('enabled') else '停用'}] {item['name']} · {item['kind']}"
+                    f" · 推广链接: {item.get('promo_url') or '未填写'}"
+                    + (f" · 口令/邀请码: {item['promo_code']}" if item.get("promo_code") else "")
+                    + (f" · 结算周期: {item['settlement_cycle']}" if item.get("settlement_cycle") else "")
+                )
+            lines.append("只读视图；弥娅不保存账号密码、Cookie 或登录态。")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"读取分发平台失败: {e}"
+
+    async def earth_list_dist_targets(self, platform: str = "") -> str:
+        """查看内容渠道投放位。只读，不登录、不发送。"""
+        try:
+            targets = self._get_store().list_dist_targets(platform=str(platform or ""))
+            if not targets:
+                return "还没有登记任何投放位。只填账号标识与公开主页，不要填密码。"
+            lines = ["【渠道投放位】"]
+            for item in targets[:40]:
+                lines.append(
+                    f"#{item['id']} [{'启用' if item.get('enabled') else '停用'}] {item['platform']}"
+                    f" · {item['account_label']} · 主页: {item.get('profile_url') or '未填写'}"
+                    f" · 日更上限 {item.get('daily_post_limit')}"
+                    + (f" · 受众: {item['audience_note']}" if item.get("audience_note") else "")
+                )
+            lines.append("只读视图；投放位只记录账号标识，不保存密码、Cookie 或令牌。")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"读取投放位失败: {e}"
+
+    async def earth_list_dist_packages(self, status: str = "") -> str:
+        """查看网盘资源包及承接状态。只读。"""
+        try:
+            packages = self._get_store().list_dist_packages(str(status or ""))
+            if not packages:
+                return "还没有资源包。先确认资源授权，再组装第一个资源包。"
+            lines = ["【网盘资源包】"]
+            for item in packages[:30]:
+                lines.append(
+                    f"#{item['id']} [{item['status']}] {item['title']}"
+                    f" · 资源 {item.get('resource_count', 0)} 份"
+                    f" · 分发平台: {item.get('channel_name') or '未绑定'}"
+                    f" · 分享链接: {item.get('share_url') or '未登记'}"
+                    + (f" · 提取码: {item['share_password']}" if item.get("share_password") else "")
+                )
+            lines.append("只读视图；只有授权核验通过的资源包才能进入可分发状态。")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"读取资源包失败: {e}"
+
+    async def earth_list_dist_materials(self, status: str = "", platform: str = "", package_id: int = 0, limit: int = 200) -> str:
+        """查看各渠道投放物料草稿与审批状态 (正文截断)。只读，不发布。"""
+        try:
+            materials = self._get_store().list_dist_materials(
+                status=str(status or ""),
+                platform=str(platform or ""),
+                package_id=int(package_id or 0) or None,
+                limit=int(limit or 200),
+            )
+            if not materials:
+                return "还没有投放物料草稿。"
+            lines = ["【投放物料草稿】"]
+            for item in materials[:50]:
+                lines.append(
+                    f"#{item['id']} [{item['status']}] {item['platform']} · {item['title']}"
+                    + (f" · 审批草稿 #{item['action_id']}" if item.get("action_id") else "")
+                )
+                body = " ".join(str(item.get("body") or "").split())
+                if body:
+                    lines.append(f"  正文: {body[:200]}{'…' if len(body) > 200 else ''}")
+                if item.get("tags"):
+                    lines.append(f"  话题: {' '.join(item['tags'][:8])}")
+                if item.get("risk_flags"):
+                    lines.append(f"  风险自检: {'、'.join(item['risk_flags'])}")
+            lines.append("只读视图；物料只是站内草稿，弥娅不发布、不发送、不登录平台。")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"读取投放物料失败: {e}"
+
+    async def earth_upsert_dist_channel(
+        self,
+        name: str,
+        key: str = "",
+        promo_url: str = "",
+        promo_code: str = "",
+        kind: str = "netdisk_cps",
+        settlement_cycle: str = "",
+        commission_note: str = "",
+        notes: str = "",
+    ) -> str:
+        """登记一个分发平台 (网盘/分销)；只登记公开推广链接，绝不保存账号密码/Cookie。"""
+        try:
+            payload: Dict[str, Any] = {
+                "name": name,
+                "key": key,
+                "promo_url": promo_url,
+                "promo_code": promo_code,
+                "kind": kind,
+                "settlement_cycle": settlement_cycle,
+                "notes": notes,
+            }
+            if commission_note:
+                # 数据层把分佣说明收在 commission_rule.note 里
+                payload["commission_rule"] = {"note": str(commission_note)[:500]}
+            channel = self._get_store().upsert_dist_channel(payload)
+            return (
+                f"分发平台 #{channel['id']} 已登记: {channel['name']} · {channel['kind']}"
+                f" · {'启用' if channel.get('enabled') else '停用'}\n"
+                f"推广链接: {channel.get('promo_url') or '未填写'}"
+                + (f" · 口令/邀请码: {channel['promo_code']}" if channel.get("promo_code") else "")
+                + "\n只登记公开推广链接；绝不保存账号密码、Cookie 或登录态。"
+            )
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"登记分发平台失败: {e}"
+
+    async def earth_upsert_dist_target(
+        self,
+        platform: str,
+        account_label: str,
+        profile_url: str = "",
+        audience_note: str = "",
+        daily_post_limit: int = 1,
+    ) -> str:
+        """登记一个渠道投放位；只存账号标识与公开主页，不存密码。"""
+        try:
+            target = self._get_store().upsert_dist_target({
+                "platform": platform,
+                "account_label": account_label,
+                "profile_url": profile_url,
+                "audience_note": audience_note,
+                "daily_post_limit": daily_post_limit,
+            })
+            return (
+                f"投放位 #{target['id']} 已登记: {target['platform']} · {target['account_label']}"
+                f" · 日更上限 {target.get('daily_post_limit')}\n"
+                "只记录账号标识与公开主页；不保存密码、Cookie 或令牌，弥娅不登录任何平台。"
+            )
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"登记投放位失败: {e}"
+
+    async def earth_create_dist_package(
+        self,
+        title: str,
+        resource_ids: Any = "",
+        channel_id: int = 0,
+        keywords: Any = "",
+        cover_hint: str = "",
+        share_note: str = "",
+    ) -> str:
+        """组装一个网盘资源包草稿 (只落站内)；不发布、不交易。"""
+        try:
+            ids = self._dist_int_list(resource_ids)
+            package = self._get_store().create_dist_package({
+                "title": title,
+                "resource_ids": ids,
+                "channel_id": int(channel_id or 0) or None,
+                "keywords": self._dist_text_list(keywords),
+                "cover_hint": cover_hint,
+                "share_note": share_note,
+            })
+            return (
+                f"资源包 #{package['id']} 已组装: {package['title']}"
+                f" · 资源 {package.get('resource_count', len(ids))} 份"
+                f" · 状态 {package.get('status')}"
+                f" · 分发平台: {package.get('channel_name') or '未绑定'}\n"
+                "只落了站内资源包；登记网盘分享链接并通过授权核验后才算可分发，对外发布仍由佳确认。"
+            )
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"组装资源包失败: {e}"
+
+    async def earth_bind_dist_share(
+        self,
+        package_id: int,
+        share_url: str,
+        share_password: str = "",
+        share_note: str = "",
+    ) -> str:
+        """登记资源包的网盘分享链接 (佳自己在网盘生成后填回)。不登录网盘。"""
+        try:
+            result = self._get_store().bind_dist_share(
+                int(package_id or 0), str(share_url or ""), str(share_password or ""), str(share_note or "")
+            )
+            package = result.get("package") or {}
+            lines = [
+                f"资源包 #{package.get('id')} 已登记网盘分享链接: {package.get('share_url')}"
+                f" · 状态 {package.get('status')}"
+                + (f" · 提取码 {package['share_password']}" if package.get("share_password") else "")
+            ]
+            if result.get("warning"):
+                lines.append(f"注意: {result['warning']}")
+            lines.append("只登记分享链接与提取码；不保存网盘账号密码，弥娅不登录网盘、不代你发布。")
+            return "\n".join(lines)
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"登记网盘分享链接失败: {e}"
+
+    async def earth_generate_dist_materials(self, package_id: int, target_ids: Any = None, variants: int = 0) -> str:
+        """为一个资源包按渠道生成投放物料草稿 (只落站内)；不发布、不发送。"""
+        try:
+            result = self._get_store().generate_dist_materials(
+                int(package_id or 0),
+                self._dist_int_list(target_ids) or None,
+                int(variants or 0),
+            )
+            lines = [
+                f"资源包 #{int(package_id or 0)} 已生成 {result.get('created_count', 0)} 条投放物料草稿"
+                f" · 跳过重复 {result.get('skipped_count', 0)} 条"
+            ]
+            for item in (result.get("created") or [])[:8]:
+                flags = f" · 风险自检: {'、'.join(item.get('risk_flags') or [])}" if item.get("risk_flags") else ""
+                lines.append(f"- 物料 #{item['id']} [{item['platform']}] {item['title']}{flags}")
+            if not result.get("created"):
+                lines.append("本轮没有新增物料 (同渠道同版本草稿已存在)。")
+            lines.append("全部只落在站内；要对外发还得提交审批，并且由佳本人确认后手动发布。")
+            return "\n".join(lines)
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"生成投放物料失败: {e}"
+
+    async def earth_promote_dist_material(self, material_id: int) -> str:
+        """把投放物料交到审批箱；不发布、不发送。"""
+        try:
+            result = self._get_store().promote_dist_material(int(material_id or 0))
+            material = result.get("material") or {}
+            action = result.get("action") or {}
+            return (
+                f"投放物料 #{material.get('id')} 已提交到审批箱: 草稿 #{action.get('id')} "
+                f"「{action.get('title')}」· 状态 {action.get('status')}\n"
+                f"需要佳回复「同意 #{action.get('id')}」才会批准；批准也不等于发布 —— "
+                "弥娅不会登录平台、不会发送、不会发布，实际发布要佳本人完成。"
+            )
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"提交投放物料审批失败: {e}"
+
+    async def earth_mark_dist_material_published(self, material_id: int, published_url: str = "") -> str:
+        """佳实际发布后回填发布状态与链接；弥娅本身不发布。"""
+        try:
+            result = self._get_store().mark_dist_material_published(int(material_id or 0), str(published_url or ""))
+            material = result.get("material") or {}
+            return (
+                f"投放物料 #{material.get('id')} 已标记为已发布: {material.get('title')}"
+                f" · 发布链接: {material.get('published_url') or '未填写'}"
+                f" · 发布时间 {material.get('published_at') or '未记录'}\n"
+                "这一步只在佳实际发布后回填；弥娅没有发布任何内容，也没有发送任何消息。"
+            )
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"回填发布状态失败: {e}"
+
+    async def earth_record_dist_metrics(
+        self,
+        material_id: int = 0,
+        package_id: int = 0,
+        stat_date: str = "",
+        impressions: int = 0,
+        clicks: int = 0,
+        saves: int = 0,
+        transfers: int = 0,
+        new_users: int = 0,
+        vip_orders: int = 0,
+        revenue: float = 0,
+        cost: float = 0,
+        note: str = "",
+    ) -> str:
+        """登记一天的渠道转化数据；只记录佳给的真实数字，不许编造佣金。"""
+        try:
+            result = self._get_store().record_dist_metrics({
+                "material_id": int(material_id or 0) or None,
+                "package_id": int(package_id or 0) or None,
+                "stat_date": str(stat_date or ""),
+                "impressions": impressions,
+                "clicks": clicks,
+                "saves": saves,
+                "transfers": transfers,
+                "new_users": new_users,
+                "vip_orders": vip_orders,
+                "revenue": revenue,
+                "cost": cost,
+                "note": str(note or ""),
+            })
+            metric = result.get("metric") or {}
+            lines = [
+                f"转化数据 #{metric.get('id')} 已记录: {metric.get('stat_date')}"
+                f" · 曝光 {metric.get('impressions', 0)} / 点击 {metric.get('clicks', 0)}"
+                f" / 转存 {metric.get('transfers', 0)} / 拉新 {metric.get('new_users', 0)}"
+                f" / 会员单 {metric.get('vip_orders', 0)}"
+                f" · 收入 ¥{float(metric.get('revenue') or 0):.2f} · 成本 ¥{float(metric.get('cost') or 0):.2f}"
+            ]
+            if result.get("income_record_id"):
+                lines.append(
+                    f"收入已自动汇入现实收益流水 #{result['income_record_id']}，收益中枢会一并统计净额与时薪。"
+                )
+            lines.append("只记录佳给的真实数字，不要编造佣金；弥娅不会自动抓取任何平台的转化数据。")
+            return "\n".join(lines)
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"记录转化数据失败: {e}"
+
+    async def earth_run_distribution_cycle(self) -> str:
+        """手动跑一次分发巡检: 只为可分发资源包生成物料草稿并提交审批，不发布。"""
+        try:
+            result = self._get_store().run_distribution_cycle()
+            if result.get("skipped") == "disabled":
+                return "网盘分发中枢当前已关闭 (earth_online.distribution.enabled=false)，本轮没有做任何动作。"
+            lines = [
+                f"分发巡检完成: 新增投放物料 {result.get('created_materials', 0)} 条"
+                f" · 提交审批 {result.get('submitted', 0)} 条"
+                f" · 审批回填 (批准 {result.get('approved', 0)} / 退回 {result.get('returned', 0)})"
+                f" · 预置分发平台 {result.get('created_channels', 0)} 个 / 投放位 {result.get('created_targets', 0)} 个"
+            ]
+            lines.append(
+                "本轮只为可分发资源包生成物料草稿并提交审批，没有发布、没有发送、没有登录任何平台；"
+                "批准需要佳回复「同意 #编号」。"
+            )
+            return "\n".join(lines)
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"分发巡检失败: {e}"
 
 
 _tools: Optional[EarthOnlineTools] = None
@@ -3041,6 +3523,36 @@ EARTH_TOOLS_SCHEMA: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "earth_stage_delivery_file",
+            "description": "把已核验资源的外部直链下载到本地交付区（受 earth_online.delivery.max_file_mb 限制），之后交付由弥娅自己下发，买家不会再看到第三方网盘或来源链接。不发布、不交易",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "resource_id": {"type": "integer", "description": "数字资源编号"},
+                },
+                "required": ["resource_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_scout_digital_resources",
+            "description": "主动去公开授权源（Openverse / Project Gutenberg / 大都会博物馆）寻找可合法转售的虚拟资源；只收录 CC0、公有领域、开放许可，自动核验可确定性判定的授权，明确拒绝非商业许可与免版税素材库原样转售。不下载、不发布、不交易",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "检索词，留空则使用配置里的默认主题"},
+                    "provider": {"type": "string", "enum": ["openverse", "gutenberg", "met_museum"], "description": "只查指定的数据源"},
+                    "limit": {"type": "integer", "description": "最多新增条数，默认跟随 earth_online.earning_scout 配置"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "earth_list_digital_resources",
             "description": "查看数字资源候选、来源和授权核验状态；只读，不自动下载或销售",
             "parameters": {"type": "object", "properties": {"status": {"type": "string"}, "rights_status": {"type": "string"}}, "required": []},
@@ -3143,6 +3655,234 @@ EARTH_TOOLS_SCHEMA: List[Dict[str, Any]] = [
             "name": "earth_revoke_earning_action",
             "description": "用户在对话中明确回复‘撤销 #编号’或‘拒绝 #编号’后，撤销指定草稿",
             "parameters": {"type": "object", "properties": {"action_id": {"type": "integer"}, "confirmation": {"type": "string", "description": "用户原话，必须是撤销 #编号或拒绝 #编号"}}, "required": ["action_id", "confirmation"]},
+        },
+    },
+    # ── v24: 网盘分发中枢（只读） ─────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_distribution_report",
+            "description": "查看网盘分发复盘：曝光/点击/转存/拉新/会员单/收入/净额/CTR/转存率/拉新率/千次曝光收入漏斗，逐物料判定与建议，渠道排行，合规检查项与下一步建议。只读；不发布、不发送、不登录平台",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "description": "统计窗口天数，0 或留空表示跟随 earth_online.distribution.report_days 配置"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_list_dist_channels",
+            "description": "查看已登记的分发平台（网盘/分销）、公开推广链接与结算周期。只读；不登录平台、不保存账号密码或 Cookie",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "enabled_only": {"type": "boolean", "description": "只看启用的分发平台，默认 false"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_list_dist_targets",
+            "description": "查看各内容渠道的投放位（平台 + 账号标识 + 公开主页 + 日更上限）。只读；不登录平台、不保存密码或登录态",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "platform": {"type": "string", "description": "只筛某个平台，如 xiaohongshu/zhihu/tieba/bilibili/douyin/kuaishou/weibo/gongzhonghao/xianyu/other；留空看全部"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_list_dist_packages",
+            "description": "查看网盘资源包与承接状态（资源数、分发平台、分享链接、可分发状态）。只读；不发布、不发送、不交易",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "description": "只筛某个状态：draft/ready/published/retired；留空看全部"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_list_dist_materials",
+            "description": "查看各渠道投放物料草稿（标题 + 平台 + 状态，正文最多展示 200 字）。只读；不发布、不发送、不登录平台",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "description": "只筛某个状态：draft/submitted/approved/published/retired"},
+                    "platform": {"type": "string", "description": "只筛某个平台，如 zhihu/xiaohongshu"},
+                    "package_id": {"type": "integer", "description": "只筛某个资源包编号"},
+                    "limit": {"type": "integer", "description": "最多返回条数，默认 200"},
+                },
+                "required": [],
+            },
+        },
+    },
+    # ── v24: 网盘分发中枢（只落站内） ─────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_upsert_dist_channel",
+            "description": "登记一个分发平台（网盘/分销）：只登记公开推广链接、口令与结算说明，绝不保存账号密码、Cookie 或登录态。不登录平台、不发布、不发送",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "平台名称，如 夸克网盘/百度网盘"},
+                    "key": {"type": "string", "description": "稳定标识 key，留空则由名称生成"},
+                    "promo_url": {"type": "string", "description": "公开推广/邀请链接（http/https）"},
+                    "promo_code": {"type": "string", "description": "公开口令或邀请码"},
+                    "kind": {"type": "string", "enum": ["netdisk_cps", "netdisk_referral", "direct_sale", "other"], "description": "分佣类型，默认 netdisk_cps"},
+                    "settlement_cycle": {"type": "string", "description": "结算周期说明，如 次月 15 日"},
+                    "commission_note": {"type": "string", "description": "分佣/返利规则说明（不含任何账号密码）"},
+                    "notes": {"type": "string", "description": "备注"},
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_upsert_dist_target",
+            "description": "登记一个内容渠道投放位：只存平台、账号标识与公开主页，不保存密码、Cookie 或登录态。不登录平台、不发布、不发送",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "platform": {"type": "string", "enum": ["xiaohongshu", "zhihu", "tieba", "bilibili", "douyin", "kuaishou", "weibo", "gongzhonghao", "xianyu", "other"], "description": "投放平台"},
+                    "account_label": {"type": "string", "description": "账号标识，如「小红书主号」——不要填密码"},
+                    "profile_url": {"type": "string", "description": "公开主页链接（http/https）"},
+                    "audience_note": {"type": "string", "description": "这个号面向谁，如「职场新人」"},
+                    "daily_post_limit": {"type": "integer", "description": "每日最多投放条数 (1-50，默认 1)"},
+                },
+                "required": ["platform", "account_label"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_create_dist_package",
+            "description": "组装一个网盘资源包草稿（只落站内）：resource_ids 支持 \"1,2,3\" 字符串或数组；只有授权核验通过且无风险信号的资源才能进入可分发状态。不发布、不发送、不交易",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "资源包名称（按一个人群一个场景）"},
+                    "resource_ids": {"type": "string", "description": "数字资源编号，如 \"1,2,3\"（也接受整数数组）"},
+                    "channel_id": {"type": "integer", "description": "绑定的分发平台编号（可选）"},
+                    "keywords": {"type": "string", "description": "关键词，如 \"网盘,资料,合集\"（也接受字符串数组）"},
+                    "cover_hint": {"type": "string", "description": "封面提示，如「9 宫格资源预览」"},
+                    "share_note": {"type": "string", "description": "分享说明，如「共 12 份高清图，解压密码在说明里」"},
+                },
+                "required": ["title", "resource_ids"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_bind_dist_share",
+            "description": "登记资源包在网盘上的公开分享链接与提取码（佳自己在网盘生成后填回）；只登记公开链接，不保存网盘账号密码，弥娅不登录网盘、不发布、不发送",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "package_id": {"type": "integer", "description": "资源包编号"},
+                    "share_url": {"type": "string", "description": "网盘公开分享链接（http/https）"},
+                    "share_password": {"type": "string", "description": "提取码（可选）"},
+                    "share_note": {"type": "string", "description": "分享说明（可选）"},
+                },
+                "required": ["package_id", "share_url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_generate_dist_materials",
+            "description": "为一个资源包按渠道模板生成投放物料草稿（只落站内）：标题、正文、话题与行动入口由 text_config 模板生成。不发布、不发送、不登录平台",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "package_id": {"type": "integer", "description": "资源包编号"},
+                    "target_ids": {"type": "string", "description": "指定投放位编号，如 \"1,2\"（留空则用全部启用的投放位）"},
+                    "variants": {"type": "integer", "description": "每个投放位生成几个版本 (1-10)，留空跟随配置"},
+                },
+                "required": ["package_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_promote_dist_material",
+            "description": "把一条投放物料提交到审批箱：需要佳回复「同意 #编号」才批准，批准后仍需佳本人手动发布。弥娅不发布、不发送、不登录平台",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "material_id": {"type": "integer", "description": "投放物料编号"},
+                },
+                "required": ["material_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_mark_dist_material_published",
+            "description": "佳实际发布后回填物料的发布状态与链接（只有审批通过的物料才能标记）；弥娅本身不发布、不发送、不登录平台",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "material_id": {"type": "integer", "description": "投放物料编号"},
+                    "published_url": {"type": "string", "description": "实际发布后的公开链接（http/https）"},
+                },
+                "required": ["material_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_record_dist_metrics",
+            "description": "记录佳给的真实渠道转化数字（曝光/点击/转存/拉新/会员单/收入/成本）：只记录真实数字、不许编造佣金，有收入时自动汇入现实收益流水。不登录平台、不抓取平台数据、不发送",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "material_id": {"type": "integer", "description": "投放物料编号（与 package_id 至少填一个）"},
+                    "package_id": {"type": "integer", "description": "资源包编号（与 material_id 至少填一个）"},
+                    "stat_date": {"type": "string", "description": "统计日期 YYYY-MM-DD，留空为今天"},
+                    "impressions": {"type": "integer", "description": "曝光量"},
+                    "clicks": {"type": "integer", "description": "点击量"},
+                    "saves": {"type": "integer", "description": "收藏/点赞量"},
+                    "transfers": {"type": "integer", "description": "转存量"},
+                    "new_users": {"type": "integer", "description": "拉新人数"},
+                    "vip_orders": {"type": "integer", "description": "会员/首单数"},
+                    "revenue": {"type": "number", "description": "当天真实佣金收入（元），没有就填 0"},
+                    "cost": {"type": "number", "description": "当天成本（元）"},
+                    "note": {"type": "string", "description": "备注，例如数据来自哪个后台"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "earth_run_distribution_cycle",
+            "description": "手动跑一次网盘分发巡检：只为可分发资源包生成物料草稿并提交审批，不发布、不发送、不登录平台",
+            "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
 ]

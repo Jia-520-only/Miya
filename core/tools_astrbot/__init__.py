@@ -440,6 +440,8 @@ class ToolRegistry:
                         "earth_start_first_income_experiment": self.earth.earth_start_first_income_experiment,
                         "earth_list_earning_offers": self.earth.earth_list_earning_offers,
                         "earth_list_digital_resources": self.earth.earth_list_digital_resources,
+                        "earth_scout_digital_resources": self.earth.earth_scout_digital_resources,
+                        "earth_stage_delivery_file": self.earth.earth_stage_delivery_file,
                         "earth_add_digital_resource": self.earth.earth_add_digital_resource,
                         "earth_create_digital_product": self.earth.earth_create_digital_product,
                         "earth_prepare_xianyu_listing": self.earth.earth_prepare_xianyu_listing,
@@ -448,6 +450,21 @@ class ToolRegistry:
                         "earth_submit_earning_action": self.earth.earth_submit_earning_action,
                         "earth_approve_earning_action": self.earth.earth_approve_earning_action,
                         "earth_revoke_earning_action": self.earth.earth_revoke_earning_action,
+                        # v24: 网盘分发中枢 (只做站内组装/草稿/复盘，不登录平台、不发布、不收款)
+                        "earth_distribution_report": self.earth.earth_distribution_report,
+                        "earth_list_dist_channels": self.earth.earth_list_dist_channels,
+                        "earth_upsert_dist_channel": self.earth.earth_upsert_dist_channel,
+                        "earth_list_dist_targets": self.earth.earth_list_dist_targets,
+                        "earth_upsert_dist_target": self.earth.earth_upsert_dist_target,
+                        "earth_list_dist_packages": self.earth.earth_list_dist_packages,
+                        "earth_create_dist_package": self.earth.earth_create_dist_package,
+                        "earth_bind_dist_share": self.earth.earth_bind_dist_share,
+                        "earth_list_dist_materials": self.earth.earth_list_dist_materials,
+                        "earth_generate_dist_materials": self.earth.earth_generate_dist_materials,
+                        "earth_promote_dist_material": self.earth.earth_promote_dist_material,
+                        "earth_mark_dist_material_published": self.earth.earth_mark_dist_material_published,
+                        "earth_record_dist_metrics": self.earth.earth_record_dist_metrics,
+                        "earth_run_distribution_cycle": self.earth.earth_run_distribution_cycle,
                     }
                 )
 

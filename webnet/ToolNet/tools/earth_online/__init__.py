@@ -4,6 +4,7 @@
 数据访问统一走 core.earth_online_store.get_earth_store()。
 """
 
+import asyncio
 from datetime import datetime
 from typing import Any, Dict
 
@@ -2841,6 +2842,98 @@ class EarthOnlineListEarningOffers(_EarthBase):
             return f"读取可售服务失败: {e}"
 
 
+class EarthOnlineScoutDigitalResources(_EarthBase):
+    """主动去公开授权源寻找可合法转售的资源。"""
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_scout_digital_resources",
+            "description": "主动去公开授权源（Openverse / Project Gutenberg / 大都会博物馆）寻找可合法转售的虚拟资源；只收录 CC0、公有领域、开放许可并自动核验可确定性判定的授权，明确拒绝非商业许可与免版税素材库原样转售。不下载、不发布、不交易",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "检索词，留空则使用配置里的默认主题"},
+                    "provider": {"type": "string", "enum": ["openverse", "gutenberg", "met_museum"], "description": "只查指定的数据源"},
+                    "limit": {"type": "integer", "description": "最多新增条数，默认跟随 earth_online.earning_scout 配置"},
+                },
+                "required": [],
+            },
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            result = await asyncio.to_thread(
+                self._store().scout_digital_resources,
+                str(args.get("query", "") or ""),
+                str(args.get("provider", "") or ""),
+                int(args.get("limit", 0) or 0),
+                False,
+            )
+            if not result.get("success") and result.get("message"):
+                return str(result["message"])
+            lines = [
+                "【开放许可资源发现】"
+                f"新增 {result.get('created_count', 0)} 条 · "
+                f"自动核验 {result.get('auto_verified_count', 0)} 条 · "
+                f"待核验 {result.get('pending_count', 0)} 条 · "
+                f"跳过重复 {result.get('skipped_duplicate_count', 0)} 条 · "
+                f"拒绝 {result.get('blocked_count', 0)} 条"
+            ]
+            for item in (result.get("created") or [])[:8]:
+                lines.append(
+                    f"#{item.get('id')} [{item.get('status')}/{item.get('rights_status')}] "
+                    f"{item.get('title')} · {item.get('license_type')}"
+                )
+            if not result.get("created"):
+                lines.append("本轮没有找到新的开放许可资源。")
+            errors = result.get("errors") or []
+            if errors:
+                lines.append(f"{len(errors)} 个数据源本轮取回失败，已跳过。")
+            lines.append(str(result.get("scope") or ""))
+            return "\n".join(line for line in lines if line)
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"资源发现失败: {e}"
+
+
+class EarthOnlineStageDeliveryFile(_EarthBase):
+    """把资源落到本地交付区，交付从此不依赖第三方网盘。"""
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_stage_delivery_file",
+            "description": "把已核验资源的外部直链下载到本地交付区（受 earth_online.delivery.max_file_mb 限制），之后交付由弥娅自己下发，买家不会再看到第三方网盘或来源链接。不发布、不交易",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "resource_id": {"type": "integer", "description": "数字资源编号"},
+                },
+                "required": ["resource_id"],
+            },
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            result = await asyncio.to_thread(
+                self._store().stage_delivery_file, int(args.get("resource_id", 0) or 0)
+            )
+            manifest = result.get("manifest") or {}
+            if not result.get("staged"):
+                return f"{result.get('message')}（{manifest.get('filename') or ''}）"
+            return (
+                f"资源 #{int(args.get('resource_id', 0) or 0)} 已落到本地交付区："
+                f"{manifest.get('filename')} · {manifest.get('size', 0)} 字节。"
+                "此后交付由弥娅自己下发，买家不会再看到第三方网盘或来源链接。"
+            )
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"准备交付文件失败: {e}"
+
+
 class EarthOnlineListDigitalResources(_EarthBase):
     @property
     def config(self) -> Dict[str, Any]:
@@ -3077,6 +3170,662 @@ class EarthOnlineRevokeEarningAction(_EarthBase):
             return f"撤销审批草稿失败: {e}"
 
 
+# ── v24: 网盘分发中枢 ────────────────────────────────
+# 边界: 只做站内登记、按渠道生成草稿与数据复盘；不发布、不发送、
+# 不登录平台、不保存账号密码/Cookie。对外动作仍走逐次审批草稿。
+
+
+def _dist_int_list(value: Any) -> list:
+    """把 "1,2,3" 或 [1,2,3] 统一转成 int 列表 (空值返回 [])。"""
+    raw = value if isinstance(value, (list, tuple)) else str(value or "").replace("，", ",").split(",")
+    result: list = []
+    for item in raw:
+        text = str(item).strip()
+        if text.isdigit() and int(text) not in result:
+            result.append(int(text))
+    return result
+
+
+def _dist_text_list(value: Any) -> list:
+    """把 "网盘,资料" 或 ["网盘","资料"] 统一转成字符串列表。"""
+    raw = value if isinstance(value, (list, tuple)) else str(value or "").replace("，", ",").split(",")
+    return [str(item).strip() for item in raw if str(item).strip()]
+
+
+class EarthOnlineDistributionReport(_EarthBase):
+    """网盘分发复盘（只读）。"""
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_distribution_report",
+            "description": "查看网盘分发复盘：曝光/点击/转存/拉新/会员单/收入/净额/CTR/转存率/拉新率/千次曝光收入漏斗，逐物料判定与建议，渠道排行，合规检查项与下一步建议。只读；不发布、不发送、不登录平台",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "description": "统计窗口天数，0 或留空表示跟随 earth_online.distribution.report_days 配置"},
+                },
+                "required": [],
+            },
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            report = self._store().distribution_report(int(args.get("days", 0) or 0))
+            funnel = report["funnel"]
+            counts = report["counts"]
+            lines = [
+                "【网盘分发复盘】",
+                f"窗口 {report['window_days']} 天 · 数据行 {counts['metric_rows']}",
+                (
+                    f"漏斗: 曝光 {funnel['impressions']} → 点击 {funnel['clicks']} → 转存 {funnel['transfers']}"
+                    f" → 拉新 {funnel['new_users']} → 会员单 {funnel['vip_orders']} (收藏 {funnel['saves']})"
+                ),
+                (
+                    f"收入 ¥{funnel['revenue']:.2f} · 成本 ¥{funnel['cost']:.2f} · 净额 ¥{funnel['net']:.2f}"
+                    f" · CTR {funnel['ctr']}% · 转存率 {funnel['transfer_rate']}%"
+                    f" · 拉新率 {funnel['new_user_rate']}% · 千次曝光收入 ¥{funnel['revenue_per_1k']:.2f}"
+                ),
+                (
+                    f"资源包 {counts['packages']} (可分发 {counts['ready_packages']}) · 物料 {counts['materials']}"
+                    f" (待审批 {counts['pending_approval']} / 已批准 {counts['approved']} / 已发布 {counts['published']})"
+                ),
+            ]
+            lines.append("逐物料判定:")
+            if report["materials"]:
+                for item in report["materials"][:10]:
+                    flags = f" · 风险自检: {'、'.join(item.get('risk_flags') or [])}" if item.get("risk_flags") else ""
+                    lines.append(
+                        f"- #{item['material_id']} [{item['platform']}/{item['status']}] {item['title'][:40]}"
+                        f" → {item['verdict']}: {item['advice']}"
+                        f" (曝光 {item['impressions']} · 点击 {item['clicks']} · 转存 {item['transfers']}"
+                        f" · 拉新 {item['new_users']} · 收入 ¥{item['revenue']:.2f}){flags}"
+                    )
+            else:
+                lines.append("- 窗口内还没有物料级转化数据。")
+            lines.append("渠道排行:")
+            if report["channels"]:
+                for item in report["channels"][:8]:
+                    lines.append(
+                        f"- {item['channel_name'] or ('平台 #' + str(item['channel_id']))}"
+                        f" · 曝光 {item['impressions']} / 点击 {item['clicks']} / 转存 {item['transfers']}"
+                        f" / 拉新 {item['new_users']} · 收入 ¥{item['revenue']:.2f} · 净额 ¥{item['net']:.2f}"
+                    )
+            elif report["platforms"]:
+                for item in report["platforms"][:8]:
+                    lines.append(
+                        f"- {item['platform']} · 曝光 {item['impressions']} / 点击 {item['clicks']}"
+                        f" / 转存 {item['transfers']} / 拉新 {item['new_users']} · 收入 ¥{item['revenue']:.2f}"
+                    )
+            else:
+                lines.append("- 窗口内还没有渠道转化数据。")
+            lines.append("合规检查:")
+            for item in report["compliance"]:
+                lines.append(f"- {item}")
+            lines.append("下一步建议:")
+            for item in report["suggestions"]:
+                lines.append(f"- {item}")
+            lines.append(str(report.get("boundary") or ""))
+            return "\n".join(line for line in lines if line)
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"读取分发复盘失败: {e}"
+
+
+class EarthOnlineListDistChannels(_EarthBase):
+    """分发平台只读列表。"""
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_list_dist_channels",
+            "description": "查看已登记的分发平台（网盘/分销）、公开推广链接与结算周期。只读；不登录平台、不保存账号密码或 Cookie",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "enabled_only": {"type": "boolean", "description": "只看启用的分发平台，默认 false"},
+                },
+                "required": [],
+            },
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            channels = self._store().list_dist_channels(enabled_only=bool(args.get("enabled_only")))
+            if not channels:
+                return "还没有登记任何分发平台。只登记公开推广链接，不要填账号密码或 Cookie。"
+            lines = ["【分发平台】"]
+            for item in channels[:30]:
+                lines.append(
+                    f"#{item['id']} [{'启用' if item.get('enabled') else '停用'}] {item['name']} · {item['kind']}"
+                    f" · 推广链接: {item.get('promo_url') or '未填写'}"
+                    + (f" · 口令/邀请码: {item['promo_code']}" if item.get("promo_code") else "")
+                    + (f" · 结算周期: {item['settlement_cycle']}" if item.get("settlement_cycle") else "")
+                )
+            lines.append("只读视图；弥娅不保存账号密码、Cookie 或登录态。")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"读取分发平台失败: {e}"
+
+
+class EarthOnlineListDistTargets(_EarthBase):
+    """渠道投放位只读列表。"""
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_list_dist_targets",
+            "description": "查看各内容渠道的投放位（平台 + 账号标识 + 公开主页 + 日更上限）。只读；不登录平台、不保存密码或登录态",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "platform": {"type": "string", "description": "只筛某个平台，如 xiaohongshu/zhihu/tieba/bilibili/douyin/kuaishou/weibo/gongzhonghao/xianyu/other；留空看全部"},
+                },
+                "required": [],
+            },
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            targets = self._store().list_dist_targets(platform=str(args.get("platform", "") or ""))
+            if not targets:
+                return "还没有登记任何投放位。只填账号标识与公开主页，不要填密码。"
+            lines = ["【渠道投放位】"]
+            for item in targets[:40]:
+                lines.append(
+                    f"#{item['id']} [{'启用' if item.get('enabled') else '停用'}] {item['platform']}"
+                    f" · {item['account_label']} · 主页: {item.get('profile_url') or '未填写'}"
+                    f" · 日更上限 {item.get('daily_post_limit')}"
+                    + (f" · 受众: {item['audience_note']}" if item.get("audience_note") else "")
+                )
+            lines.append("只读视图；投放位只记录账号标识，不保存密码、Cookie 或令牌。")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"读取投放位失败: {e}"
+
+
+class EarthOnlineListDistPackages(_EarthBase):
+    """网盘资源包只读列表。"""
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_list_dist_packages",
+            "description": "查看网盘资源包与承接状态（资源数、分发平台、分享链接、可分发状态）。只读；不发布、不发送、不交易",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "description": "只筛某个状态：draft/ready/published/retired；留空看全部"},
+                },
+                "required": [],
+            },
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            packages = self._store().list_dist_packages(str(args.get("status", "") or ""))
+            if not packages:
+                return "还没有资源包。先确认资源授权，再组装第一个资源包。"
+            lines = ["【网盘资源包】"]
+            for item in packages[:30]:
+                lines.append(
+                    f"#{item['id']} [{item['status']}] {item['title']}"
+                    f" · 资源 {item.get('resource_count', 0)} 份"
+                    f" · 分发平台: {item.get('channel_name') or '未绑定'}"
+                    f" · 分享链接: {item.get('share_url') or '未登记'}"
+                    + (f" · 提取码: {item['share_password']}" if item.get("share_password") else "")
+                )
+            lines.append("只读视图；只有授权核验通过的资源包才能进入可分发状态。")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"读取资源包失败: {e}"
+
+
+class EarthOnlineListDistMaterials(_EarthBase):
+    """投放物料草稿只读列表（正文截断）。"""
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_list_dist_materials",
+            "description": "查看各渠道投放物料草稿（标题 + 平台 + 状态，正文最多展示 200 字）。只读；不发布、不发送、不登录平台",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "description": "只筛某个状态：draft/submitted/approved/published/retired"},
+                    "platform": {"type": "string", "description": "只筛某个平台，如 zhihu/xiaohongshu"},
+                    "package_id": {"type": "integer", "description": "只筛某个资源包编号"},
+                    "limit": {"type": "integer", "description": "最多返回条数，默认 200"},
+                },
+                "required": [],
+            },
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            materials = self._store().list_dist_materials(
+                status=str(args.get("status", "") or ""),
+                platform=str(args.get("platform", "") or ""),
+                package_id=int(args.get("package_id", 0) or 0) or None,
+                limit=int(args.get("limit", 200) or 200),
+            )
+            if not materials:
+                return "还没有投放物料草稿。"
+            lines = ["【投放物料草稿】"]
+            for item in materials[:50]:
+                lines.append(
+                    f"#{item['id']} [{item['status']}] {item['platform']} · {item['title']}"
+                    + (f" · 审批草稿 #{item['action_id']}" if item.get("action_id") else "")
+                )
+                body = " ".join(str(item.get("body") or "").split())
+                if body:
+                    lines.append(f"  正文: {body[:200]}{'…' if len(body) > 200 else ''}")
+                if item.get("tags"):
+                    lines.append(f"  话题: {' '.join(item['tags'][:8])}")
+                if item.get("risk_flags"):
+                    lines.append(f"  风险自检: {'、'.join(item['risk_flags'])}")
+            lines.append("只读视图；物料只是站内草稿，弥娅不发布、不发送、不登录平台。")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"读取投放物料失败: {e}"
+
+
+class EarthOnlineUpsertDistChannel(_EarthBase):
+    """登记分发平台（只登记公开推广链接）。"""
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_upsert_dist_channel",
+            "description": "登记一个分发平台（网盘/分销）：只登记公开推广链接、口令与结算说明，绝不保存账号密码、Cookie 或登录态。不登录平台、不发布、不发送",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "平台名称，如 夸克网盘/百度网盘"},
+                    "key": {"type": "string", "description": "稳定标识 key，留空则由名称生成"},
+                    "promo_url": {"type": "string", "description": "公开推广/邀请链接（http/https）"},
+                    "promo_code": {"type": "string", "description": "公开口令或邀请码"},
+                    "kind": {"type": "string", "enum": ["netdisk_cps", "netdisk_referral", "direct_sale", "other"], "description": "分佣类型，默认 netdisk_cps"},
+                    "settlement_cycle": {"type": "string", "description": "结算周期说明，如 次月 15 日"},
+                    "commission_note": {"type": "string", "description": "分佣/返利规则说明（不含任何账号密码）"},
+                    "notes": {"type": "string", "description": "备注"},
+                },
+                "required": ["name"],
+            },
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            payload: Dict[str, Any] = {
+                "name": args.get("name"),
+                "key": args.get("key", ""),
+                "promo_url": args.get("promo_url", ""),
+                "promo_code": args.get("promo_code", ""),
+                "kind": args.get("kind", "netdisk_cps"),
+                "settlement_cycle": args.get("settlement_cycle", ""),
+                "notes": args.get("notes", ""),
+            }
+            commission_note = str(args.get("commission_note", "") or "")
+            if commission_note:
+                # 数据层把分佣说明收在 commission_rule.note 里
+                payload["commission_rule"] = {"note": commission_note[:500]}
+            channel = self._store().upsert_dist_channel(payload)
+            return (
+                f"分发平台 #{channel['id']} 已登记: {channel['name']} · {channel['kind']}"
+                f" · {'启用' if channel.get('enabled') else '停用'}\n"
+                f"推广链接: {channel.get('promo_url') or '未填写'}"
+                + (f" · 口令/邀请码: {channel['promo_code']}" if channel.get("promo_code") else "")
+                + "\n只登记公开推广链接；绝不保存账号密码、Cookie 或登录态。"
+            )
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"登记分发平台失败: {e}"
+
+
+class EarthOnlineUpsertDistTarget(_EarthBase):
+    """登记渠道投放位（只存账号标识与公开主页）。"""
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_upsert_dist_target",
+            "description": "登记一个内容渠道投放位：只存平台、账号标识与公开主页，不保存密码、Cookie 或登录态。不登录平台、不发布、不发送",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "platform": {"type": "string", "enum": ["xiaohongshu", "zhihu", "tieba", "bilibili", "douyin", "kuaishou", "weibo", "gongzhonghao", "xianyu", "other"], "description": "投放平台"},
+                    "account_label": {"type": "string", "description": "账号标识，如「小红书主号」——不要填密码"},
+                    "profile_url": {"type": "string", "description": "公开主页链接（http/https）"},
+                    "audience_note": {"type": "string", "description": "这个号面向谁，如「职场新人」"},
+                    "daily_post_limit": {"type": "integer", "description": "每日最多投放条数 (1-50，默认 1)"},
+                },
+                "required": ["platform", "account_label"],
+            },
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            target = self._store().upsert_dist_target({
+                "platform": args.get("platform"),
+                "account_label": args.get("account_label"),
+                "profile_url": args.get("profile_url", ""),
+                "audience_note": args.get("audience_note", ""),
+                "daily_post_limit": args.get("daily_post_limit", 1),
+            })
+            return (
+                f"投放位 #{target['id']} 已登记: {target['platform']} · {target['account_label']}"
+                f" · 日更上限 {target.get('daily_post_limit')}\n"
+                "只记录账号标识与公开主页；不保存密码、Cookie 或令牌，弥娅不登录任何平台。"
+            )
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"登记投放位失败: {e}"
+
+
+class EarthOnlineCreateDistPackage(_EarthBase):
+    """组装网盘资源包草稿（只落站内）。"""
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_create_dist_package",
+            "description": "组装一个网盘资源包草稿（只落站内）：resource_ids 支持 \"1,2,3\" 字符串或数组；只有授权核验通过且无风险信号的资源才能进入可分发状态。不发布、不发送、不交易",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "资源包名称（按一个人群一个场景）"},
+                    "resource_ids": {"type": "string", "description": "数字资源编号，如 \"1,2,3\"（也接受整数数组）"},
+                    "channel_id": {"type": "integer", "description": "绑定的分发平台编号（可选）"},
+                    "keywords": {"type": "string", "description": "关键词，如 \"网盘,资料,合集\"（也接受字符串数组）"},
+                    "cover_hint": {"type": "string", "description": "封面提示，如「9 宫格资源预览」"},
+                    "share_note": {"type": "string", "description": "分享说明，如「共 12 份高清图，解压密码在说明里」"},
+                },
+                "required": ["title", "resource_ids"],
+            },
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            ids = _dist_int_list(args.get("resource_ids"))
+            package = self._store().create_dist_package({
+                "title": args.get("title"),
+                "resource_ids": ids,
+                "channel_id": int(args.get("channel_id", 0) or 0) or None,
+                "keywords": _dist_text_list(args.get("keywords")),
+                "cover_hint": args.get("cover_hint", ""),
+                "share_note": args.get("share_note", ""),
+            })
+            return (
+                f"资源包 #{package['id']} 已组装: {package['title']}"
+                f" · 资源 {package.get('resource_count', len(ids))} 份"
+                f" · 状态 {package.get('status')}"
+                f" · 分发平台: {package.get('channel_name') or '未绑定'}\n"
+                "只落了站内资源包；登记网盘分享链接并通过授权核验后才算可分发，对外发布仍由佳确认。"
+            )
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"组装资源包失败: {e}"
+
+
+class EarthOnlineBindDistShare(_EarthBase):
+    """登记资源包的网盘分享链接（不登录网盘）。"""
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_bind_dist_share",
+            "description": "登记资源包在网盘上的公开分享链接与提取码（佳自己在网盘生成后填回）；只登记公开链接，不保存网盘账号密码，弥娅不登录网盘、不发布、不发送",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "package_id": {"type": "integer", "description": "资源包编号"},
+                    "share_url": {"type": "string", "description": "网盘公开分享链接（http/https）"},
+                    "share_password": {"type": "string", "description": "提取码（可选）"},
+                    "share_note": {"type": "string", "description": "分享说明（可选）"},
+                },
+                "required": ["package_id", "share_url"],
+            },
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            result = self._store().bind_dist_share(
+                int(args.get("package_id", 0) or 0),
+                str(args.get("share_url", "") or ""),
+                str(args.get("share_password", "") or ""),
+                str(args.get("share_note", "") or ""),
+            )
+            package = result.get("package") or {}
+            lines = [
+                f"资源包 #{package.get('id')} 已登记网盘分享链接: {package.get('share_url')}"
+                f" · 状态 {package.get('status')}"
+                + (f" · 提取码 {package['share_password']}" if package.get("share_password") else "")
+            ]
+            if result.get("warning"):
+                lines.append(f"注意: {result['warning']}")
+            lines.append("只登记分享链接与提取码；不保存网盘账号密码，弥娅不登录网盘、不代你发布。")
+            return "\n".join(lines)
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"登记网盘分享链接失败: {e}"
+
+
+class EarthOnlineGenerateDistMaterials(_EarthBase):
+    """按渠道生成投放物料草稿（只落站内）。"""
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_generate_dist_materials",
+            "description": "为一个资源包按渠道模板生成投放物料草稿（只落站内）：标题、正文、话题与行动入口由 text_config 模板生成。不发布、不发送、不登录平台",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "package_id": {"type": "integer", "description": "资源包编号"},
+                    "target_ids": {"type": "string", "description": "指定投放位编号，如 \"1,2\"（留空则用全部启用的投放位）"},
+                    "variants": {"type": "integer", "description": "每个投放位生成几个版本 (1-10)，留空跟随配置"},
+                },
+                "required": ["package_id"],
+            },
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            package_id = int(args.get("package_id", 0) or 0)
+            result = self._store().generate_dist_materials(
+                package_id,
+                _dist_int_list(args.get("target_ids")) or None,
+                int(args.get("variants", 0) or 0),
+            )
+            lines = [
+                f"资源包 #{package_id} 已生成 {result.get('created_count', 0)} 条投放物料草稿"
+                f" · 跳过重复 {result.get('skipped_count', 0)} 条"
+            ]
+            for item in (result.get("created") or [])[:8]:
+                flags = f" · 风险自检: {'、'.join(item.get('risk_flags') or [])}" if item.get("risk_flags") else ""
+                lines.append(f"- 物料 #{item['id']} [{item['platform']}] {item['title']}{flags}")
+            if not result.get("created"):
+                lines.append("本轮没有新增物料 (同渠道同版本草稿已存在)。")
+            lines.append("全部只落在站内；要对外发还得提交审批，并且由佳本人确认后手动发布。")
+            return "\n".join(lines)
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"生成投放物料失败: {e}"
+
+
+class EarthOnlinePromoteDistMaterial(_EarthBase):
+    """把投放物料交到审批箱（不发布）。"""
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_promote_dist_material",
+            "description": "把一条投放物料提交到审批箱：需要佳回复「同意 #编号」才批准，批准后仍需佳本人手动发布。弥娅不发布、不发送、不登录平台",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "material_id": {"type": "integer", "description": "投放物料编号"},
+                },
+                "required": ["material_id"],
+            },
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            result = self._store().promote_dist_material(int(args.get("material_id", 0) or 0))
+            material = result.get("material") or {}
+            action = result.get("action") or {}
+            return (
+                f"投放物料 #{material.get('id')} 已提交到审批箱: 草稿 #{action.get('id')} "
+                f"「{action.get('title')}」· 状态 {action.get('status')}\n"
+                f"需要佳回复「同意 #{action.get('id')}」才会批准；批准也不等于发布 —— "
+                "弥娅不会登录平台、不会发送、不会发布，实际发布要佳本人完成。"
+            )
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"提交投放物料审批失败: {e}"
+
+
+class EarthOnlineMarkDistMaterialPublished(_EarthBase):
+    """佳实际发布后回填发布状态。"""
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_mark_dist_material_published",
+            "description": "佳实际发布后回填物料的发布状态与链接（只有审批通过的物料才能标记）；弥娅本身不发布、不发送、不登录平台",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "material_id": {"type": "integer", "description": "投放物料编号"},
+                    "published_url": {"type": "string", "description": "实际发布后的公开链接（http/https）"},
+                },
+                "required": ["material_id"],
+            },
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            result = self._store().mark_dist_material_published(
+                int(args.get("material_id", 0) or 0), str(args.get("published_url", "") or "")
+            )
+            material = result.get("material") or {}
+            return (
+                f"投放物料 #{material.get('id')} 已标记为已发布: {material.get('title')}"
+                f" · 发布链接: {material.get('published_url') or '未填写'}"
+                f" · 发布时间 {material.get('published_at') or '未记录'}\n"
+                "这一步只在佳实际发布后回填；弥娅没有发布任何内容，也没有发送任何消息。"
+            )
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"回填发布状态失败: {e}"
+
+
+class EarthOnlineRecordDistMetrics(_EarthBase):
+    """登记真实转化数字（不编造佣金）。"""
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_record_dist_metrics",
+            "description": "记录佳给的真实渠道转化数字（曝光/点击/转存/拉新/会员单/收入/成本）：只记录真实数字、不许编造佣金，有收入时自动汇入现实收益流水。不登录平台、不抓取平台数据、不发送",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "material_id": {"type": "integer", "description": "投放物料编号（与 package_id 至少填一个）"},
+                    "package_id": {"type": "integer", "description": "资源包编号（与 material_id 至少填一个）"},
+                    "stat_date": {"type": "string", "description": "统计日期 YYYY-MM-DD，留空为今天"},
+                    "impressions": {"type": "integer", "description": "曝光量"},
+                    "clicks": {"type": "integer", "description": "点击量"},
+                    "saves": {"type": "integer", "description": "收藏/点赞量"},
+                    "transfers": {"type": "integer", "description": "转存量"},
+                    "new_users": {"type": "integer", "description": "拉新人数"},
+                    "vip_orders": {"type": "integer", "description": "会员/首单数"},
+                    "revenue": {"type": "number", "description": "当天真实佣金收入（元），没有就填 0"},
+                    "cost": {"type": "number", "description": "当天成本（元）"},
+                    "note": {"type": "string", "description": "备注，例如数据来自哪个后台"},
+                },
+                "required": [],
+            },
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            result = self._store().record_dist_metrics({
+                "material_id": int(args.get("material_id", 0) or 0) or None,
+                "package_id": int(args.get("package_id", 0) or 0) or None,
+                "stat_date": str(args.get("stat_date", "") or ""),
+                "impressions": args.get("impressions", 0),
+                "clicks": args.get("clicks", 0),
+                "saves": args.get("saves", 0),
+                "transfers": args.get("transfers", 0),
+                "new_users": args.get("new_users", 0),
+                "vip_orders": args.get("vip_orders", 0),
+                "revenue": args.get("revenue", 0),
+                "cost": args.get("cost", 0),
+                "note": str(args.get("note", "") or ""),
+            })
+            metric = result.get("metric") or {}
+            lines = [
+                f"转化数据 #{metric.get('id')} 已记录: {metric.get('stat_date')}"
+                f" · 曝光 {metric.get('impressions', 0)} / 点击 {metric.get('clicks', 0)}"
+                f" / 转存 {metric.get('transfers', 0)} / 拉新 {metric.get('new_users', 0)}"
+                f" / 会员单 {metric.get('vip_orders', 0)}"
+                f" · 收入 ¥{float(metric.get('revenue') or 0):.2f} · 成本 ¥{float(metric.get('cost') or 0):.2f}"
+            ]
+            if result.get("income_record_id"):
+                lines.append(
+                    f"收入已自动汇入现实收益流水 #{result['income_record_id']}，收益中枢会一并统计净额与时薪。"
+                )
+            lines.append("只记录佳给的真实数字，不要编造佣金；弥娅不会自动抓取任何平台的转化数据。")
+            return "\n".join(lines)
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"记录转化数据失败: {e}"
+
+
+class EarthOnlineRunDistributionCycle(_EarthBase):
+    """手动跑一次分发巡检（只生成草稿、只提审批）。"""
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        return {
+            "name": "earth_run_distribution_cycle",
+            "description": "手动跑一次网盘分发巡检：只为可分发资源包生成物料草稿并提交审批，不发布、不发送、不登录平台",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        }
+
+    async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
+        try:
+            result = self._store().run_distribution_cycle()
+            if result.get("skipped") == "disabled":
+                return "网盘分发中枢当前已关闭 (earth_online.distribution.enabled=false)，本轮没有做任何动作。"
+            lines = [
+                f"分发巡检完成: 新增投放物料 {result.get('created_materials', 0)} 条"
+                f" · 提交审批 {result.get('submitted', 0)} 条"
+                f" · 审批回填 (批准 {result.get('approved', 0)} / 退回 {result.get('returned', 0)})"
+                f" · 预置分发平台 {result.get('created_channels', 0)} 个 / 投放位 {result.get('created_targets', 0)} 个"
+            ]
+            lines.append(
+                "本轮只为可分发资源包生成物料草稿并提交审批，没有发布、没有发送、没有登录任何平台；"
+                "批准需要佳回复「同意 #编号」。"
+            )
+            return "\n".join(lines)
+        except ValueError as e:
+            return str(e)
+        except Exception as e:
+            return f"分发巡检失败: {e}"
+
+
 def get_earth_online_tools():
     """获取所有地球online 工具实例"""
     return [
@@ -3174,6 +3923,8 @@ def get_earth_online_tools():
         EarthOnlineCreateEarningSprint(),
         EarthOnlineStartFirstIncomeExperiment(),
         EarthOnlineListDigitalResources(),
+        EarthOnlineScoutDigitalResources(),
+        EarthOnlineStageDeliveryFile(),
         EarthOnlineAddDigitalResource(),
         EarthOnlineCreateDigitalProduct(),
         EarthOnlinePrepareXianyuListing(),
@@ -3183,4 +3934,20 @@ def get_earth_online_tools():
         EarthOnlineSubmitEarningAction(),
         EarthOnlineApproveEarningAction(),
         EarthOnlineRevokeEarningAction(),
+        # v24: 网盘分发中枢（只读 5 个）
+        EarthOnlineDistributionReport(),
+        EarthOnlineListDistChannels(),
+        EarthOnlineListDistTargets(),
+        EarthOnlineListDistPackages(),
+        EarthOnlineListDistMaterials(),
+        # v24: 网盘分发中枢（写操作 9 个，全部只落站内）
+        EarthOnlineUpsertDistChannel(),
+        EarthOnlineUpsertDistTarget(),
+        EarthOnlineCreateDistPackage(),
+        EarthOnlineBindDistShare(),
+        EarthOnlineGenerateDistMaterials(),
+        EarthOnlinePromoteDistMaterial(),
+        EarthOnlineMarkDistMaterialPublished(),
+        EarthOnlineRecordDistMetrics(),
+        EarthOnlineRunDistributionCycle(),
     ]

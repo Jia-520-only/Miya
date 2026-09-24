@@ -42,11 +42,15 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 from html import unescape
 from urllib.parse import urlencode, urljoin, urlparse
 
 logger = logging.getLogger(__name__)
+
+# 代理 fake-ip 模式 (Clash 等) 会把所有域名解析到 RFC 2544 基准测试段，
+# 让公开域名看起来像内网地址。只有 earth_online.allow_proxy_fake_ip 显式打开时才放行这一段。
+_PROXY_FAKE_IP_RANGE = ipaddress.ip_network("198.18.0.0/15")
 
 
 class _NoFeedRedirect(urllib.request.HTTPRedirectHandler):
@@ -112,6 +116,20 @@ EARNING_ROUTE_TEMPLATES: List[Dict[str, Any]] = [
             ("准备演示与交付说明", "制作清晰预览、适用范围和交付格式。"),
             ("起草商品页与定价", "弥娅协助写标题、卖点、FAQ 和退款边界。"),
             ("确认后发布并收集反馈", "发布和上架属于外部动作，必须由你最终确认。"),
+        ],
+    },
+    {
+        "key": "netdisk_share", "name": "网盘分发与拉新", "icon": "☁", "kind": "数字分发",
+        "summary": "把已核验授权的资源做成资源包，用网盘分享承接，靠内容引流拿拉新与分销收益。",
+        "best_for": "手里有可合法分发的资源，愿意持续做内容选题和渠道投放",
+        "first_revenue_days": "7-45 天", "cash_cost": "几乎为零", "effort": "中高",
+        "keywords": ["网盘", "分享", "资源", "拉新", "资料", "素材", "合集", "分发", "引流"],
+        "steps": [
+            ("确认资源的可分发授权", "只分发自有原创、开放许可、公有领域或明确获授权的资源，来源与许可逐条记录。"),
+            ("组装第一个资源包", "按一个具体人群的具体场景挑 5-15 份资源，写清适用边界，不做大杂烩。"),
+            ("建立分发平台与投放位", "登记网盘推广链接与各内容渠道投放位；只填公开链接，不填账号密码。"),
+            ("按渠道生成投放物料", "弥娅为每个渠道写好标题、正文、话题与行动入口，形成待审批草稿。"),
+            ("确认后发布并回收转化数据", "发布必须由你确认；发布后把曝光、转存、拉新与佣金填回来，弥娅据此复盘加码或停投。"),
         ],
     },
     {
@@ -575,6 +593,8 @@ class EarthOnlineStore:
         base_dir = os.path.dirname(self.db_path)
         self.data_dir = os.path.join(base_dir, "earthonline")
         self.image_dir = os.path.join(self.data_dir, "images")
+        # v23: 本地交付区。资源落到这里之后，交付链接只指向弥娅自己，不再依赖第三方网盘。
+        self.delivery_dir = os.path.join(self.data_dir, "deliveries")
         self.mirror_path = os.path.join(self.data_dir, "earthonline.json")
         self.templates_path = os.path.join(self.data_dir, "templates.json")
         self.backup_dir = os.path.join(self.data_dir, "backups")
@@ -585,6 +605,11 @@ class EarthOnlineStore:
         self._backup_legacy_virtual_world()
         self._init_tables()
         self._seed_templates_file()
+        # v24: 首次启动把配置里的分发平台预置入库 (幂等, 不覆盖已填的推广链接)
+        try:
+            self.ensure_distribution_defaults()
+        except Exception as exc:
+            logger.warning("[EarthOnline] 分发平台预置失败: %s", exc)
         self._write_mirror()
 
     # ── 配置读取 (qq_config.yaml → earth_online 节, 全部带默认值兜底) ──
@@ -1344,6 +1369,117 @@ class EarthOnlineStore:
                 )
                 """
             )
+            # ── v24: 网盘分发中枢 (分享链接 → 内容引流 → 转化回流 → 复盘加码) ──
+            # 只保存公开的推广链接、邀请口令与投放物料；绝不保存平台账号、密码、
+            # Cookie 或任何登录态，也不执行登录、发布、收款与交易。
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS earning_dist_channels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    kind TEXT NOT NULL DEFAULT 'netdisk_cps',
+                    promo_url TEXT DEFAULT '',
+                    promo_code TEXT DEFAULT '',
+                    settlement_cycle TEXT DEFAULT '',
+                    commission_rule TEXT NOT NULL DEFAULT '{}',
+                    source_note TEXT DEFAULT '',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    notes TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_dist_channels_enabled ON earning_dist_channels(enabled, updated_at)")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS earning_dist_targets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    platform TEXT NOT NULL,
+                    account_label TEXT NOT NULL,
+                    profile_url TEXT DEFAULT '',
+                    audience_note TEXT DEFAULT '',
+                    daily_post_limit INTEGER NOT NULL DEFAULT 1,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    notes TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(platform, account_label)
+                )
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_dist_targets_platform ON earning_dist_targets(platform, enabled)")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS earning_dist_packages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    channel_id INTEGER,
+                    resource_ids TEXT NOT NULL DEFAULT '[]',
+                    share_url TEXT DEFAULT '',
+                    share_password TEXT DEFAULT '',
+                    share_note TEXT DEFAULT '',
+                    cover_hint TEXT DEFAULT '',
+                    keywords TEXT NOT NULL DEFAULT '[]',
+                    status TEXT NOT NULL DEFAULT 'draft',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (channel_id) REFERENCES earning_dist_channels(id)
+                )
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_dist_packages_status ON earning_dist_packages(status, updated_at)")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS earning_dist_materials (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    package_id INTEGER NOT NULL,
+                    target_id INTEGER,
+                    platform TEXT NOT NULL,
+                    variant INTEGER NOT NULL DEFAULT 1,
+                    title TEXT NOT NULL DEFAULT '',
+                    body TEXT NOT NULL DEFAULT '',
+                    tags TEXT NOT NULL DEFAULT '[]',
+                    cta TEXT DEFAULT '',
+                    risk_flags TEXT NOT NULL DEFAULT '[]',
+                    status TEXT NOT NULL DEFAULT 'draft',
+                    action_id INTEGER,
+                    published_url TEXT DEFAULT '',
+                    published_at TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (package_id) REFERENCES earning_dist_packages(id),
+                    FOREIGN KEY (target_id) REFERENCES earning_dist_targets(id)
+                )
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_dist_materials_status ON earning_dist_materials(status, platform, updated_at)")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS earning_dist_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    package_id INTEGER,
+                    material_id INTEGER,
+                    target_id INTEGER,
+                    channel_id INTEGER,
+                    stat_date TEXT NOT NULL,
+                    impressions INTEGER NOT NULL DEFAULT 0,
+                    clicks INTEGER NOT NULL DEFAULT 0,
+                    saves INTEGER NOT NULL DEFAULT 0,
+                    transfers INTEGER NOT NULL DEFAULT 0,
+                    new_users INTEGER NOT NULL DEFAULT 0,
+                    vip_orders INTEGER NOT NULL DEFAULT 0,
+                    revenue REAL NOT NULL DEFAULT 0,
+                    cost REAL NOT NULL DEFAULT 0,
+                    income_record_id INTEGER,
+                    source TEXT NOT NULL DEFAULT 'manual',
+                    note TEXT DEFAULT '',
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_dist_metrics_date ON earning_dist_metrics(stat_date, package_id, material_id)")
             cur.execute(
                 "INSERT OR IGNORE INTO earning_preferences (id, updated_at) VALUES (1, ?)",
                 (datetime.now().isoformat(),),
@@ -1410,8 +1546,8 @@ class EarthOnlineStore:
             self._ensure_column(conn, "real_place_visits", "observed_at", "TEXT NOT NULL DEFAULT ''")
             conn.execute(
                 "UPDATE real_places SET verification_status = CASE "
-                "WHEN source IN ('browser_geolocation','location_watch','gps','journey_end','journey_gps') THEN 'observed' "
-                "WHEN source IN ('conversation','assistant_inference') THEN 'unverified' "
+                "WHEN TRIM(REPLACE(source,'_geocoded','')) IN ('browser_geolocation','location_watch','gps','journey_end','journey_gps') THEN 'observed' "
+                "WHEN TRIM(REPLACE(source,'_geocoded','')) IN ('conversation','assistant_inference') THEN 'unverified' "
                 "ELSE 'confirmed' END, source_updated_at = COALESCE(NULLIF(source_updated_at, ''), updated_at) "
                 "WHERE verification_status = 'unverified' AND source <> 'conversation'"
             )
@@ -1664,6 +1800,16 @@ class EarthOnlineStore:
             (amount, datetime.now().isoformat()),
         )
         self._ledger_locked(conn, "miya", amount, reason)
+
+    def log_activity(self, kind: str, icon: str, summary: str, detail: str = "") -> None:
+        """写一条全局动态 (自带连接与锁，供收益部件等外部模块复用)。"""
+        with self._lock:
+            conn = self._connect()
+            try:
+                self._log_activity(conn, kind, icon, summary, detail)
+                conn.commit()
+            finally:
+                conn.close()
 
     def list_activity(self, limit: int = 50, kind: str = "") -> List[Dict[str, Any]]:
         conn = self._connect()
@@ -4118,6 +4264,19 @@ class EarthOnlineStore:
         self._write_mirror()
         return True
 
+    @staticmethod
+    def _provenance_source(value: Any) -> str:
+        """去掉反向地理编码留下的 `_geocoded` 后缀。
+
+        `record_real_place_visit` 在成功反向地理编码后会把 source 改写成
+        `journey_gps_geocoded`；若不还原，GPS 实测来源就会掉出可信度判定表，
+        被错误降级成"仅确认"。
+        """
+        source = str(value or "").strip().lower()
+        while source.endswith("_geocoded"):
+            source = source[: -len("_geocoded")]
+        return source
+
     def record_real_place_visit(
         self,
         name: str,
@@ -4162,16 +4321,16 @@ class EarthOnlineStore:
         display_address = str(display_address or (geocoded or {}).get("display_name") or "").strip()
         provided_category = str(category or "").strip()[:80]
         category = str(provided_category or (geocoded or {}).get("category") or "other").strip()[:80]
-        if geocoded:
-            source = f"{source}_geocoded" if not source.endswith("_geocoded") else source
+        # 反向地理编码成功只影响地址/分类，不再污染 source: source 必须保持真实证据来源
+        # (曾经的 `_geocoded` 后缀会把 GPS 实测降级成"仅确认"，且全仓库无人消费该后缀)。
         now = datetime.now().isoformat()
         visited = str(visited_at or "").strip() or now
         observed_at = str(observed_at or visited).strip()
         slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
         base_key = slug or f"place-{name.encode('utf-8').hex()}"
         inferred_status = (
-            "observed" if source in {"browser_geolocation", "location_watch", "gps", "journey_end", "journey_gps"}
-            else "unverified" if source.startswith("conversation") or source == "assistant_inference"
+            "observed" if self._provenance_source(source) in {"browser_geolocation", "location_watch", "gps", "journey_end", "journey_gps"}
+            else "unverified" if self._provenance_source(source).startswith("conversation") or self._provenance_source(source) == "assistant_inference"
             else "confirmed"
         )
         verification_status = str(verification_status or inferred_status).strip().lower()
@@ -5676,6 +5835,20 @@ class EarthOnlineStore:
                 raise
         return str(value).strip()[:1000]
 
+    @staticmethod
+    def _proxy_fake_ip_allowed() -> bool:
+        """代理 fake-ip 模式放行开关 (earth_online.allow_proxy_fake_ip)。
+
+        字面内网/本机地址 (127.0.0.1 / 192.168.* 等) 无论开关如何都一律拒绝；
+        这里只放行"域名被代理解析到 198.18.0.0/15"这一种情况。
+        """
+        try:
+            from config.config_utils import get_qq_config
+
+            return bool(get_qq_config("earth_online", "allow_proxy_fake_ip", default=False))
+        except Exception:
+            return False
+
     @classmethod
     def _validate_public_feed_resolution(cls, value: Any) -> str:
         """Validate all current DNS answers; redirects are validated separately per hop."""
@@ -5687,39 +5860,128 @@ class EarthOnlineStore:
             raise ValueError("信息源域名无法解析") from exc
         if not addresses:
             raise ValueError("信息源域名没有可用地址")
+        allow_fake_ip = cls._proxy_fake_ip_allowed()
         for address in addresses:
             ip = ipaddress.ip_address(address[4][0])
-            if not ip.is_global:
-                raise ValueError("信息源域名解析到了内网、本机或保留地址")
+            if ip.is_global:
+                continue
+            if allow_fake_ip and ip in _PROXY_FAKE_IP_RANGE:
+                continue
+            raise ValueError("信息源域名解析到了内网、本机或保留地址")
         return url
 
     @classmethod
-    def _fetch_public_feed(cls, value: Any) -> bytes:
+    def _validate_public_fetch_target(cls, value: Any, trusted_hosts: Iterable[str] = ()) -> str:
+        """校验一次跳转目标。可信主机 (代码内置的公开 API) 只做字面校验。"""
+        host = (urlparse(str(value or "")).hostname or "").lower().rstrip(".")
+        if host and host in set(trusted_hosts):
+            return cls._public_feed_url(value)
+        return cls._validate_public_feed_resolution(value)
+
+    @classmethod
+    def _open_public_url(
+        cls,
+        value: Any,
+        *,
+        accept: str = "application/json",
+        timeout: int = 10,
+        trusted_hosts: Iterable[str] = (),
+    ):
+        """打开一个公开地址，返回已逐跳校验的响应对象 (调用方负责关闭)。
+
+        收益中枢所有对外抓取 (RSS 信息源、开放许可资源 API、交付文件下载) 共用这一条通路。
+        """
         opener = urllib.request.build_opener(_NoFeedRedirect())
+        trusted = {str(host).strip().lower() for host in trusted_hosts if str(host).strip()}
         current = str(value)
         for _ in range(4):
-            current = cls._validate_public_feed_resolution(current)
+            current = cls._validate_public_fetch_target(current, trusted)
             request = urllib.request.Request(
                 current,
-                headers={"User-Agent": "Miya-EarthOnline/1.0", "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml"},
+                headers={"User-Agent": "Miya-EarthOnline/1.0", "Accept": accept},
             )
             try:
-                response = opener.open(request, timeout=10)
+                response = opener.open(request, timeout=timeout)
             except urllib.error.HTTPError as exc:
                 if exc.code not in {301, 302, 303, 307, 308}:
                     raise
                 location = exc.headers.get("Location")
                 if not location:
-                    raise ValueError("信息源返回了无目标的重定向") from exc
+                    raise ValueError("远端返回了无目标的重定向") from exc
                 current = urljoin(current, location)
                 continue
-            with response:
-                cls._validate_public_feed_resolution(response.geturl())
-                payload = response.read(1024 * 1024 + 1)
-            if len(payload) > 1024 * 1024:
-                raise ValueError("信息源响应超过 1MB")
-            return payload
-        raise ValueError("信息源重定向次数过多")
+            cls._validate_public_fetch_target(response.geturl(), trusted)
+            return response
+        raise ValueError("远端重定向次数过多")
+
+    @classmethod
+    def fetch_public_document(
+        cls,
+        value: Any,
+        *,
+        accept: str = "application/json",
+        max_bytes: int = 1024 * 1024,
+        timeout: int = 10,
+        trusted_hosts: Iterable[str] = (),
+    ) -> bytes:
+        """抓取一个公开地址到内存：逐跳校验 DNS、拒绝内网/本机/保留地址、限制响应大小。
+
+        ``trusted_hosts`` 只用于代码里写死的公开 API 域名 (避免代理 fake-ip 误伤)；
+        用户提供的地址永远走完整 DNS 校验。
+        """
+        with cls._open_public_url(value, accept=accept, timeout=timeout, trusted_hosts=trusted_hosts) as response:
+            payload = response.read(max_bytes + 1)
+        if len(payload) > max_bytes:
+            raise ValueError("远端响应超过大小上限")
+        return payload
+
+    @classmethod
+    def download_public_file(
+        cls,
+        value: Any,
+        destination: str,
+        *,
+        max_bytes: int = 100 * 1024 * 1024,
+        timeout: int = 60,
+    ) -> Dict[str, Any]:
+        """把公开地址流式下载到本地文件 (先写 .part 再原子改名)，返回大小与 SHA-256。"""
+        destination = os.path.abspath(destination)
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        partial = destination + ".part"
+        digest = hashlib.sha256()
+        total = 0
+        try:
+            with cls._open_public_url(
+                value, accept="application/octet-stream, */*", timeout=timeout
+            ) as response, open(partial, "wb") as handle:
+                while True:
+                    chunk = response.read(262144)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise ValueError(f"文件超过交付大小上限 ({max_bytes // (1024 * 1024)}MB)")
+                    digest.update(chunk)
+                    handle.write(chunk)
+            if total <= 0:
+                raise ValueError("远端返回了空文件")
+            os.replace(partial, destination)
+        except Exception:
+            if os.path.exists(partial):
+                try:
+                    os.remove(partial)
+                except OSError:
+                    pass
+            raise
+        return {"path": destination, "bytes": total, "sha256": digest.hexdigest()}
+
+    @classmethod
+    def _fetch_public_feed(cls, value: Any) -> bytes:
+        return cls.fetch_public_document(
+            value,
+            accept="application/rss+xml, application/atom+xml, application/xml, text/xml",
+            timeout=10,
+        )
 
     def list_earning_sources(self) -> List[Dict[str, Any]]:
         conn = self._connect()
@@ -6223,6 +6485,40 @@ class EarthOnlineStore:
         })
         return {"success": True, "created": True, "product": product, "action": action}
 
+    def count_digital_resources_created_since(self, since_iso: str) -> int:
+        """统计某个时间点之后新增的数字资源条数 (资源发现器的每日上限用)。"""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS c FROM earning_digital_resources WHERE created_at >= ?",
+                (str(since_iso or ""),),
+            ).fetchone()
+            return int(row["c"] if row else 0)
+        finally:
+            conn.close()
+
+    def scout_digital_resources(
+        self,
+        query: str = "",
+        provider: str = "",
+        limit: int = 0,
+        respect_limits: bool = True,
+    ) -> Dict[str, Any]:
+        """去公开授权源寻找可合法转售的数字资源并入库 (见 core/earth_online_resource_scout.py)。
+
+        后台巡检走 ``respect_limits=True``（受开关、单轮上限与每日上限约束）；
+        弥娅工具与前台调用可以指定检索词 / 数据源 / 条数。
+        """
+        from core.earth_online_resource_scout import scout_open_resources
+
+        return scout_open_resources(
+            self,
+            query=str(query or ""),
+            provider=str(provider or ""),
+            limit=int(limit or 0),
+            respect_limits=bool(respect_limits),
+        )
+
     def prepare_ready_digital_product_draft(self) -> Dict[str, Any]:
         """为一个待发布数字商品生成站内闲鱼草稿，绝不执行外部发布。"""
         for product in self.list_digital_products(status="ready"):
@@ -6361,22 +6657,160 @@ class EarthOnlineStore:
             finally:
                 conn.close()
         self._write_mirror()
+        delivery_path = f"{self.DELIVERY_PATH_PREFIX}{token}"
         return {
             "success": True,
             "delivery_id": delivery_id,
             "order_id": int(order_id),
             "token": token,
+            "delivery_path": delivery_path,
+            "delivery_url": self.absolute_delivery_url(delivery_path),
             "expires_at": expires_at,
             "max_downloads": downloads,
             "resource_manifest": [
-                {"id": int(item["id"]), "title": item["title"], "content_uri": item.get("content_uri", ""), "checksum": item.get("checksum", ""), "version": item.get("version", "")}
-                for item in resources if item
+                self._deliverable_manifest(item) for item in resources if item
             ],
-            "warning": "明文令牌只显示这一次；请通过你确认的渠道交给买家。",
+            "warning": "明文令牌只显示这一次；请通过你确认的渠道交给买家。交付链接本身就是凭证，转发即等于把下载权交给对方。",
         }
 
-    def redeem_digital_delivery(self, token: str) -> Dict[str, Any]:
-        """验证并消费一次交付令牌，返回已审核资源清单。"""
+    # ── v23: 自建限时交付 (令牌 → 弥娅自己下发的下载页, 不再依赖网盘分享) ──
+
+    DELIVERY_PATH_PREFIX = "/api/earth/d/"
+
+    def delivery_settings(self) -> Dict[str, Any]:
+        """交付相关配置 (qq_config.yaml → earth_online.delivery)。"""
+        def number(key: str, default: float, low: float, high: float) -> float:
+            try:
+                value = float(self._cfg("delivery", key, default=default) or default)
+            except (TypeError, ValueError):
+                value = default
+            return max(low, min(high, value))
+
+        return {
+            "enabled": bool(self._cfg("delivery", "enabled", default=True)),
+            "allow_external_redirect": bool(self._cfg("delivery", "allow_external_redirect", default=True)),
+            "max_file_mb": int(number("max_file_mb", 200, 1, 5120)),
+            "zip_max_mb": int(number("zip_max_mb", 500, 1, 10240)),
+            "rate_limit_per_minute": int(number("rate_limit_per_minute", 30, 1, 600)),
+            "base_url": str(self._cfg("delivery", "base_url", default="") or "").strip().rstrip("/"),
+        }
+
+    def absolute_delivery_url(self, path: str) -> str:
+        """把交付路径拼成可发给买家的链接；未配置 base_url 时只返回站内路径。"""
+        base = self.delivery_settings()["base_url"]
+        return f"{base}{path}" if base else path
+
+    def _confined_delivery_path(self, candidate: str) -> str:
+        """把候选路径限制在本地交付区内 (拒绝 .. 逃逸与指向区外的符号链接)。"""
+        root = os.path.realpath(self.delivery_dir)
+        try:
+            resolved = os.path.realpath(str(candidate))
+        except OSError:
+            return ""
+        if resolved != root and not resolved.startswith(root + os.sep):
+            return ""
+        return resolved if os.path.isfile(resolved) else ""
+
+    def resolve_delivery_target(self, resource: Dict[str, Any]) -> Dict[str, Any]:
+        """把资源的内容位置解析成可交付目标。
+
+        - ``delivery://相对路径`` 或交付区内的绝对路径 → kind=file (弥娅自己下发)
+        - 公开 http/https 链接 → kind=url (只能跳转，买家会看到来源)
+        - 其他/缺失 → kind=missing (拒绝交付)
+        """
+        uri = str((resource or {}).get("content_uri") or "").strip()
+        if not uri:
+            return {"kind": "missing", "reason": "资源还没有内容位置 (content_uri)"}
+        if uri.lower().startswith(("http://", "https://")):
+            return {
+                "kind": "url",
+                "href": uri,
+                "filename": os.path.basename(urlparse(uri).path) or f"resource-{resource.get('id')}",
+            }
+        if uri.startswith("delivery://"):
+            candidate = os.path.join(self.delivery_dir, uri[len("delivery://"):].lstrip("/\\"))
+        elif os.path.isabs(uri):
+            candidate = uri
+        else:
+            return {"kind": "missing", "reason": "相对路径必须使用 delivery:// 前缀"}
+        resolved = self._confined_delivery_path(candidate)
+        if not resolved:
+            return {"kind": "missing", "reason": "交付文件不在本地交付区内或已丢失"}
+        return {
+            "kind": "file",
+            "path": resolved,
+            "filename": os.path.basename(resolved),
+            "size": int(os.path.getsize(resolved)),
+        }
+
+    def _deliverable_manifest(self, resource: Dict[str, Any]) -> Dict[str, Any]:
+        """交付清单条目 (令牌只保存哈希，这里也不会泄露本地绝对路径)。"""
+        target = self.resolve_delivery_target(resource)
+        return {
+            "id": int(resource["id"]),
+            "title": str(resource.get("title") or ""),
+            "kind": target.get("kind"),
+            "filename": target.get("filename") or "",
+            "size": int(target.get("size") or 0),
+            "checksum": str(resource.get("checksum") or ""),
+            "version": str(resource.get("version") or ""),
+            "reason": target.get("reason") or "",
+            "content_uri": str(resource.get("content_uri") or ""),
+        }
+
+    def stage_delivery_file(self, resource_id: int, timeout: int = 120) -> Dict[str, Any]:
+        """把资源的外部直链下载到本地交付区，并把 content_uri 改写为 delivery://。
+
+        之后这个资源由弥娅自己下发，买家不会再看到第三方网盘或来源链接。
+        """
+        resource = self.get_digital_resource(resource_id)
+        if not resource:
+            raise ValueError("数字资源不存在")
+        if resource.get("rights_status") != "verified" or resource.get("status") != "approved":
+            raise ValueError("只有授权已核验并审核通过的资源才能准备交付文件")
+        uri = str(resource.get("content_uri") or "").strip()
+        if uri.startswith("delivery://") or os.path.isabs(uri):
+            if self.resolve_delivery_target(resource).get("kind") == "file":
+                return {
+                    "success": True, "staged": False, "resource": resource,
+                    "message": "该资源已在本地交付区，无需重新下载",
+                    "manifest": self._deliverable_manifest(resource),
+                }
+            raise ValueError("交付区文件已丢失，请先把 content_uri 改回公开来源地址再重新准备")
+        if not uri.lower().startswith(("http://", "https://")):
+            raise ValueError("资源的内容位置不是可下载的公开地址")
+
+        settings = self.delivery_settings()
+        max_bytes = int(settings["max_file_mb"]) * 1024 * 1024
+        os.makedirs(self.delivery_dir, exist_ok=True)
+        raw_name = os.path.basename(urlparse(uri).path) or ""
+        safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", raw_name).strip("-") or "download"
+        filename = f"r{int(resource_id)}-{safe_name[:80]}"
+        destination = os.path.join(self.delivery_dir, filename)
+        if os.path.isfile(destination):
+            filename = f"r{int(resource_id)}-{datetime.now().strftime('%H%M%S')}-{safe_name[:70]}"
+            destination = os.path.join(self.delivery_dir, filename)
+
+        result = self.download_public_file(uri, destination, max_bytes=max_bytes, timeout=timeout)
+        updated = self.update_digital_resource(
+            resource_id,
+            {"content_uri": f"delivery://{filename}", "checksum": result["sha256"]},
+        )
+        self.log_activity(
+            "earning", "▣",
+            f"资源 #{int(resource_id)} 已落到本地交付区",
+            f"{result['bytes']} 字节 · {filename} · 交付不再依赖第三方网盘",
+        )
+        return {
+            "success": True,
+            "staged": True,
+            "resource": updated or resource,
+            "manifest": self._deliverable_manifest(updated or resource),
+            "message": f"已下载 {result['bytes']} 字节到本地交付区，交付链接将由弥娅自己下发",
+        }
+
+    def _delivery_manifest(self, token: str, consume: bool) -> Dict[str, Any]:
+        """校验交付令牌；consume=True 时同时消费一次下载配额。"""
         digest = hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
         now = datetime.now().isoformat()
         with self._lock:
@@ -6392,7 +6826,9 @@ class EarthOnlineStore:
                     conn.execute("UPDATE earning_digital_deliveries SET status='expired' WHERE id=?", (int(delivery["id"]),))
                     conn.commit()
                     return {"success": False, "message": "交付令牌已过期"}
-                if int(delivery.get("download_count") or 0) >= int(delivery.get("max_downloads") or 0):
+                max_downloads = int(delivery.get("max_downloads") or 0)
+                count = int(delivery.get("download_count") or 0)
+                if count >= max_downloads:
                     conn.execute("UPDATE earning_digital_deliveries SET status='exhausted' WHERE id=?", (int(delivery["id"]),))
                     conn.commit()
                     return {"success": False, "message": "交付令牌使用次数已耗尽"}
@@ -6401,16 +6837,24 @@ class EarthOnlineStore:
                 resources = [self.get_digital_resource(value) for value in product.get("resource_ids", [])]
                 if not order or any(not item or item.get("rights_status") != "verified" or item.get("status") != "approved" for item in resources):
                     return {"success": False, "message": "订单或资源授权状态异常，交付已暂停"}
-                count = int(delivery.get("download_count") or 0) + 1
-                status = "exhausted" if count >= int(delivery.get("max_downloads") or 0) else "active"
-                conn.execute(
-                    "UPDATE earning_digital_deliveries SET download_count=?, status=?, last_accessed_at=? WHERE id=?",
-                    (count, status, now, int(delivery["id"])),
-                )
-                conn.commit()
+                if consume:
+                    count += 1
+                    status = "exhausted" if count >= max_downloads else "active"
+                    conn.execute(
+                        "UPDATE earning_digital_deliveries SET download_count=?, status=?, last_accessed_at=? WHERE id=?",
+                        (count, status, now, int(delivery["id"])),
+                    )
+                    conn.commit()
                 return {
-                    "success": True, "order_id": int(order["id"]), "product": product,
-                    "remaining_downloads": max(0, int(delivery["max_downloads"]) - count),
+                    "success": True,
+                    "order_id": int(order["id"]),
+                    "delivery_id": int(delivery["id"]),
+                    "product": product,
+                    "expires_at": str(delivery.get("expires_at") or ""),
+                    "max_downloads": max_downloads,
+                    "download_count": count,
+                    "remaining_downloads": max(0, max_downloads - count),
+                    "manifest": [self._deliverable_manifest(item) for item in resources if item],
                     "resources": [
                         {"title": item["title"], "content_uri": item.get("content_uri", ""), "checksum": item.get("checksum", ""), "version": item.get("version", "")}
                         for item in resources if item
@@ -6418,6 +6862,32 @@ class EarthOnlineStore:
                 }
             finally:
                 conn.close()
+
+    def inspect_digital_delivery(self, token: str) -> Dict[str, Any]:
+        """校验令牌并返回交付清单，不消耗配额 (公开下载页用)。"""
+        return self._delivery_manifest(token, consume=False)
+
+    def claim_digital_download(self, token: str) -> Dict[str, Any]:
+        """消费一次下载配额并返回交付清单 (真正下发文件/打包前调用)。"""
+        return self._delivery_manifest(token, consume=True)
+
+    def redemption_target(self, manifest_item: Dict[str, Any], token: str) -> Dict[str, Any]:
+        """把清单条目解析成公开下载页要用的目标 (含绝对下载地址)。"""
+        kind = str(manifest_item.get("kind") or "")
+        resource = self.get_digital_resource(int(manifest_item.get("id") or 0)) or {}
+        target = self.resolve_delivery_target(resource)
+        base = self.DELIVERY_PATH_PREFIX + str(token)
+        return {
+            **manifest_item,
+            "target": target,
+            "file_path": f"{base}/f/{manifest_item.get('id')}",
+            "file_url": self.absolute_delivery_url(f"{base}/f/{manifest_item.get('id')}"),
+            "kind": kind,
+        }
+
+    def redeem_digital_delivery(self, token: str) -> Dict[str, Any]:
+        """验证并消费一次交付令牌，返回已审核资源清单 (兼容旧接口)。"""
+        return self._delivery_manifest(token, consume=True)
 
     def revoke_digital_delivery(self, delivery_id: int) -> Dict[str, Any]:
         now = datetime.now().isoformat()
@@ -7261,11 +7731,18 @@ class EarthOnlineStore:
     def run_earning_automation_cycle(self) -> Dict[str, Any]:
         """运行一次安全的收益自动巡检。
 
-        该入口处理公开 RSS/Atom 信息源，并推进已明确启动的收益实验。
+        该入口同步公开 RSS/Atom 信息源、去公开授权源补充可合法转售的资源、
+        为可分发资源包生成投放物料草稿并提交审批，并推进已明确启动的收益实验。
         它不会创建外部动作、发送消息、上传资料、接单或执行任何资金操作。
         """
         started_at = datetime.now().isoformat()
         sync = self.sync_earning_sources()
+        # 开放许可资源发现器：只收录授权可确定性判定的资源，受开关/单轮/每日上限约束。
+        try:
+            resource_scout = self.scout_digital_resources()
+        except Exception as exc:
+            logger.warning(f"[EarthOnline] 资源发现器异常: {exc}")
+            resource_scout = {"success": False, "created_count": 0, "errors": [{"provider": "scout", "query": "", "error": str(exc)[:300]}]}
         # 先建立一次排序快照，再推进所有已明确启动的实验。旧版本只推进
         # automation_tool，导致 digital_product / resale 等路线在后台永远停住。
         guidance = self.earning_guidance()
@@ -7282,10 +7759,31 @@ class EarthOnlineStore:
             "status": "no_active_experiment", "route_key": "automation_tool", "created": False,
         }
         product_draft = self.prepare_ready_digital_product_draft()
+        # v24: 网盘分发巡检 —— 只为可分发资源包生成投放物料草稿并提交审批，
+        # 同样不登录平台、不发布、不发送。
+        try:
+            distribution = self.run_distribution_cycle()
+        except Exception as exc:
+            logger.warning(f"[EarthOnline] 分发巡检异常: {exc}")
+            distribution = {"success": False, "error": str(exc)[:300]}
         actions = ["公开信息同步", "去重与初筛", "收益排序刷新", "安全推进已核验机会"]
+        if resource_scout.get("created_count"):
+            actions.append(
+                f"资源发现器补充 {resource_scout['created_count']} 条开放许可资源"
+                f"（自动核验 {resource_scout.get('auto_verified_count', 0)} 条）"
+            )
+        elif resource_scout.get("skipped"):
+            actions.append(f"资源发现器本轮跳过（{resource_scout['skipped']}）")
         actions.extend(pipeline.get("actions", []))
         if product_draft.get("created"):
             actions.append("为已审核数字商品生成闲鱼发布草稿")
+        if distribution.get("created_materials"):
+            actions.append(
+                f"为可分发资源包生成 {distribution['created_materials']} 条投放物料草稿"
+                f"（提交审批 {distribution.get('submitted', 0)} 条）"
+            )
+        if distribution.get("approved"):
+            actions.append(f"审批结果回填：{distribution['approved']} 条投放物料已批准，等你手动发布")
         for route, state in experiments.items():
             if state.get("status") == "quest_created":
                 actions.append(f"推进 {route} 收益实验并生成当前委托")
@@ -7297,10 +7795,12 @@ class EarthOnlineStore:
             "started_at": started_at,
             "finished_at": datetime.now().isoformat(),
             "sync": sync,
+            "resource_scout": resource_scout,
             "experiment": experiment,
             "experiments": experiments,
             "pipeline": pipeline,
             "digital_product": product_draft,
+            "distribution": distribution,
             "guidance": guidance,
             "actions": actions,
             "requires_confirmation": guidance.get("automation", {}).get("requires_confirmation", []),
@@ -7385,6 +7885,10 @@ class EarthOnlineStore:
         digital_products = self.list_digital_products()
         digital_orders = self.list_digital_orders()
         digital_deliveries = self.list_digital_deliveries()
+        dist_channels = self.list_dist_channels()
+        dist_targets = self.list_dist_targets()
+        dist_packages = self.list_dist_packages()
+        dist_materials = self.list_dist_materials(limit=200)
         skills = [str(value).lower() for value in prefs.get("skills", [])]; preferred_kinds = [str(value).lower() for value in prefs.get("preferred_kinds", [])]
         for raw in opportunities:
             item = dict(raw); item["scam_flags"] = self._infer_earning_scam_flags(item); hours = float(item.get("hours") or 0); lo = float(item.get("income_min") or 0); hi = float(item.get("income_max") or 0); text = f"{item.get('title', '')} {item.get('description', '')} {item.get('kind', '')}".lower(); item["hourly_estimate"] = round((lo + hi) / 2 / hours, 2) if hours > 0 else 0
@@ -7421,9 +7925,14 @@ class EarthOnlineStore:
         ready_products = [product for product in digital_products if product.get("status") == "ready"]
         pending_actions = [action for action in actions if action.get("status") == "pending"]
         approved_actions = [action for action in actions if action.get("status") == "approved"]
+        dist_pending = [item for item in dist_materials if item.get("status") == "submitted"]
+        dist_ready_packages = [item for item in dist_packages if item.get("status") in ("ready", "published")]
+        dist_published = [item for item in dist_materials if item.get("status") == "published"]
         profile_ready = bool(prefs.get("skills") or prefs.get("sellable_assets") or active_offers) and float(prefs.get("weekly_hours") or 0) > 0
         if pending_actions:
             brief = f"审批箱里有 {len(pending_actions)} 份外部动作草稿待你逐项确认；批准只在 30 分钟内有效，也不会自动发送。"
+        elif dist_pending:
+            brief = f"网盘分发有 {len(dist_pending)} 条投放物料等你确认；批准后由你手动发布，弥娅不登录平台。"
         elif approved_actions:
             brief = f"有 {len(approved_actions)} 份草稿已经批准，等待你人工执行；弥娅不会自行发送或交易。"
         elif next_step:
@@ -7441,6 +7950,17 @@ class EarthOnlineStore:
             "offers": offers[:20], "action_drafts": actions[:50],
             "digital_resources": digital_resources[:50], "digital_products": digital_products[:30],
             "digital_orders": digital_orders[:50], "digital_deliveries": digital_deliveries[:50],
+            "distribution": {
+                "channels": dist_channels,
+                "targets": dist_targets,
+                "packages": dist_packages[:50],
+                "materials": dist_materials[:100],
+                "settings": self.distribution_settings(),
+                "brief": (
+                    f"{len(dist_ready_packages)} 个资源包可分发 · {len(dist_pending)} 条物料待审批 · {len(dist_published)} 条已发布"
+                    if dist_packages else "还没有网盘资源包；先确认资源授权，再组装第一个资源包。"
+                ),
+            },
             "routes": routes, "profile_ready": profile_ready, "brief": brief, "focus_plan": focus_plan, "next_action": next_step,
             "pipeline": pipeline,
             "totals": {
@@ -7450,20 +7970,1140 @@ class EarthOnlineStore:
                 "approved_resource_count": len(approved_resources), "ready_product_count": len(ready_products),
                 "awaiting_payment_count": sum(1 for order in digital_orders if order.get("status") == "awaiting_payment"),
                 "active_delivery_count": sum(1 for delivery in digital_deliveries if delivery.get("status") == "active"),
+                "dist_channel_count": len(dist_channels), "dist_target_count": len(dist_targets),
+                "dist_package_count": len(dist_packages), "dist_ready_package_count": len(dist_ready_packages),
+                "dist_pending_material_count": len(dist_pending), "dist_published_material_count": len(dist_published),
                 "total_hours": round(total_hours, 2),
                 "effective_hourly_rate": round(net_income / total_hours, 2) if total_hours > 0 else 0,
             },
             "automation": {
-                "automatic": ["公开信息同步", "去重与初筛", "核验机会安全入选", "推进已启动的收益实验", "生成当前站内委托", "为已审核数字商品生成闲鱼发布草稿", "站内提醒", "收益复盘"],
-                "requires_confirmation": ["对外发布", "联系客户", "提交申请", "上传资料", "接受订单", "确认付款后交付"],
-                "blocked": ["付款", "转账", "提现", "退款", "自动输入验证码或支付密码"],
+                "automatic": ["公开信息同步", "去重与初筛", "核验机会安全入选", "推进已启动的收益实验", "生成当前站内委托", "为已审核数字商品生成闲鱼发布草稿", "为可分发资源包按渠道生成投放物料草稿", "回填审批结果与转化复盘", "站内提醒", "收益复盘"],
+                "requires_confirmation": ["对外发布", "联系客户", "提交申请", "上传资料", "接受订单", "确认付款后交付", "把物料发到任何内容平台"],
+                "blocked": ["付款", "转账", "提现", "退款", "自动输入验证码或支付密码", "保存或使用平台账号密码、Cookie 与登录态"],
             },
             "authorization": {
                 "policy": self.get_earning_authorization_policy(),
                 "audit": self.list_earning_authorization_audit(limit=20),
             },
-            "boundary": "建议不保证收益；资源必须有可核验授权。弥娅可自动整理资源和生成闲鱼草稿，但外部发布、收款确认、交付和交易仍由你人工执行。付款、转账、提现、退款和金融凭据输入不开放给弥娅。",
+            "boundary": "建议不保证收益；资源必须有可核验授权。弥娅可自动整理资源、组装资源包、按渠道生成投放物料，并生成闲鱼发布草稿，但外部发布、收款确认、交付和交易仍由你人工执行。付款、转账、提现、退款和金融凭据输入不开放给弥娅。",
         }
+
+    # ══════════════════════════════════════════════════
+    # v24: 网盘分发中枢
+    # 分发平台(网盘/分销) → 资源包 → 各渠道投放物料 → 转化回流 → 复盘加码
+    # 边界: 只负责站内整理、生成草稿与数据复盘；对外发布仍走 earning_action_drafts
+    # 的逐次审批，弥娅不登录任何平台、不发送、不收款、不交易。
+    # ══════════════════════════════════════════════════
+
+    DIST_PLATFORMS = (
+        "xiaohongshu", "zhihu", "tieba", "bilibili", "douyin",
+        "kuaishou", "weibo", "gongzhonghao", "xianyu", "other",
+    )
+    DIST_CHANNEL_KINDS = ("netdisk_cps", "netdisk_referral", "direct_sale", "other")
+    DIST_PACKAGE_STATUS = ("draft", "ready", "published", "retired")
+    DIST_MATERIAL_STATUS = ("draft", "submitted", "approved", "published", "retired")
+
+    # 平台风险词自检: 命中即打标, 只提示不删改, 由佳决定是否调整文案。
+    DIST_RISK_PATTERNS = (
+        ("疑似诱导私下联系", ("私信我", "加微信", "加v", "加V", "留邮箱", "扫码加", "个人号", "扣扣", "加我好友")),
+        ("疑似夸大承诺", ("全网最全", "永久有效", "百分百", "100%有效", "包过", "稳赚", "日入", "月入过万", "零风险", "绝对")),
+        ("疑似侵权资源", ("破解", "盗版", "免授权", "搬运", "付费课", "内部资料", "原价购买")),
+        ("疑似平台违禁词", ("最低价", "第一", "国家级", "史上最", "顶级", "独家首发")),
+        ("疑似诱导分享", ("转发三个群", "集赞", "拉人进群", "邀请好友才能")),
+    )
+
+    def distribution_settings(self) -> Dict[str, Any]:
+        """网盘分发中枢配置 (qq_config.yaml → earth_online.distribution)。"""
+        raw_channels = self._cfg("distribution", "default_channels", default=[]) or []
+        channels: List[Dict[str, Any]] = []
+        if isinstance(raw_channels, list):
+            for item in raw_channels:
+                if not isinstance(item, dict):
+                    continue
+                key = self._slug(str(item.get("key") or item.get("name") or ""))
+                if not key:
+                    continue
+                channels.append({
+                    "key": key[:60],
+                    "name": str(item.get("name") or key)[:120],
+                    "kind": self._normalise_earning_status(item.get("kind"), self.DIST_CHANNEL_KINDS, "netdisk_cps"),
+                    "promo_url": str(item.get("promo_url") or "")[:1000],
+                    "promo_code": str(item.get("promo_code") or "")[:200],
+                    "settlement_cycle": str(item.get("settlement_cycle") or "")[:80],
+                    "commission_note": str(item.get("commission_note") or "")[:500],
+                })
+        raw_targets = self._cfg("distribution", "default_targets", default=[]) or []
+        targets: List[Dict[str, Any]] = []
+        if isinstance(raw_targets, list):
+            for item in raw_targets:
+                if not isinstance(item, dict):
+                    continue
+                platform = self._normalise_earning_status(item.get("platform"), self.DIST_PLATFORMS, "")
+                label = str(item.get("account_label") or "").strip()
+                if not platform or not label:
+                    continue
+                targets.append({
+                    "platform": platform,
+                    "account_label": label[:120],
+                    "profile_url": str(item.get("profile_url") or "")[:1000],
+                    "audience_note": str(item.get("audience_note") or "")[:500],
+                    "daily_post_limit": max(1, min(50, int(item.get("daily_post_limit") or 1))),
+                })
+        return {
+            "enabled": bool(self._cfg("distribution", "enabled", default=True)),
+            "require_verified_rights": bool(self._cfg("distribution", "require_verified_rights", default=True)),
+            "auto_generate": bool(self._cfg("distribution", "auto_generate", default=True)),
+            "auto_submit": bool(self._cfg("distribution", "auto_submit", default=True)),
+            "max_materials_per_cycle": max(0, min(50, int(self._cfg("distribution", "max_materials_per_cycle", default=3) or 0))),
+            "max_submit_per_cycle": max(0, min(50, int(self._cfg("distribution", "max_submit_per_cycle", default=2) or 0))),
+            "variants_per_target": max(1, min(10, int(self._cfg("distribution", "variants_per_target", default=1) or 1))),
+            "min_impressions_for_verdict": max(0, int(self._cfg("distribution", "min_impressions_for_verdict", default=200) or 0)),
+            "min_clicks_for_verdict": max(0, int(self._cfg("distribution", "min_clicks_for_verdict", default=20) or 0)),
+            "report_days": max(1, min(365, int(self._cfg("distribution", "report_days", default=30) or 30))),
+            "default_channels": channels,
+            "default_targets": targets,
+        }
+
+    @staticmethod
+    def _slug(value: str) -> str:
+        text = re.sub(r"[^0-9a-zA-Z_\u4e00-\u9fff-]+", "-", str(value or "").strip().lower())
+        return text.strip("-")[:60]
+
+    # ── 分发平台 (网盘/分销) ─────────────────────────
+
+    @staticmethod
+    def _decode_json_object(value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return dict(value)
+        if isinstance(value, str) and value.strip():
+            try:
+                decoded = json.loads(value)
+            except (TypeError, ValueError):
+                return {}
+            return dict(decoded) if isinstance(decoded, dict) else {}
+        return {}
+
+    @staticmethod
+    def _public_http_url(value: Any, label: str) -> str:
+        url = str(value or "").strip()[:1000]
+        if url and not url.lower().startswith(("http://", "https://")):
+            raise ValueError(f"{label}必须是公开的 http/https 地址")
+        return url
+
+    def list_dist_channels(self, enabled_only: bool = False) -> List[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            sql = "SELECT * FROM earning_dist_channels"
+            if enabled_only:
+                sql += " WHERE enabled = 1"
+            rows = conn.execute(sql + " ORDER BY enabled DESC, id ASC").fetchall()
+            result = []
+            for row in rows:
+                item = dict(row)
+                item["enabled"] = bool(item.get("enabled"))
+                item["commission_rule"] = self._decode_json_object(item.get("commission_rule"))
+                result.append(item)
+            return result
+        finally:
+            conn.close()
+
+    def get_dist_channel(self, channel_id: int) -> Optional[Dict[str, Any]]:
+        return next((item for item in self.list_dist_channels() if int(item["id"]) == int(channel_id)), None)
+
+    def upsert_dist_channel(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """新增或按 key/id 更新分发平台；只保存公开推广链接，不保存任何平台凭据。"""
+        data = data if isinstance(data, dict) else {}
+        now = datetime.now().isoformat()
+        commission_rule = self._decode_json_object(data.get("commission_rule"))
+        existing = None
+        if data.get("id"):
+            existing = self.get_dist_channel(int(data["id"]))
+        if not existing:
+            key = self._slug(str(data.get("key") or data.get("name") or ""))
+            existing = next((item for item in self.list_dist_channels() if item["key"] == key), None) if key else None
+        # 佣金口径: 未显式传 commission_rule 时沿用已有规则, 避免编辑平台时把备注清空。
+        if not commission_rule:
+            commission_rule = dict((existing or {}).get("commission_rule") or {})
+        note_text = str(data.get("commission_note") or data.get("note") or "").strip()[:500]
+        if note_text:
+            commission_rule["note"] = note_text
+        name = str(data.get("name") or (existing or {}).get("name") or "").strip()[:120]
+        key = self._slug(str(data.get("key") or (existing or {}).get("key") or name))
+        if not key or not name:
+            raise ValueError("分发平台必须有名称")
+        kind = self._normalise_earning_status(data.get("kind", (existing or {}).get("kind")), self.DIST_CHANNEL_KINDS, "netdisk_cps")
+        promo_url = self._public_http_url(data.get("promo_url", (existing or {}).get("promo_url")), "推广链接")
+        promo_code = str(data.get("promo_code", (existing or {}).get("promo_code")) or "")[:200]
+        settlement_cycle = str(data.get("settlement_cycle", (existing or {}).get("settlement_cycle")) or "")[:80]
+        source_note = str(data.get("source_note", (existing or {}).get("source_note")) or "")[:500]
+        notes = str(data.get("notes", (existing or {}).get("notes")) or "")[:2000]
+        if "enabled" in data:
+            enabled = 1 if data.get("enabled") else 0
+        else:
+            enabled = 1 if (existing or {}).get("enabled", True) else 0
+        with self._lock:
+            conn = self._connect()
+            try:
+                if existing:
+                    conn.execute(
+                        "UPDATE earning_dist_channels SET key=?, name=?, kind=?, promo_url=?, promo_code=?, settlement_cycle=?, commission_rule=?, source_note=?, enabled=?, notes=?, updated_at=? WHERE id=?",
+                        (key, name, kind, promo_url, promo_code, settlement_cycle,
+                         json.dumps(commission_rule, ensure_ascii=False), source_note, enabled, notes, now, int(existing["id"])),
+                    )
+                    channel_id = int(existing["id"])
+                else:
+                    cur = conn.execute(
+                        "INSERT INTO earning_dist_channels (key, name, kind, promo_url, promo_code, settlement_cycle, commission_rule, source_note, enabled, notes, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (key, name, kind, promo_url, promo_code, settlement_cycle,
+                         json.dumps(commission_rule, ensure_ascii=False), source_note, enabled, notes, now, now),
+                    )
+                    channel_id = int(cur.lastrowid)
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_dist_channel(channel_id) or {}
+
+    def delete_dist_channel(self, channel_id: int) -> bool:
+        used = [item for item in self.list_dist_packages() if item.get("channel_id") and int(item["channel_id"]) == int(channel_id)]
+        if used:
+            raise ValueError(f"还有 {len(used)} 个资源包在用这个分发平台，先改绑或删除资源包")
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute("DELETE FROM earning_dist_channels WHERE id = ?", (int(channel_id),))
+                conn.commit()
+                return cur.rowcount > 0
+            finally:
+                conn.close()
+
+    def ensure_distribution_defaults(self) -> Dict[str, Any]:
+        """把 qq_config.yaml 里配置的分发平台与投放位补进库 (幂等, 不覆盖已有链接)。"""
+        settings = self.distribution_settings()
+        created_channels, created_targets = 0, 0
+        existing_keys = {item["key"] for item in self.list_dist_channels()}
+        for item in settings["default_channels"]:
+            if item["key"] in existing_keys:
+                continue
+            try:
+                self.upsert_dist_channel({
+                    "key": item["key"], "name": item["name"], "kind": item["kind"],
+                    "promo_url": item["promo_url"], "promo_code": item["promo_code"],
+                    "settlement_cycle": item["settlement_cycle"],
+                    "commission_rule": {"note": item["commission_note"]} if item["commission_note"] else {},
+                })
+                created_channels += 1
+            except ValueError as exc:
+                logger.warning("[EarthOnline] 分发平台预置失败 %s: %s", item.get("key"), exc)
+        existing_targets = {(item["platform"], item["account_label"]) for item in self.list_dist_targets()}
+        for item in settings["default_targets"]:
+            if (item["platform"], item["account_label"]) in existing_targets:
+                continue
+            self.upsert_dist_target(item)
+            created_targets += 1
+        return {"created_channels": created_channels, "created_targets": created_targets, **settings}
+
+    # ── 投放位 (内容渠道账号位) ──────────────────────
+
+    def list_dist_targets(self, enabled_only: bool = False, platform: str = "") -> List[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            clauses: List[str] = []
+            params: List[Any] = []
+            if enabled_only:
+                clauses.append("enabled = 1")
+            if platform:
+                clauses.append("platform = ?")
+                params.append(str(platform))
+            where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+            rows = conn.execute(f"SELECT * FROM earning_dist_targets{where} ORDER BY enabled DESC, platform ASC, id ASC", params).fetchall()
+            result = []
+            for row in rows:
+                item = dict(row)
+                item["enabled"] = bool(item.get("enabled"))
+                result.append(item)
+            return result
+        finally:
+            conn.close()
+
+    def get_dist_target(self, target_id: int) -> Optional[Dict[str, Any]]:
+        return next((item for item in self.list_dist_targets() if int(item["id"]) == int(target_id)), None)
+
+    def upsert_dist_target(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """新增或更新一个渠道投放位；不接收账号密码、Cookie 或登录态。"""
+        data = data if isinstance(data, dict) else {}
+        existing = self.get_dist_target(int(data["id"])) if data.get("id") else None
+        platform = self._normalise_earning_status(data.get("platform", (existing or {}).get("platform")), self.DIST_PLATFORMS, "")
+        if not platform:
+            raise ValueError(f"投放平台只能是: {', '.join(self.DIST_PLATFORMS)}")
+        label = str(data.get("account_label", (existing or {}).get("account_label")) or "").strip()[:120]
+        if not label:
+            raise ValueError("投放位需要一个账号标识 (例如「小红书主号」，不要填密码)")
+        if any(word in label.lower() for word in ("password", "密码", "cookie", "token")):
+            raise ValueError("投放位只记录账号标识，不保存密码、Cookie 或令牌")
+        profile_url = self._public_http_url(data.get("profile_url", (existing or {}).get("profile_url")), "主页链接")
+        audience_note = str(data.get("audience_note", (existing or {}).get("audience_note")) or "")[:500]
+        notes = str(data.get("notes", (existing or {}).get("notes")) or "")[:2000]
+        try:
+            daily_post_limit = max(1, min(50, int(data.get("daily_post_limit", (existing or {}).get("daily_post_limit", 1)) or 1)))
+        except (TypeError, ValueError):
+            daily_post_limit = 1
+        enabled = (1 if data.get("enabled") else 0) if "enabled" in data else (1 if (existing or {}).get("enabled", True) else 0)
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                if existing:
+                    conn.execute(
+                        "UPDATE earning_dist_targets SET platform=?, account_label=?, profile_url=?, audience_note=?, daily_post_limit=?, enabled=?, notes=?, updated_at=? WHERE id=?",
+                        (platform, label, profile_url, audience_note, daily_post_limit, enabled, notes, now, int(existing["id"])),
+                    )
+                    target_id = int(existing["id"])
+                else:
+                    row = conn.execute(
+                        "SELECT id FROM earning_dist_targets WHERE platform = ? AND account_label = ?", (platform, label)
+                    ).fetchone()
+                    if row:
+                        target_id = int(row["id"])
+                        conn.execute(
+                            "UPDATE earning_dist_targets SET profile_url=?, audience_note=?, daily_post_limit=?, enabled=?, notes=?, updated_at=? WHERE id=?",
+                            (profile_url, audience_note, daily_post_limit, enabled, notes, now, target_id),
+                        )
+                    else:
+                        cur = conn.execute(
+                            "INSERT INTO earning_dist_targets (platform, account_label, profile_url, audience_note, daily_post_limit, enabled, notes, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                            (platform, label, profile_url, audience_note, daily_post_limit, enabled, notes, now, now),
+                        )
+                        target_id = int(cur.lastrowid)
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_dist_target(target_id) or {}
+
+    def delete_dist_target(self, target_id: int) -> bool:
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("UPDATE earning_dist_materials SET target_id = NULL, updated_at = ? WHERE target_id = ?", (datetime.now().isoformat(), int(target_id)))
+                cur = conn.execute("DELETE FROM earning_dist_targets WHERE id = ?", (int(target_id),))
+                conn.commit()
+                return cur.rowcount > 0
+            finally:
+                conn.close()
+
+    # ── 资源包 (资源组 + 网盘分享承接) ───────────────
+
+    def list_dist_packages(self, status: str = "") -> List[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            if status:
+                rows = conn.execute(
+                    "SELECT * FROM earning_dist_packages WHERE status = ? ORDER BY updated_at DESC, id DESC", (str(status),)
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM earning_dist_packages ORDER BY updated_at DESC, id DESC").fetchall()
+            packages = []
+            for row in rows:
+                item = dict(row)
+                item["resource_ids"] = [int(value) for value in self._decode_string_list(item.get("resource_ids")) if str(value).isdigit()]
+                item["keywords"] = self._decode_string_list(item.get("keywords"))
+                packages.append(item)
+            channels = {int(item["id"]): item for item in self.list_dist_channels()}
+            for item in packages:
+                channel = channels.get(int(item["channel_id"])) if item.get("channel_id") else None
+                item["channel_name"] = (channel or {}).get("name", "")
+                item["channel_key"] = (channel or {}).get("key", "")
+                item["resource_count"] = len(item["resource_ids"])
+            return packages
+        finally:
+            conn.close()
+
+    def get_dist_package(self, package_id: int) -> Optional[Dict[str, Any]]:
+        return next((item for item in self.list_dist_packages() if int(item["id"]) == int(package_id)), None)
+
+    def _dist_package_rights(self, resource_ids: List[int]) -> Dict[str, Any]:
+        """检查资源包内每条资源的授权状态，给出合规闸门结论。"""
+        resources = self.list_digital_resources()
+        by_id = {int(item["id"]): item for item in resources}
+        missing = [rid for rid in resource_ids if rid not in by_id]
+        unverified = [
+            {"id": rid, "title": by_id[rid]["title"], "rights_status": by_id[rid].get("rights_status")}
+            for rid in resource_ids if rid in by_id and by_id[rid].get("rights_status") != "verified"
+        ]
+        not_approved = [
+            {"id": rid, "title": by_id[rid]["title"], "status": by_id[rid].get("status")}
+            for rid in resource_ids if rid in by_id and by_id[rid].get("status") != "approved"
+        ]
+        risky = [
+            {"id": rid, "title": by_id[rid]["title"], "risk_flags": by_id[rid].get("risk_flags") or []}
+            for rid in resource_ids if rid in by_id and (by_id[rid].get("risk_flags") or [])
+        ]
+        return {
+            "missing": missing, "unverified": unverified, "not_approved": not_approved, "risky": risky,
+            "titles": [by_id[rid]["title"] for rid in resource_ids if rid in by_id],
+            "ready": not missing and not unverified and not not_approved and not risky,
+        }
+
+    @staticmethod
+    def _int_list(value: Any) -> List[int]:
+        raw = value if isinstance(value, list) else (str(value or "").replace("，", ",").split(","))
+        result: List[int] = []
+        for item in raw:
+            text = str(item).strip()
+            if text.isdigit() and int(text) not in result:
+                result.append(int(text))
+        return result[:60]
+
+    def create_dist_package(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        data = data if isinstance(data, dict) else {}
+        title = str(data.get("title") or "").strip()[:200]
+        if not title:
+            raise ValueError("资源包名称不能为空")
+        resource_ids = self._int_list(data.get("resource_ids"))
+        if not resource_ids:
+            raise ValueError("资源包至少要包含一条已收录资源")
+        channel_id = int(data["channel_id"]) if str(data.get("channel_id") or "").strip().isdigit() else None
+        if channel_id and not self.get_dist_channel(channel_id):
+            raise ValueError("指定的分发平台不存在")
+        status = self._normalise_earning_status(data.get("status"), self.DIST_PACKAGE_STATUS, "draft")
+        rights = self._dist_package_rights(resource_ids)
+        if rights["missing"]:
+            raise ValueError(f"这些资源不存在: {rights['missing']}")
+        if status in ("ready", "published") and not rights["ready"]:
+            raise ValueError(self._dist_rights_message(rights))
+        share_url = self._public_http_url(data.get("share_url"), "网盘分享链接")
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute(
+                    "INSERT INTO earning_dist_packages (title, channel_id, resource_ids, share_url, share_password, share_note, cover_hint, keywords, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        title, channel_id, json.dumps(resource_ids),
+                        share_url, str(data.get("share_password") or "")[:80],
+                        str(data.get("share_note") or "")[:1000], str(data.get("cover_hint") or "")[:500],
+                        json.dumps(self._decode_string_list(data.get("keywords")), ensure_ascii=False),
+                        status, now, now,
+                    ),
+                )
+                package_id = int(cur.lastrowid)
+                self._log_activity(conn, "earning", "☁", f"组装网盘资源包: {title}", f"{len(resource_ids)} 份资源 · 状态 {status}")
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_dist_package(package_id) or {}
+
+    @staticmethod
+    def _dist_rights_message(rights: Dict[str, Any]) -> str:
+        parts: List[str] = []
+        if rights.get("unverified"):
+            parts.append("授权未核验: " + "、".join(item["title"] for item in rights["unverified"][:5]))
+        if rights.get("not_approved"):
+            parts.append("未进入可售资源库: " + "、".join(item["title"] for item in rights["not_approved"][:5]))
+        if rights.get("risky"):
+            parts.append("命中风险信号: " + "、".join(item["title"] for item in rights["risky"][:5]))
+        return "资源包还不能进入可分发状态 —— " + "；".join(parts) + "。只分发原创、开放许可、公有领域或已获明确授权的资源。"
+
+    def update_dist_package(self, package_id: int, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        current = self.get_dist_package(package_id)
+        if not current:
+            return None
+        data = data if isinstance(data, dict) else {}
+        merged = {**current, **(data if isinstance(data, dict) else {})}
+        resource_ids = self._int_list(merged.get("resource_ids")) or list(current["resource_ids"])
+        status = self._normalise_earning_status(merged.get("status"), self.DIST_PACKAGE_STATUS, current.get("status", "draft"))
+        rights = self._dist_package_rights(resource_ids)
+        if rights["missing"]:
+            raise ValueError(f"这些资源不存在: {rights['missing']}")
+        if status in ("ready", "published") and not rights["ready"]:
+            raise ValueError(self._dist_rights_message(rights))
+        channel_id = merged.get("channel_id")
+        channel_id = int(channel_id) if str(channel_id or "").strip().isdigit() else None
+        if channel_id and not self.get_dist_channel(channel_id):
+            raise ValueError("指定的分发平台不存在")
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE earning_dist_packages SET title=?, channel_id=?, resource_ids=?, share_url=?, share_password=?, share_note=?, cover_hint=?, keywords=?, status=?, updated_at=? WHERE id=?",
+                    (
+                        str(merged.get("title") or current["title"])[:200], channel_id, json.dumps(resource_ids),
+                        self._public_http_url(merged.get("share_url"), "网盘分享链接"),
+                        str(merged.get("share_password") or "")[:80], str(merged.get("share_note") or "")[:1000],
+                        str(merged.get("cover_hint") or "")[:500],
+                        json.dumps(self._decode_string_list(merged.get("keywords")), ensure_ascii=False),
+                        status, now, int(package_id),
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_dist_package(package_id)
+
+    def bind_dist_share(self, package_id: int, share_url: str, share_password: str = "", share_note: str = "") -> Dict[str, Any]:
+        """登记资源包在网盘上的分享链接 (佳自己在网盘生成后填回)。"""
+        package = self.get_dist_package(package_id)
+        if not package:
+            raise ValueError("资源包不存在")
+        url = self._public_http_url(share_url, "网盘分享链接")
+        if not url:
+            raise ValueError("网盘分享链接不能为空")
+        rights = self._dist_package_rights(list(package["resource_ids"]))
+        if rights["missing"]:
+            raise ValueError(f"这些资源不存在: {rights['missing']}")
+        status = "ready" if rights["ready"] else "draft"
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE earning_dist_packages SET share_url=?, share_password=?, share_note=?, status=?, updated_at=? WHERE id=?",
+                    (url, str(share_password or "")[:80], str(share_note or "")[:1000], status, datetime.now().isoformat(), int(package_id)),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        result = {"success": True, "package": self.get_dist_package(package_id)}
+        if status != "ready":
+            result["warning"] = self._dist_rights_message(rights)
+        return result
+
+    def delete_dist_package(self, package_id: int) -> bool:
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("DELETE FROM earning_dist_materials WHERE package_id = ?", (int(package_id),))
+                cur = conn.execute("DELETE FROM earning_dist_packages WHERE id = ?", (int(package_id),))
+                conn.commit()
+                return cur.rowcount > 0
+            finally:
+                conn.close()
+
+    # ── 投放物料 (按渠道生成文案草稿) ────────────────
+
+    def list_dist_materials(self, status: str = "", platform: str = "", package_id: Optional[int] = None, limit: int = 200) -> List[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            clauses: List[str] = []
+            params: List[Any] = []
+            if status:
+                clauses.append("status = ?")
+                params.append(str(status))
+            if platform:
+                clauses.append("platform = ?")
+                params.append(str(platform))
+            if package_id:
+                clauses.append("package_id = ?")
+                params.append(int(package_id))
+            where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+            rows = conn.execute(
+                f"SELECT * FROM earning_dist_materials{where} ORDER BY updated_at DESC, id DESC LIMIT ?",
+                (*params, max(1, min(1000, int(limit)))),
+            ).fetchall()
+            result = []
+            for row in rows:
+                item = dict(row)
+                item["tags"] = self._decode_string_list(item.get("tags"))
+                item["risk_flags"] = self._decode_string_list(item.get("risk_flags"))
+                result.append(item)
+            return result
+        finally:
+            conn.close()
+
+    def get_dist_material(self, material_id: int) -> Optional[Dict[str, Any]]:
+        return next((item for item in self.list_dist_materials(limit=1000) if int(item["id"]) == int(material_id)), None)
+
+    @classmethod
+    def _dist_material_risk_flags(cls, *texts: str) -> List[str]:
+        blob = " ".join(str(text or "") for text in texts).lower()
+        flags = [label for label, keywords in cls.DIST_RISK_PATTERNS if any(word.lower() in blob for word in keywords)]
+        return flags[:8]
+
+    @staticmethod
+    def _dist_templates() -> Dict[str, Any]:
+        try:
+            from config.config_utils import get_text
+
+            templates = get_text("earth_online", "distribution", "templates", default=None)
+            return templates if isinstance(templates, dict) else {}
+        except Exception as exc:
+            logger.warning("[EarthOnline] 分发物料模板读取失败: %s", exc)
+            return {}
+
+    @staticmethod
+    def _dist_fill(template: str, variables: Dict[str, str]) -> str:
+        text = str(template or "")
+        for key, value in variables.items():
+            text = text.replace("{" + key + "}", str(value))
+        return text
+
+    def _dist_material_variables(self, package: Dict[str, Any], target: Dict[str, Any]) -> Dict[str, str]:
+        channel = self.get_dist_channel(int(package["channel_id"])) if package.get("channel_id") else None
+        keywords = list(package.get("keywords") or [])
+        rights = self._dist_package_rights(list(package.get("resource_ids") or []))
+        titles = rights["titles"]
+        share_hint = ""
+        if channel:
+            share_hint = f"在{channel['name']}打开分享链接"
+            if channel.get("promo_code"):
+                share_hint += f"（口令/邀请码：{channel['promo_code']}）"
+            if package.get("share_password"):
+                share_hint += f"，提取码 {package['share_password']}"
+        return {
+            "topic": str(package.get("title") or ""),
+            "platform": str(target.get("platform") or ""),
+            "account": str(target.get("account_label") or ""),
+            "audience": str(target.get("audience_note") or "") or "需要这类资料的人",
+            "keyword": (keywords[0] if keywords else str(package.get("title") or ""))[:40],
+            "keywords": "、".join(keywords[:5]) or str(package.get("title") or ""),
+            "resource_count": str(len(titles)),
+            "resource_list": "\n".join(f"{index + 1}. {name}" for index, name in enumerate(titles[:10])) or "（资源清单待补充）",
+            "cover_hint": str(package.get("cover_hint") or ""),
+            "share_hint": share_hint,
+            "share_url": str(package.get("share_url") or ""),
+            "share_password": str(package.get("share_password") or ""),
+            "share_note": str(package.get("share_note") or ""),
+        }
+
+    def generate_dist_materials(
+        self,
+        package_id: int,
+        target_ids: Optional[List[int]] = None,
+        variants: int = 0,
+        replace: bool = False,
+    ) -> Dict[str, Any]:
+        """为一个资源包按渠道模板生成投放物料草稿 (只落站内, 不发布)。"""
+        settings = self.distribution_settings()
+        package = self.get_dist_package(package_id)
+        if not package:
+            raise ValueError("资源包不存在")
+        if settings["require_verified_rights"]:
+            rights = self._dist_package_rights(list(package["resource_ids"]))
+            if not rights["ready"]:
+                raise ValueError(self._dist_rights_message(rights))
+        wanted = self._int_list(target_ids) if target_ids else []
+        targets = self.list_dist_targets(enabled_only=True)
+        if wanted:
+            targets = [item for item in targets if int(item["id"]) in wanted]
+        if not targets:
+            raise ValueError("还没有可用的投放位：先登记至少一个内容渠道投放位（只填账号标识与主页，不填密码）")
+        variants = max(1, min(10, int(variants or settings["variants_per_target"])))
+        templates = self._dist_templates()
+        variables = self._dist_material_variables(package, targets[0])
+        existing = {
+            (int(item["target_id"] or 0), int(item["variant"]), str(item["status"]))
+            for item in self.list_dist_materials(package_id=package_id, limit=1000)
+        } if not replace else set()
+        created: List[Dict[str, Any]] = []
+        skipped = 0
+        now = datetime.now().isoformat()
+        for target in targets:
+            platform = str(target["platform"])
+            template = templates.get(platform) if isinstance(templates.get(platform), dict) else None
+            if not template:
+                template = templates.get("other") if isinstance(templates.get("other"), dict) else None
+            template = template or {}
+            hooks = template.get("hooks") if isinstance(template.get("hooks"), list) else []
+            base_tags = template.get("tags") if isinstance(template.get("tags"), list) else []
+            for variant in range(1, variants + 1):
+                if any((int(target["id"]), variant, status) in existing for status in ("draft", "submitted", "approved", "published")):
+                    skipped += 1
+                    continue
+                local_vars = dict(variables)
+                local_vars["hook"] = str(hooks[(variant - 1) % len(hooks)]) if hooks else "整理了一份实用资料"
+                local_vars["variant"] = str(variant)
+                title = self._dist_fill(template.get("title") or "{hook}：{topic}", local_vars)[:200]
+                body = self._dist_fill(template.get("body") or "{hook}\n\n{topic}\n\n{resource_list}\n\n{share_hint}", local_vars)[:12000]
+                cta = self._dist_fill(template.get("cta") or "需要的话留言「{keyword}」。", local_vars)[:500]
+                tags = [self._dist_fill(str(tag), local_vars)[:60] for tag in base_tags][:12]
+                if not tags:
+                    tags = [f"#{local_vars['keyword']}"]
+                flags = self._dist_material_risk_flags(title, body, cta, " ".join(tags))
+                with self._lock:
+                    conn = self._connect()
+                    try:
+                        cur = conn.execute(
+                            "INSERT INTO earning_dist_materials (package_id, target_id, platform, variant, title, body, tags, cta, risk_flags, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,'draft',?,?)",
+                            (
+                                int(package_id), int(target["id"]), platform, variant, title, body,
+                                json.dumps(tags, ensure_ascii=False), cta, json.dumps(flags, ensure_ascii=False), now, now,
+                            ),
+                        )
+                        material_id = int(cur.lastrowid)
+                        conn.commit()
+                    finally:
+                        conn.close()
+                created.append(self.get_dist_material(material_id) or {})
+        if created:
+            self._write_mirror()
+        return {
+            "success": True,
+            "package": self.get_dist_package(package_id),
+            "created": created,
+            "created_count": len(created),
+            "skipped_count": skipped,
+        }
+
+    def update_dist_material(self, material_id: int, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        current = self.get_dist_material(material_id)
+        if not current:
+            return None
+        if current.get("status") in ("submitted", "approved"):
+            raise ValueError("物料正在审批流程中，先撤销对应草稿再修改")
+        data = data if isinstance(data, dict) else {}
+        title = str(data.get("title", current["title"]) or "").strip()[:200]
+        body = str(data.get("body", current["body"]) or "")[:12000]
+        cta = str(data.get("cta", current.get("cta")) or "")[:500]
+        tags = self._decode_string_list(data.get("tags", current.get("tags"))) or list(current.get("tags") or [])
+        status = self._normalise_earning_status(data.get("status", current.get("status")), self.DIST_MATERIAL_STATUS, "draft")
+        if status == "published":
+            raise ValueError("发布状态只能通过「标记已发布」推进")
+        if not title or not body:
+            raise ValueError("物料的标题和正文不能为空")
+        flags = self._dist_material_risk_flags(title, body, cta, " ".join(tags))
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE earning_dist_materials SET title=?, body=?, tags=?, cta=?, risk_flags=?, status=?, updated_at=? WHERE id=?",
+                    (title, body, json.dumps(tags[:12], ensure_ascii=False), cta,
+                     json.dumps(flags, ensure_ascii=False), status, datetime.now().isoformat(), int(material_id)),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return self.get_dist_material(material_id)
+
+    def delete_dist_material(self, material_id: int) -> bool:
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute("DELETE FROM earning_dist_materials WHERE id = ?", (int(material_id),))
+                conn.commit()
+                return cur.rowcount > 0
+            finally:
+                conn.close()
+
+    def promote_dist_material(self, material_id: int) -> Dict[str, Any]:
+        """把物料转成「对外发布」审批草稿并提交审批 (不发布、不发送)。"""
+        material = self.get_dist_material(material_id)
+        if not material:
+            raise ValueError("投放物料不存在")
+        if material.get("status") not in ("draft", "retired", "submitted", "approved"):
+            raise ValueError(f"当前状态 {material.get('status')} 不能提交审批")
+        package = self.get_dist_package(int(material["package_id"]))
+        if not package:
+            raise ValueError("物料对应的资源包不存在")
+        channel = self.get_dist_channel(int(package["channel_id"])) if package.get("channel_id") else None
+        if not package.get("share_url") and not (channel or {}).get("promo_url"):
+            raise ValueError("资源包还没有网盘分享链接，也没有可用的分发平台推广链接，先补齐承接入口")
+        if not (channel or {}).get("promo_url"):
+            target_hint = str(package.get("share_url") or "")
+        else:
+            target_hint = str(channel["promo_url"])
+        tags = " ".join(material.get("tags") or [])
+        content = "\n\n".join(part for part in (material.get("body"), material.get("cta"), tags) if str(part or "").strip())
+        content += f"\n\n【分发承接】{channel['name'] if channel else '未指定平台'} · {target_hint}"
+        if package.get("share_password"):
+            content += f"\n【提取码】{package['share_password']}"
+        if material.get("risk_flags"):
+            content += "\n【自检提示】" + "、".join(material["risk_flags"])
+        action = self.create_earning_action({
+            "action_type": "publish",
+            "title": f"[{material['platform']}] {material['title']}",
+            "content": content[:12000],
+            "target": f"{material['platform']} · {target_hint}"[:1000],
+            "risk": "medium",
+        })
+        action = self.submit_earning_action(int(action["id"]))
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE earning_dist_materials SET status='submitted', action_id=?, updated_at=? WHERE id=?",
+                    (int(action["id"]), datetime.now().isoformat(), int(material_id)),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return {"success": True, "material": self.get_dist_material(material_id), "action": action}
+
+    def sync_dist_material_actions(self) -> Dict[str, Any]:
+        """把审批结果回填到物料状态；已发布物料不再受审批过期影响。"""
+        from_status = {"skipped": 0, "approved": 0, "returned": 0}
+        for material in self.list_dist_materials(status="submitted", limit=500):
+            action = self.get_earning_action(int(material["action_id"])) if material.get("action_id") else None
+            if not action:
+                from_status["skipped"] += 1
+                continue
+            status = str(action.get("status"))
+            if status == "approved":
+                new_status = "approved"
+                from_status["approved"] += 1
+            elif status in {"revoked", "expired", "draft"}:
+                new_status = "draft"
+                from_status["returned"] += 1
+            else:
+                from_status["skipped"] += 1
+                continue
+            with self._lock:
+                conn = self._connect()
+                try:
+                    conn.execute(
+                        "UPDATE earning_dist_materials SET status=?, updated_at=? WHERE id=?",
+                        (new_status, datetime.now().isoformat(), int(material["id"])),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+        if from_status["approved"] or from_status["returned"]:
+            self._write_mirror()
+        return {"success": True, **from_status}
+
+    def mark_dist_material_published(self, material_id: int, published_url: str = "") -> Dict[str, Any]:
+        """佳实际发布后回填：只有审批通过 (或已发布) 的物料才能标记为已发布。"""
+        material = self.get_dist_material(material_id)
+        if not material:
+            raise ValueError("投放物料不存在")
+        if material.get("status") not in ("approved", "published"):
+            raise ValueError("这份物料还没有通过审批；先批准对应草稿，或确认你已手动发布后再标记")
+        url = self._public_http_url(published_url or material.get("published_url"), "发布链接")
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE earning_dist_materials SET status='published', published_url=?, published_at=?, updated_at=? WHERE id=?",
+                    (url, now, now, int(material_id)),
+                )
+                conn.execute(
+                    "UPDATE earning_dist_packages SET status='published', updated_at=? WHERE id=? AND status != 'published'",
+                    (now, int(material["package_id"])),
+                )
+                self._log_activity(conn, "earning", "☁", f"已发布投放物料 #{int(material_id)}", f"{material.get('platform')} · {material.get('title', '')[:60]}")
+                conn.commit()
+            finally:
+                conn.close()
+        self._write_mirror()
+        return {"success": True, "material": self.get_dist_material(material_id)}
+
+    # ── 转化与收益回流 ──────────────────────────────
+
+    def list_dist_metrics(self, days: int = 0, package_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            clauses: List[str] = []
+            params: List[Any] = []
+            if days and days > 0:
+                since = (datetime.now() - timedelta(days=int(days))).date().isoformat()
+                clauses.append("stat_date >= ?")
+                params.append(since)
+            if package_id:
+                clauses.append("package_id = ?")
+                params.append(int(package_id))
+            where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+            rows = conn.execute(f"SELECT * FROM earning_dist_metrics{where} ORDER BY stat_date DESC, id DESC LIMIT 5000", params).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def record_dist_metrics(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """登记一天的渠道转化数据；有佣金时自动汇入现实收益流水。"""
+        data = data if isinstance(data, dict) else {}
+        material = self.get_dist_material(int(data["material_id"])) if str(data.get("material_id") or "").strip().isdigit() else None
+        package = self.get_dist_package(int(data["package_id"])) if str(data.get("package_id") or "").strip().isdigit() else None
+        if material and not package:
+            package = self.get_dist_package(int(material["package_id"]))
+        if not package and not material:
+            raise ValueError("转化数据至少要关联一个资源包或一条投放物料")
+
+        def number(key: str) -> int:
+            try:
+                return max(0, int(float(data.get(key) or 0)))
+            except (TypeError, ValueError):
+                return 0
+
+        def money(key: str) -> float:
+            try:
+                return max(0.0, float(data.get(key) or 0))
+            except (TypeError, ValueError):
+                return 0.0
+
+        stat_date = str(data.get("stat_date") or datetime.now().date().isoformat())[:10]
+        revenue, cost = money("revenue"), money("cost")
+        now = datetime.now().isoformat()
+        target_id = int(material["target_id"]) if material and material.get("target_id") else None
+        channel_id = int(package["channel_id"]) if package and package.get("channel_id") else None
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute(
+                    "INSERT INTO earning_dist_metrics (package_id, material_id, target_id, channel_id, stat_date, impressions, clicks, saves, transfers, new_users, vip_orders, revenue, cost, source, note, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        int(package["id"]) if package else None, int(material["id"]) if material else None,
+                        target_id, channel_id, stat_date, number("impressions"), number("clicks"), number("saves"),
+                        number("transfers"), number("new_users"), number("vip_orders"), revenue, cost,
+                        self._normalise_earning_status(data.get("source"), ("manual", "import", "estimate"), "manual"),
+                        str(data.get("note") or "")[:1000], now,
+                    ),
+                )
+                metric_id = int(cur.lastrowid)
+                if revenue > 0:
+                    self._log_activity(
+                        conn, "earning", "☁",
+                        f"网盘分发转化 ¥{revenue - cost:.2f}",
+                        f"{(package or {}).get('title', '')} · 拉新 {number('new_users')} · 转存 {number('transfers')}",
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+        income_record_id = None
+        if revenue > 0:
+            label = (package or {}).get("title") or (material or {}).get("title") or "网盘分发"
+            record = self.record_income({
+                "amount": revenue, "cost": cost,
+                "note": f"网盘分发收益 · {label} · {stat_date}",
+                "recorded_at": f"{stat_date}T00:00:00",
+            })
+            income_record_id = int((record.get("record") or {}).get("id") or 0) or None
+            if income_record_id:
+                with self._lock:
+                    conn = self._connect()
+                    try:
+                        conn.execute("UPDATE earning_dist_metrics SET income_record_id = ? WHERE id = ?", (income_record_id, metric_id))
+                        conn.commit()
+                    finally:
+                        conn.close()
+        self._write_mirror()
+        metrics = [item for item in self.list_dist_metrics(package_id=int(package["id"]) if package else None) if int(item["id"]) == metric_id]
+        return {"success": True, "metric": metrics[0] if metrics else {"id": metric_id}, "income_record_id": income_record_id}
+
+    def delete_dist_metrics(self, metric_id: int) -> bool:
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute("DELETE FROM earning_dist_metrics WHERE id = ?", (int(metric_id),))
+                conn.commit()
+                return cur.rowcount > 0
+            finally:
+                conn.close()
+
+    def distribution_report(self, days: int = 0) -> Dict[str, Any]:
+        """分发复盘: 曝光→点击→转存→拉新→佣金 漏斗 + 逐渠道/物料判定。"""
+        settings = self.distribution_settings()
+        window = int(days or settings["report_days"])
+        metrics = self.list_dist_metrics(days=window)
+        packages = {int(item["id"]): item for item in self.list_dist_packages()}
+        materials = {int(item["id"]): item for item in self.list_dist_materials(limit=1000)}
+        targets = {int(item["id"]): item for item in self.list_dist_targets()}
+        channels = {int(item["id"]): item for item in self.list_dist_channels()}
+
+        def blank() -> Dict[str, Any]:
+            return {
+                "impressions": 0, "clicks": 0, "saves": 0, "transfers": 0,
+                "new_users": 0, "vip_orders": 0, "revenue": 0.0, "cost": 0.0,
+                "net": 0.0, "rows": 0, "days": set(),
+            }
+
+        total = blank()
+        per_material: Dict[int, Dict[str, Any]] = {}
+        per_platform: Dict[str, Dict[str, Any]] = {}
+        per_channel: Dict[int, Dict[str, Any]] = {}
+        for row in metrics:
+            for bucket in (total,):
+                for key in ("impressions", "clicks", "saves", "transfers", "new_users", "vip_orders"):
+                    bucket[key] += int(row.get(key) or 0)
+                bucket["revenue"] += float(row.get("revenue") or 0)
+                bucket["cost"] += float(row.get("cost") or 0)
+                bucket["rows"] += 1
+                bucket["days"].add(str(row.get("stat_date") or ""))
+            total["net"] = round(total["revenue"] - total["cost"], 2)
+            material_id = int(row.get("material_id") or 0)
+            if material_id:
+                entry = per_material.setdefault(material_id, blank())
+                for key in ("impressions", "clicks", "saves", "transfers", "new_users", "vip_orders"):
+                    entry[key] += int(row.get(key) or 0)
+                entry["revenue"] += float(row.get("revenue") or 0)
+                entry["cost"] += float(row.get("cost") or 0)
+            platform = str((materials.get(material_id) or {}).get("platform") or "")
+            if platform:
+                entry = per_platform.setdefault(platform, blank())
+                for key in ("impressions", "clicks", "saves", "transfers", "new_users", "vip_orders"):
+                    entry[key] += int(row.get(key) or 0)
+                entry["revenue"] += float(row.get("revenue") or 0)
+                entry["cost"] += float(row.get("cost") or 0)
+            channel_id = int(row.get("channel_id") or 0)
+            if channel_id:
+                entry = per_channel.setdefault(channel_id, blank())
+                for key in ("impressions", "clicks", "transfers", "new_users", "vip_orders"):
+                    entry[key] += int(row.get(key) or 0)
+                entry["revenue"] += float(row.get("revenue") or 0)
+                entry["cost"] += float(row.get("cost") or 0)
+
+        def finalise(bucket: Dict[str, Any]) -> Dict[str, Any]:
+            impressions, clicks = bucket["impressions"], bucket["clicks"]
+            bucket["net"] = round(bucket["revenue"] - bucket["cost"], 2)
+            bucket["day_count"] = len(bucket.pop("days", set()))
+            bucket["ctr"] = round(clicks / impressions * 100, 2) if impressions else 0.0
+            bucket["transfer_rate"] = round(bucket["transfers"] / clicks * 100, 2) if clicks else 0.0
+            bucket["new_user_rate"] = round(bucket["new_users"] / clicks * 100, 2) if clicks else 0.0
+            bucket["revenue_per_1k"] = round(bucket["revenue"] / impressions * 1000, 2) if impressions else 0.0
+            return bucket
+
+        ranked: List[Dict[str, Any]] = []
+        for material_id, bucket in per_material.items():
+            finalise(bucket)
+            material = materials.get(material_id) or {}
+            enough = bucket["impressions"] >= settings["min_impressions_for_verdict"] and bucket["clicks"] >= settings["min_clicks_for_verdict"]
+            if not enough:
+                verdict = "样本不足"
+                advice = "继续投放或补录数据，先不要下结论"
+            elif bucket["revenue"] > 0 and bucket["new_users"] > 0:
+                verdict = "加码"
+                advice = "转化成立：复制这条选题与结构，换关键词再发一轮"
+            elif bucket["revenue"] > 0:
+                verdict = "微调"
+                advice = "有收益但拉新弱：把行动入口提前，强化网盘承接说明"
+            else:
+                verdict = "停投"
+                advice = "有曝光无转化：换选题或换渠道，不要重复投放同一份文案"
+            ranked.append({
+                "material_id": material_id,
+                "title": material.get("title", ""),
+                "platform": material.get("platform", ""),
+                "status": material.get("status", ""),
+                "risk_flags": material.get("risk_flags") or [],
+                "verdict": verdict,
+                "advice": advice,
+                **bucket,
+            })
+        ranked.sort(key=lambda item: (item["revenue"], item["new_users"], item["clicks"]), reverse=True)
+        platform_rows = [{"platform": key, **finalise(value)} for key, value in per_platform.items()]
+        platform_rows.sort(key=lambda item: (item["revenue"], item["new_users"]), reverse=True)
+        channel_rows = []
+        for channel_id, bucket in per_channel.items():
+            finalise(bucket)
+            channel = channels.get(channel_id) or {}
+            channel_rows.append({"channel_id": channel_id, "channel_name": channel.get("name", ""), **bucket})
+        channel_rows.sort(key=lambda item: (item["revenue"], item["new_users"]), reverse=True)
+
+        pending = [item for item in materials.values() if item.get("status") == "submitted"]
+        approved = [item for item in materials.values() if item.get("status") == "approved"]
+        published = [item for item in materials.values() if item.get("status") == "published"]
+        risky = [item for item in materials.values() if item.get("risk_flags")]
+        ready_packages = [item for item in packages.values() if item.get("status") in ("ready", "published")]
+        missing_share = [item for item in packages.values() if not item.get("share_url")]
+        missing_promo = [item for item in self.list_dist_channels(enabled_only=True) if not item.get("promo_url")]
+
+        compliance: List[str] = []
+        if missing_share:
+            compliance.append(f"{len(missing_share)} 个资源包还没有登记网盘分享链接")
+        if missing_promo:
+            compliance.append(f"{len(missing_promo)} 个分发平台还没填推广链接（{'、'.join(item['name'] for item in missing_promo[:4])}）")
+        if risky:
+            compliance.append(f"{len(risky)} 条物料命中风险词自检，发布前请人工确认措辞")
+        rights_problems = 0
+        for package in packages.values():
+            rights = self._dist_package_rights(list(package.get("resource_ids") or []))
+            if not rights["ready"]:
+                rights_problems += 1
+        if rights_problems:
+            compliance.append(f"{len(rights_problems)} 个资源包存在授权未核验或风险信号，不能进入可分发状态")
+        if not compliance:
+            compliance.append("未发现授权、链接或措辞层面的阻断项")
+
+        suggestions: List[str] = []
+        if ranked:
+            top = ranked[0]
+            if top["verdict"] == "加码":
+                suggestions.append(f"「{top['title'][:40]}」在 {top['platform']} 已跑出收益，优先复制这条选题再发一轮")
+            elif top["verdict"] == "停投":
+                suggestions.append(f"「{top['title'][:40]}」有点击无转化，换选题而不是重复发同一条")
+        if not published and pending:
+            suggestions.append(f"审批箱里有 {len(pending)} 条投放物料等你确认，批准后你手动发布即可")
+        if not packages:
+            suggestions.append("还没有资源包：先确认资源授权，再组装第一个 5-15 份的资源包")
+        if not ready_packages and packages:
+            suggestions.append("资源包都还没到可分发状态：先补齐网盘分享链接并通过授权核验")
+        if not suggestions:
+            suggestions.append("节奏正常：保持每周 2-3 条新选题，转化数据回填后弥娅会自动给出加码或停投建议")
+
+        finalise(total)
+        return {
+            "window_days": window,
+            "funnel": {
+                "impressions": total["impressions"], "clicks": total["clicks"], "saves": total["saves"],
+                "transfers": total["transfers"], "new_users": total["new_users"],
+                "vip_orders": total["vip_orders"], "revenue": round(total["revenue"], 2),
+                "cost": round(total["cost"], 2), "net": total["net"],
+                "ctr": total["ctr"], "transfer_rate": total["transfer_rate"],
+                "new_user_rate": total["new_user_rate"], "revenue_per_1k": total["revenue_per_1k"],
+            },
+            "materials": ranked[:50],
+            "platforms": platform_rows,
+            "channels": channel_rows,
+            "counts": {
+                "packages": len(packages), "ready_packages": len(ready_packages),
+                "materials": len(materials), "pending_approval": len(pending),
+                "approved": len(approved), "published": len(published), "risky": len(risky),
+                "metric_rows": total["rows"],
+            },
+            "compliance": compliance,
+            "suggestions": suggestions,
+            "settings": settings,
+            "boundary": "弥娅只做到站内组装、按渠道生成草稿与数据复盘；对外发布、收款与交易仍由你逐条确认，弥娅不登录平台、不发送、不收款。",
+        }
+
+    def run_distribution_cycle(self) -> Dict[str, Any]:
+        """自主运营周期里的分发巡检：只做站内动作，不放行任何对外请求。"""
+        settings = self.ensure_distribution_defaults()
+        if not settings["enabled"]:
+            return {"success": True, "skipped": "disabled"}
+        summary = self.sync_dist_material_actions()
+        created, submitted = 0, 0
+        if settings["auto_generate"] and settings["max_materials_per_cycle"]:
+            budget = int(settings["max_materials_per_cycle"])
+            for package in self.list_dist_packages(status="ready"):
+                if budget <= 0:
+                    break
+                if not package.get("share_url"):
+                    continue
+                try:
+                    result = self.generate_dist_materials(int(package["id"]))
+                except ValueError as exc:
+                    logger.debug("[EarthOnline] 资源包 #%s 生成物料跳过: %s", package.get("id"), exc)
+                    continue
+                created += int(result.get("created_count") or 0)
+                budget -= int(result.get("created_count") or 0)
+                if settings["auto_submit"] and submitted < int(settings["max_submit_per_cycle"]):
+                    for material in result.get("created") or []:
+                        if submitted >= int(settings["max_submit_per_cycle"]):
+                            break
+                        try:
+                            self.promote_dist_material(int(material["id"]))
+                            submitted += 1
+                        except ValueError as exc:
+                            logger.debug("[EarthOnline] 物料 #%s 提交审批跳过: %s", material.get("id"), exc)
+        if created or submitted:
+            with self._lock:
+                conn = self._connect()
+                try:
+                    self._log_activity(
+                        conn, "earning", "☁",
+                        f"分发巡检: 新增 {created} 条投放物料",
+                        f"提交审批 {submitted} 条 · 审批回填 {summary.get('approved', 0)} 条",
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+            self._write_mirror()
+        return {"success": True, "created_materials": created, "submitted": submitted, **summary}
 
     # ── 汇总 (弥娅/前端一键读取) ────────────────────
 

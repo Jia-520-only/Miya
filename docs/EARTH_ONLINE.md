@@ -519,6 +519,55 @@ v17.3 起关怀敲门使用**独立的 `trigger_type="earth_care"` 与 key `eart
 - **撤销与审计**: 令牌可撤销，使用次数、过期时间和最后访问时间会记录在 `earning_digital_deliveries`；订单与交付不会保存买家隐私或支付凭据。
 - **售后边界**: 当前只提供订单状态、交付和撤销，不自动退款、不自动私信、不自动确认平台交易。退款和纠纷仍由你在闲鱼人工处理。
 
+## v23 特性 — 开放许可资源发现器
+
+- **弥娅自己去找资源**: `core/earth_online_resource_scout.py`，入口是 `earth_scout_digital_resources` 工具、`POST /api/earth/earning/digital-resources/scout` 和收益中枢「执行」页的「主动寻找可合法转售的资源」按钮。她去公开授权源检索，授权判定完全由规则决定，不依赖模型猜测。
+- **三个内置数据源（全部免 API Key，且只允许代码内置的域名）**:
+  - `openverse` — Openverse API，`license=cc0,pdm` 过滤的图片（实测约 4 秒）
+  - `gutenberg` — Project Gutenberg 官方 OPDS 检索，公版书（实测约 2 秒）
+  - `met_museum` — 大都会博物馆 Open Access，`isPublicDomain=true` 的 CC0 馆藏
+- **确定性授权判定**: CC0 / 公有领域（PD / PDM / No Known Copyright）→ 自动核验并进入可售资源库；CC BY / BY-SA / BY-ND → 入库为待核验候选（署名或共享方式必须由你确认）；非商业许可 (NC)、"保留所有权利"、未知许可 → 一律不入库；Unsplash / Pexels / Pixabay / Shutterstock 等免版税素材库**原样转售一律拒绝**，即使它们标着 CC0。
+- **后台自动补充**: 收益安全巡检每轮先跑一次发现器，受 `earth_online.earning_scout` 约束 —— `max_per_cycle`（单轮新增上限）、`daily_cap`（每日上限，含人工收录）、每个源每轮只跑 1 个检索词；数据源按小时轮换，保证每个源都能轮到额度。
+- **只找到并整理**: 不下载文件、不上传、不发布、不私信、不交易；`content_uri` 最初只是来源直链或你自己的网盘地址（要让弥娅自己下发，见 v23.1 的本地交付区）。
+- **代理 fake-ip 兼容**: Clash 等 fake-ip 模式会把所有域名解析到 `198.18.0.0/15`，原本会被公开地址抓取器的私网校验误杀（公开信息源同步同样受影响）。新增 `earth_online.allow_proxy_fake_ip`；字面内网/本机地址仍然一律拒绝，用户自填的信息源地址仍然走完整 DNS 校验。
+- **工具白名单补齐 (M0)**: `earth_list_digital_resources` / `earth_scout_digital_resources` / `earth_add_digital_resource` / `earth_create_digital_product` / `earth_prepare_xianyu_listing` 现在都在 `hub/platform_tools.py` 的 `EARTH_TOOLS` 里 —— 之前只有 ToolNet 与决策中枢注册了它们，聊天平台上的弥娅其实调不到这些工具。
+- **配置**: `config/qq_config.yaml → earth_online.earning_scout`（enabled / auto_verify / max_per_cycle / daily_cap / per_query / providers / queries）+ `earth_online.allow_proxy_fake_ip`。
+- **测试**: `tests/test_earth_resource_scout.py`（授权判定、自动核验边界、去重与每日上限、OPDS 解析、非内置域名拒绝、跨平台工具白名单、巡检接线）。
+- **已知取舍**: Gutendex 第三方镜像单次检索要 54-100 秒且经常超时，已由古腾堡官方 OPDS 取代；Project Gutenberg 公版文本转售时需移除 PG 头信息与商标（`rights_note` 已写明）。
+
+## v23.1 特性 — 自建限时交付链接 (不再依赖网盘分享)
+
+- **买家拿到的是弥娅自己的下载页**: 已确认收款的订单签发令牌后，交付地址是 `{base_url}/api/earth/d/{token}`。页面列出本次交付的文件与体积、剩余下载次数，并提供单文件下载与打包下载（zip 现打，受 `zip_max_mb` 限制）。
+- **本地交付区**: `data/earthonline/deliveries/`（跟随存档目录推导，测试用临时库存临时目录）。`content_uri` 用 `delivery://相对路径` 表示交付区文件；`POST /api/earth/earning/digital-resources/{id}/stage` 与弥娅工具 `earth_stage_delivery_file` 会把资源的外部直链**流式下载**到交付区（先写 `.part` 再原子改名，边下边算 SHA-256），并把 `content_uri` 改写为 `delivery://`。整个过程幂等，重复调用不会重复下载。
+- **配额语义**: 浏览交付页**不**消耗次数；每次单文件下载或打包下载消耗一次；`max_downloads` 在签发时可调（API 与前台默认 10）。令牌只保存 SHA-256，明文只在签发响应里出现一次。
+- **公开页的安全边界**: 交付页是系统里唯一无鉴权入口，凭证就是令牌本身。因此：(1) 交付区之外的路径一律不可交付 —— `..` 逃逸、区外绝对路径、指向区外的符号链接全部拒绝；(2) 单 IP 限流（`rate_limit_per_minute`，默认 30/分钟）；(3) `earth_online.delivery.enabled` 是总开关，关掉后所有交付链接立即失效；(4) 资源授权被撤销或暂停时交付自动暂停；(5) 页面不暴露本地文件名与绝对路径，并带 `noindex,nofollow`。
+- **来源直链兜底**: 还没落到交付区的资源，`allow_external_redirect`（默认开）允许交付页直接跳转到来源地址；关掉后这类资源一律拒绝交付，逼迫先 stage，买家就只会看到你的链接。
+- **配置**: `earth_online.delivery`（enabled / allow_external_redirect / max_file_mb / zip_max_mb / rate_limit_per_minute / base_url）。用公网穿透把主机暴露给买家时，把 `base_url` 填成穿透地址；留空则按请求 Host 推导。
+- **前台**: 收益中枢「执行」页的资源卡新增「准备本地交付文件」按钮（已就绪显示 ✓）；订单卡按钮改为「生成自建交付链接」，签发后显示可一键复制的交付链接，收起后不再显示明文令牌。
+- **弥娅工具**: `earth_stage_delivery_file`（决策中枢 + ToolNet + 全平台白名单）。
+- **测试**: `tests/test_earth_delivery.py`（交付区边界与符号链接逃逸、准备交付文件幂等与前置校验、配额语义、令牌无效/过期/撤销、公开页/单文件/打包、限流、总开关、外部跳转开关、工具注册对齐）。
+- **仍未开放**: 不自动登录闲鱼、不自动发布、不自动私信、不读取支付账单、不自动退款；收款确认仍需佳本人输入确认语。
+
+## v24 特性 — 网盘分发中枢 (资源包 → 网盘分享 → 内容引流 → 转化复盘)
+
+把「网盘分享生意」做成了弥娅的第四条收益通道：她自己组装资源包、按渠道写投放物料、把草稿放进审批箱、回填转化数据并给出加码/停投判定。**她不登录任何平台、不发布、不私信、不收款**。
+
+- **数据模型 (5 张表)**: `earning_dist_channels`（分发平台：网盘/分销 + 公开推广链接 + 邀请口令 + 佣金口径）、`earning_dist_targets`（内容渠道投放位：平台 + 账号标识 + 主页 + 人群备注 + 日发上限）、`earning_dist_packages`（资源包：资源组合 + 网盘分享链接/提取码 + 关键词 + 封面提示）、`earning_dist_materials`（按渠道生成的投放物料：标题/正文/话题/行动入口/风险自检/审批回填）、`earning_dist_metrics`（按天转化的曝光/点击/收藏/转存/拉新/会员单/佣金/成本）。
+- **合规闸门 (不可绕过)**: `earth_online.distribution.require_verified_rights`（默认开）要求资源包内**每一条**资源都是 `rights_status=verified` 且 `status=approved` 且无风险信号，才能进入 `ready`/`published` 状态、才能生成物料。错误信息会逐条点名是哪些资源卡住了，并说明只分发原创、开放许可、公有领域或已获明确授权的资源。盗版、破解、付费课搬运、共享账号与来源不明的内容进不来。
+- **登记边界**: 投放位只接受账号标识与主页链接；`account_label` 里出现「密码 / password / Cookie / token」直接拒绝。系统不保存任何平台账号、密码、Cookie 或登录态。
+- **物料生成**: `earth_generate_dist_materials` / `POST /api/earth/earning/distribution/packages/{id}/materials` 读取 `config/text_config.json → earth_online.distribution.templates` 里每个平台（小红书/知乎/贴吧/B站/抖音/快手/微博/公众号/闲鱼/其他）的标题、正文、开场变体、话题与行动入口模板，用资源包的真实资源清单、关键词、人群备注与网盘承接信息填充。同一（投放位 × 变体）只生成一次，重复调用只统计跳过。
+- **风险词自检**: 生成的物料会自动标注五类高风险的措辞 —— 诱导私下联系、夸大承诺、疑似侵权资源、平台违禁词、诱导分享。只打标提示，不删除也不改写，由佳决定是否调整。
+- **审批边界（沿用既有机制）**: `earth_promote_dist_material` 把物料转成 `earning_action_drafts` 里的 `publish` 草稿并提交审批，**批准仍然只认「同意 #编号 / 批准 #编号」**，且 30 分钟有效。`sync_dist_material_actions()` 把审批结果回填到物料状态：批准 → `approved`，撤销/过期 → 退回 `draft`。只有 `approved` 的物料才能 `earth_mark_dist_material_published` 标记已发布（附带发布链接），已发布物料不再被审批过期流程拉回草稿。
+- **转化回流**: `earth_record_dist_metrics` 登记当天的曝光/点击/转存/拉新/会员单/佣金/成本。佣金大于 0 时**自动汇入 `income_records` 并写入地球币台账**（净额 = 佣金 − 成本），这是既有数字商品订单没接上的那条线；无佣金的日子不产生收入记录。
+- **复盘**: `earth_distribution_report` / `GET /api/earth/earning/distribution/report` 输出漏斗（曝光→点击→转存→拉新→会员单→佣金，含 CTR、转存率、拉新率、千次曝光收入）、逐物料的判定（样本充足且有收益 → 加码；有点击无转化 → 停投；样本不足 → 继续观察）、平台与分发平台排行、合规检查项（缺分享链接、缺推广链接、物料风险词、资源包授权问题）与下一步建议。判定阈值由 `min_impressions_for_verdict` / `min_clicks_for_verdict` 控制，不能靠小样本下结论。
+- **自主巡检**: 收益安全巡检尾部新增 `run_distribution_cycle()` —— 回填审批结果、为 `ready` 状态资源包生成物料草稿、按 `max_submit_per_cycle` 提交审批。**它产生的物料状态只会是 `draft` 或 `submitted`，永远不会是 `published`**（有测试守这条线）。
+- **配置**: `earth_online.distribution`（enabled / require_verified_rights / auto_generate / auto_submit / max_materials_per_cycle / max_submit_per_cycle / variants_per_target / min_impressions_for_verdict / min_clicks_for_verdict / report_days / default_channels / default_targets）。`default_channels` 预置夸克/迅雷/UC/百度/阿里五个平台，**推广链接留空**，由佳从平台官方后台复制粘贴；首次构造 store 时幂等入库，重复启动不会覆盖已填的链接。
+- **收益路线**: `EARNING_ROUTE_TEMPLATES` 新增 `netdisk_share`（「网盘分发与拉新」），收益中枢的路线排序会把「网盘 / 分享 / 资源 / 拉新 / 资料 / 素材 / 合集 / 分发 / 引流」等关键词与佳的能力档案匹配。
+- **前台**: 收益中枢新增「网盘分发」面板（复盘概览 / 分发平台 / 投放位 / 资源包 / 投放物料 / 运行分发巡检）。
+- **弥娅工具**: `earth_list_dist_channels` / `earth_upsert_dist_channel` / `earth_list_dist_targets` / `earth_upsert_dist_target` / `earth_list_dist_packages` / `earth_create_dist_package` / `earth_bind_dist_share` / `earth_list_dist_materials` / `earth_generate_dist_materials` / `earth_promote_dist_material` / `earth_mark_dist_material_published` / `earth_record_dist_metrics` / `earth_distribution_report` / `earth_run_distribution_cycle`（决策中枢 + ToolNet 双层严格对齐 + 全平台白名单）。
+- **测试**: `tests/test_earth_distribution.py`（合规闸门、登记边界、物料生成与去重、风险词自检、审批回填、发布前置、转化回流与记账、漏斗与判定、巡检只产草稿、路线可选）。
+- **仍未开放**: 不自动登录内容平台或网盘、不自动发布/私信/评论、不读取平台佣金账单（转化数据由佳回填）、不代替佳收款。佣金口径以各平台官方后台为准，系统不承诺任何收益。
+
 ## 地图能力边界（当前实现）
 
 - **已经完成**: 世界页已换成 MapLibre 真实地图引擎；配置 `VITE_MAPTILER_KEY` 时加载 MapTiler 矢量样式，未配置时回退到 OpenStreetMap 栅格瓦片。地点搜索使用 Nominatim，已记录地点和现实天气位置可以叠加到地图上。

@@ -10,19 +10,26 @@
 """
 
 import asyncio
+import html
 import logging
 import os
+import re
+import tempfile
+import threading
+import time
 import uuid
 import json
 import urllib.request
-from typing import Any, Dict, Optional
+import zipfile
+from typing import Any, Dict, Iterable, Optional
 
 from core.earth_online_store import get_earth_store
 
 logger = logging.getLogger(__name__)
 
 try:
-    from fastapi import APIRouter, File, HTTPException, UploadFile
+    from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+    from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 
     FASTAPI_AVAILABLE = True
 except ImportError:
@@ -30,7 +37,45 @@ except ImportError:
     APIRouter = object
     File = None
     HTTPException = None
+    Request = None
     UploadFile = None
+    FileResponse = HTMLResponse = RedirectResponse = StreamingResponse = None
+
+
+class _DeliveryRateLimiter:
+    """公开交付页的进程内滑动窗口限流 (公开页面是唯一无鉴权入口，必须自己兜住)。"""
+
+    def __init__(self) -> None:
+        self._hits: Dict[str, list] = {}
+        self._lock = threading.Lock()
+
+    def allow(self, key: str, per_minute: int) -> bool:
+        now = time.monotonic()
+        with self._lock:
+            window = [stamp for stamp in self._hits.get(key, []) if now - stamp < 60]
+            if len(window) >= max(1, int(per_minute)):
+                self._hits[key] = window
+                return False
+            window.append(now)
+            self._hits[key] = window
+            if len(self._hits) > 2048:
+                self._hits = {k: v for k, v in self._hits.items() if v and now - v[-1] < 60}
+            return True
+
+
+def _stream_and_close(buffer: Any) -> Iterable[bytes]:
+    """把打包好的临时文件流出去，结束后关闭 (SpooledTemporaryFile 会自动落盘/释放)。"""
+    try:
+        while True:
+            chunk = buffer.read(262144)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        try:
+            buffer.close()
+        except Exception:
+            pass
 
 
 class EarthOnlineRoutes:
@@ -47,6 +92,7 @@ class EarthOnlineRoutes:
 
         self.store = get_earth_store()
         self.router = APIRouter(prefix="/api/earth", tags=["EarthOnline"])
+        self._delivery_limiter = _DeliveryRateLimiter()
         self._setup_routes()
         logger.info("[EarthOnline] 地球online 路由已初始化")
 
@@ -554,6 +600,36 @@ class EarthOnlineRoutes:
         async def digital_resources(status: str = "", rights_status: str = ""):
             return self.store.list_digital_resources(status=status, rights_status=rights_status)
 
+        # v23: 开放许可资源发现器（只收录可确定性判定授权的内容，不下载/不发布/不交易）
+        @self.router.get("/earning/digital-resources/scout/providers")
+        async def digital_resource_scout_providers():
+            from core.earth_online_resource_scout import provider_catalog, load_scout_config
+
+            config = load_scout_config()
+            return {
+                "providers": provider_catalog(),
+                "enabled": config.get("enabled"),
+                "auto_verify": config.get("auto_verify"),
+                "max_per_cycle": config.get("max_per_cycle"),
+                "daily_cap": config.get("daily_cap"),
+                "queries": config.get("queries"),
+            }
+
+        @self.router.post("/earning/digital-resources/scout")
+        async def scout_digital_resources(request: Dict[str, Any] = None):
+            """让弥娅去公开授权源找可合法转售的资源；命中非商业许可或素材库一律拒绝。"""
+            body = request if isinstance(request, dict) else {}
+            try:
+                return await asyncio.to_thread(
+                    self.store.scout_digital_resources,
+                    str(body.get("query", "") or ""),
+                    str(body.get("provider", "") or ""),
+                    int(body.get("limit", 0) or 0),
+                    False,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+
         @self.router.post("/earning/digital-resources")
         async def create_digital_resource(request: Dict[str, Any] = None):
             try:
@@ -570,6 +646,14 @@ class EarthOnlineRoutes:
             if result is None:
                 raise HTTPException(status_code=404, detail="数字资源不存在")
             return result
+
+        # v23: 把资源落到本地交付区 (交付从此由弥娅自己下发)。下载是阻塞动作，放到线程里。
+        @self.router.post("/earning/digital-resources/{resource_id}/stage")
+        async def stage_delivery_file(resource_id: int):
+            try:
+                return await asyncio.to_thread(self.store.stage_delivery_file, int(resource_id))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
 
         @self.router.get("/earning/digital-products")
         async def digital_products(status: str = ""):
@@ -612,15 +696,19 @@ class EarthOnlineRoutes:
             return self.store.list_digital_deliveries(order_id=order_id)
 
         @self.router.post("/earning/digital-orders/{order_id}/deliveries")
-        async def issue_digital_delivery(order_id: int, request: Dict[str, Any] = None):
+        async def issue_digital_delivery(order_id: int, http_request: Request, payload: Dict[str, Any] = None):
             try:
-                payload = request or {}
-                return self.store.issue_digital_delivery(
-                    order_id, expires_hours=int(payload.get("expires_hours", 72) or 72),
-                    max_downloads=int(payload.get("max_downloads", 3) or 3),
+                body = payload or {}
+                result = self.store.issue_digital_delivery(
+                    order_id, expires_hours=int(body.get("expires_hours", 72) or 72),
+                    max_downloads=int(body.get("max_downloads", 10) or 10),
                 )
             except (TypeError, ValueError) as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
+            # 未配置 delivery.base_url 时按请求自身推导绝对地址，佳可以直接复制给买家
+            if str(result.get("delivery_url", "")).startswith("/"):
+                result["delivery_url"] = str(http_request.base_url).rstrip("/") + str(result.get("delivery_path", ""))
+            return result
 
         @self.router.post("/earning/digital-deliveries/redeem")
         async def redeem_digital_delivery(request: Dict[str, Any] = None):
@@ -628,6 +716,170 @@ class EarthOnlineRoutes:
             if not result.get("success"):
                 raise HTTPException(status_code=400, detail=result.get("message", "交付失败"))
             return result
+
+        # ── v23: 自建限时交付页 (买家侧唯一无鉴权入口，凭证就是令牌) ──
+
+        def _delivery_guard(http_request: Request) -> Dict[str, Any]:
+            settings = self.store.delivery_settings()
+            if not settings["enabled"]:
+                raise HTTPException(status_code=404, detail="交付页未开放")
+            client = getattr(http_request.client, "host", "") or "unknown"
+            if not self._delivery_limiter.allow(client, int(settings["rate_limit_per_minute"])):
+                raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
+            return settings
+
+        def _human_size(size: int) -> str:
+            value = float(size or 0)
+            for unit in ("B", "KB", "MB", "GB"):
+                if value < 1024 or unit == "GB":
+                    return f"{value:.0f} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+                value /= 1024
+            return f"{value:.1f} GB"
+
+        @self.router.get("/d/{token}")
+        async def public_delivery_page(token: str, http_request: Request):
+            settings = _delivery_guard(http_request)
+            inspected = self.store.inspect_digital_delivery(token)
+            if not inspected.get("success"):
+                raise HTTPException(status_code=410, detail=inspected.get("message", "交付不可用"))
+            rows = []
+            local_total = 0
+            local_count = 0
+            for entry in inspected.get("manifest", []):
+                resolved = self.store.redemption_target(entry, token)
+                target = resolved.get("target") or {}
+                kind = target.get("kind")
+                title = html.escape(str(entry.get("title") or "资源"))
+                if kind == "file":
+                    local_total += int(target.get("size") or 0)
+                    local_count += 1
+                    rows.append(
+                        f'<li><span class="name">{title}</span>'
+                        f'<span class="meta">{_human_size(int(target.get("size") or 0))}</span>'
+                        f'<a class="btn" href="{self.store.DELIVERY_PATH_PREFIX}{html.escape(token)}/f/{int(entry.get("id") or 0)}">下载</a></li>'
+                    )
+                elif kind == "url" and settings["allow_external_redirect"]:
+                    href = html.escape(str(target.get("href") or ""))
+                    rows.append(
+                        f'<li><span class="name">{title}</span>'
+                        f'<span class="meta">外部来源</span>'
+                        f'<a class="btn ghost" rel="noreferrer noopener" href="{href}">打开来源</a></li>'
+                    )
+                else:
+                    rows.append(
+                        f'<li><span class="name">{title}</span>'
+                        f'<span class="meta">暂不可交付</span>'
+                        f'<span class="btn disabled">等待卖家准备</span></li>'
+                    )
+            zip_button = ""
+            if local_count > 1 and local_total <= int(settings["zip_max_mb"]) * 1024 * 1024:
+                zip_button = (
+                    f'<a class="zip" href="{self.store.DELIVERY_PATH_PREFIX}{html.escape(token)}/zip">'
+                    f'打包下载全部（{_human_size(local_total)}）</a>'
+                )
+            title = html.escape(str((inspected.get("product") or {}).get("title") or "你的数字商品"))
+            body = f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{title} · 交付</title>
+<style>
+:root {{ color-scheme: dark; }}
+* {{ box-sizing: border-box; }}
+body {{ margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+  background:#0d1117; color:#e6edf3; font:15px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif; padding:24px; }}
+.card {{ width:100%; max-width:560px; background:#161b22; border:1px solid #30363d; border-radius:16px; padding:26px 24px; }}
+.kicker {{ font-size:12px; letter-spacing:.18em; color:#78cfd1; text-transform:uppercase; }}
+h1 {{ font-size:20px; margin:6px 0 4px; }}
+.stats {{ color:#8b949e; font-size:13px; margin-bottom:18px; }}
+ul {{ list-style:none; margin:0; padding:0; }}
+li {{ display:flex; align-items:center; gap:10px; padding:12px 0; border-top:1px solid #21262d; }}
+.name {{ flex:1; min-width:0; overflow-wrap:anywhere; }}
+.meta {{ color:#8b949e; font-size:12px; white-space:nowrap; }}
+.btn {{ flex:none; text-decoration:none; background:#1f6feb; color:#fff; padding:7px 14px; border-radius:9px; font-size:13px; }}
+.btn.ghost {{ background:#21262d; color:#c9d1d9; }}
+.btn.disabled {{ background:#21262d; color:#6e7681; }}
+.zip {{ display:block; margin-top:18px; text-align:center; text-decoration:none; background:#238636; color:#fff; padding:12px; border-radius:10px; font-weight:600; }}
+footer {{ margin-top:20px; color:#6e7681; font-size:12px; }}
+</style></head>
+<body><main class="card">
+<span class="kicker">MIYA · SECURE DELIVERY</span>
+<h1>{title}</h1>
+<div class="stats">链接有效期至 {html.escape(str(inspected.get("expires_at") or "")[:16].replace("T", " "))} ·
+剩余下载次数 {int(inspected.get("remaining_downloads") or 0)} / {int(inspected.get("max_downloads") or 0)}</div>
+<ul>{''.join(rows) or '<li><span class="name">本次交付暂时没有可下载内容</span></li>'}</ul>
+{zip_button}
+<footer>本页由弥娅自建交付通道直接下发，不经过网盘。每次下载会消耗一次次数，链接请勿转发；有问题请联系卖家重新签发。</footer>
+</main></body></html>"""
+            return HTMLResponse(content=body)
+
+        @self.router.get("/d/{token}/f/{resource_id}")
+        async def public_delivery_file(token: str, resource_id: int, http_request: Request):
+            settings = _delivery_guard(http_request)
+            inspected = self.store.inspect_digital_delivery(token)
+            if not inspected.get("success"):
+                raise HTTPException(status_code=410, detail=inspected.get("message", "交付不可用"))
+            entry = next(
+                (item for item in inspected.get("manifest", []) if int(item.get("id") or 0) == int(resource_id)),
+                None,
+            )
+            if not entry:
+                raise HTTPException(status_code=404, detail="该资源不在本次交付范围内")
+            target = (self.store.redemption_target(entry, token).get("target") or {})
+            kind = target.get("kind")
+            if kind == "missing":
+                raise HTTPException(status_code=409, detail=str(target.get("reason") or "资源暂不可交付"))
+            if kind == "url" and not settings["allow_external_redirect"]:
+                raise HTTPException(status_code=409, detail="该资源尚未落到本地交付区，暂不可交付")
+            claimed = self.store.claim_digital_download(token)
+            if not claimed.get("success"):
+                raise HTTPException(status_code=410, detail=claimed.get("message", "交付不可用"))
+            if kind == "url":
+                return RedirectResponse(str(target.get("href") or ""), status_code=302)
+            return FileResponse(
+                str(target.get("path")),
+                filename=str(target.get("filename") or "download"),
+                media_type="application/octet-stream",
+            )
+
+        @self.router.get("/d/{token}/zip")
+        async def public_delivery_zip(token: str, http_request: Request):
+            settings = _delivery_guard(http_request)
+            inspected = self.store.inspect_digital_delivery(token)
+            if not inspected.get("success"):
+                raise HTTPException(status_code=410, detail=inspected.get("message", "交付不可用"))
+            files = []
+            total = 0
+            for entry in inspected.get("manifest", []):
+                target = (self.store.redemption_target(entry, token).get("target") or {})
+                if target.get("kind") != "file":
+                    continue
+                name = str(target.get("filename") or f"resource-{entry.get('id')}")
+                files.append((name, str(target.get("path")), int(target.get("size") or 0)))
+                total += int(target.get("size") or 0)
+            if not files:
+                raise HTTPException(status_code=409, detail="本次交付没有可打包的本地文件，请逐个下载")
+            if total > int(settings["zip_max_mb"]) * 1024 * 1024:
+                raise HTTPException(status_code=413, detail="打包体积超过上限，请逐个下载")
+            claimed = self.store.claim_digital_download(token)
+            if not claimed.get("success"):
+                raise HTTPException(status_code=410, detail=claimed.get("message", "交付不可用"))
+
+            def _build() -> Any:
+                buffer = tempfile.SpooledTemporaryFile(max_size=32 * 1024 * 1024)
+                with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+                    for name, path, _size in files:
+                        archive.write(path, arcname=os.path.basename(name))
+                buffer.seek(0)
+                return buffer
+
+            buffer = await asyncio.to_thread(_build)
+            slug = re.sub(r"[^A-Za-z0-9._-]+", "-", str((inspected.get("product") or {}).get("title") or "miya"))[:40].strip("-") or "miya"
+            return StreamingResponse(
+                _stream_and_close(buffer),
+                media_type="application/zip",
+                headers={"Content-Disposition": f'attachment; filename="{slug}.zip"'},
+            )
 
         @self.router.post("/earning/digital-deliveries/{delivery_id}/revoke")
         async def revoke_digital_delivery(delivery_id: int):
@@ -760,6 +1012,185 @@ class EarthOnlineRoutes:
         async def revoke_earning_action(action_id: int):
             try: return self.store.revoke_earning_action(action_id)
             except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
+
+        # ── v24: 网盘分发中枢 (只做站内组装/草稿/复盘；不登录平台、不发布、不收款) ──
+
+        def _dist_payload(request: Optional[Dict[str, Any]], allowed: Iterable[str]) -> Dict[str, Any]:
+            """只放行白名单字段，避免把列表接口返回的只读列原样写回库里。"""
+            body = request if isinstance(request, dict) else {}
+            return {key: body[key] for key in allowed if key in body}
+
+        @self.router.get("/earning/distribution/report")
+        async def distribution_report(days: int = 0):
+            """分发复盘：漏斗 + 逐渠道/物料判定。聚合面较大，放到线程里跑。"""
+            return await asyncio.to_thread(self.store.distribution_report, days)
+
+        @self.router.get("/earning/distribution/settings")
+        async def distribution_settings():
+            return self.store.distribution_settings()
+
+        @self.router.get("/earning/distribution/channels")
+        async def dist_channels(enabled_only: bool = False):
+            return self.store.list_dist_channels(enabled_only=enabled_only)
+
+        @self.router.post("/earning/distribution/channels")
+        async def upsert_dist_channel(request: Dict[str, Any] = None):
+            payload = _dist_payload(request, (
+                "id", "key", "name", "kind", "promo_url", "promo_code",
+                "settlement_cycle", "commission_rule", "source_note", "note", "notes", "enabled",
+            ))
+            try: return self.store.upsert_dist_channel(payload)
+            except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.delete("/earning/distribution/channels/{channel_id}")
+        async def delete_dist_channel(channel_id: int):
+            try:
+                if not self.store.delete_dist_channel(channel_id):
+                    raise HTTPException(status_code=404, detail="分发平台不存在")
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            return {"success": True}
+
+        @self.router.get("/earning/distribution/targets")
+        async def dist_targets(platform: str = "", enabled_only: bool = False):
+            return self.store.list_dist_targets(enabled_only=enabled_only, platform=platform)
+
+        @self.router.post("/earning/distribution/targets")
+        async def upsert_dist_target(request: Dict[str, Any] = None):
+            payload = _dist_payload(request, (
+                "id", "platform", "account_label", "profile_url", "audience_note",
+                "daily_post_limit", "enabled", "notes",
+            ))
+            try: return self.store.upsert_dist_target(payload)
+            except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.delete("/earning/distribution/targets/{target_id}")
+        async def delete_dist_target(target_id: int):
+            if not self.store.delete_dist_target(target_id):
+                raise HTTPException(status_code=404, detail="投放位不存在")
+            return {"success": True}
+
+        @self.router.get("/earning/distribution/packages")
+        async def dist_packages(status: str = ""):
+            return self.store.list_dist_packages(status=status)
+
+        @self.router.post("/earning/distribution/packages")
+        async def create_dist_package(request: Dict[str, Any] = None):
+            payload = _dist_payload(request, (
+                "title", "resource_ids", "channel_id", "share_url", "share_password",
+                "share_note", "cover_hint", "keywords", "status",
+            ))
+            try: return self.store.create_dist_package(payload)
+            except (TypeError, ValueError) as exc: raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.put("/earning/distribution/packages/{package_id}")
+        async def update_dist_package(package_id: int, request: Dict[str, Any] = None):
+            payload = _dist_payload(request, (
+                "title", "resource_ids", "channel_id", "share_url", "share_password",
+                "share_note", "cover_hint", "keywords", "status",
+            ))
+            try: result = self.store.update_dist_package(package_id, payload)
+            except (TypeError, ValueError) as exc: raise HTTPException(status_code=400, detail=str(exc))
+            if result is None: raise HTTPException(status_code=404, detail="资源包不存在")
+            return result
+
+        @self.router.delete("/earning/distribution/packages/{package_id}")
+        async def delete_dist_package(package_id: int):
+            if not self.store.delete_dist_package(package_id):
+                raise HTTPException(status_code=404, detail="资源包不存在")
+            return {"success": True}
+
+        @self.router.post("/earning/distribution/packages/{package_id}/share")
+        async def bind_dist_share(package_id: int, request: Dict[str, Any] = None):
+            body = request if isinstance(request, dict) else {}
+            try:
+                return self.store.bind_dist_share(
+                    package_id,
+                    str(body.get("share_url", "") or ""),
+                    str(body.get("share_password", "") or ""),
+                    str(body.get("share_note", "") or ""),
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.get("/earning/distribution/materials")
+        async def dist_materials(status: str = "", platform: str = "", package_id: Optional[int] = None, limit: int = 200):
+            return self.store.list_dist_materials(status=status, platform=platform, package_id=package_id, limit=limit)
+
+        @self.router.post("/earning/distribution/materials/actions/sync")
+        async def sync_dist_material_actions():
+            """把审批箱结果回填到物料状态 (只改站内状态)。"""
+            return self.store.sync_dist_material_actions()
+
+        @self.router.post("/earning/distribution/packages/{package_id}/materials")
+        async def generate_dist_materials(package_id: int, request: Dict[str, Any] = None):
+            body = request if isinstance(request, dict) else {}
+            target_ids = body.get("target_ids") if isinstance(body.get("target_ids"), list) else []
+            try:
+                variants = int(body.get("variants", 0) or 0)
+            except (TypeError, ValueError):
+                variants = 0
+            try:
+                return self.store.generate_dist_materials(
+                    package_id,
+                    target_ids=[int(item) for item in target_ids if str(item).strip().isdigit()] or None,
+                    variants=variants,
+                    replace=bool(body.get("replace")),
+                )
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.put("/earning/distribution/materials/{material_id}")
+        async def update_dist_material(material_id: int, request: Dict[str, Any] = None):
+            payload = _dist_payload(request, ("title", "body", "tags", "cta", "status"))
+            try: result = self.store.update_dist_material(material_id, payload)
+            except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
+            if result is None: raise HTTPException(status_code=404, detail="投放物料不存在")
+            return result
+
+        @self.router.delete("/earning/distribution/materials/{material_id}")
+        async def delete_dist_material(material_id: int):
+            if not self.store.delete_dist_material(material_id):
+                raise HTTPException(status_code=404, detail="投放物料不存在")
+            return {"success": True}
+
+        @self.router.post("/earning/distribution/materials/{material_id}/promote")
+        async def promote_dist_material(material_id: int):
+            """转成对外发布审批草稿并提交审批 (仍然不发布)。"""
+            try: return self.store.promote_dist_material(material_id)
+            except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.post("/earning/distribution/materials/{material_id}/published")
+        async def mark_dist_material_published(material_id: int, request: Dict[str, Any] = None):
+            body = request if isinstance(request, dict) else {}
+            try:
+                return self.store.mark_dist_material_published(material_id, str(body.get("published_url", "") or ""))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.get("/earning/distribution/metrics")
+        async def dist_metrics(days: int = 0, package_id: Optional[int] = None):
+            return self.store.list_dist_metrics(days=days, package_id=package_id)
+
+        @self.router.post("/earning/distribution/metrics")
+        async def record_dist_metrics(request: Dict[str, Any] = None):
+            payload = _dist_payload(request, (
+                "material_id", "package_id", "stat_date", "impressions", "clicks", "saves",
+                "transfers", "new_users", "vip_orders", "revenue", "cost", "source", "note",
+            ))
+            try: return self.store.record_dist_metrics(payload)
+            except (TypeError, ValueError) as exc: raise HTTPException(status_code=400, detail=str(exc))
+
+        @self.router.delete("/earning/distribution/metrics/{metric_id}")
+        async def delete_dist_metrics(metric_id: int):
+            if not self.store.delete_dist_metrics(metric_id):
+                raise HTTPException(status_code=404, detail="转化数据不存在")
+            return {"success": True}
+
+        @self.router.post("/earning/distribution/cycle")
+        async def run_distribution_cycle():
+            """运行一次分发巡检：只做站内生成、提交审批与状态回填。"""
+            return await asyncio.to_thread(self.store.run_distribution_cycle)
 
         # ── 称号系统 ──
 

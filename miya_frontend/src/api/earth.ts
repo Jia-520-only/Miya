@@ -277,6 +277,191 @@ export interface EarthDigitalResource {
   updated_at?: string
 }
 
+// ── v24: 网盘分发中枢 ──
+// 后端 snake_case 经 ApiClient 的 camelcaseKeys 转换后即为下列字段。
+export type EarthDistPlatform = 'xiaohongshu' | 'zhihu' | 'tieba' | 'bilibili' | 'douyin' | 'kuaishou' | 'weibo' | 'gongzhonghao' | 'xianyu' | 'other'
+export type EarthDistChannelKind = 'netdisk_cps' | 'netdisk_referral' | 'direct_sale' | 'other'
+export type EarthDistPackageStatus = 'draft' | 'ready' | 'published' | 'retired'
+export type EarthDistMaterialStatus = 'draft' | 'submitted' | 'approved' | 'published' | 'retired'
+
+export interface EarthDistributionSettings {
+  enabled: boolean
+  requireVerifiedRights: boolean
+  autoGenerate: boolean
+  autoSubmit: boolean
+  maxMaterialsPerCycle: number
+  maxSubmitPerCycle: number
+  variantsPerTarget: number
+  minImpressionsForVerdict: number
+  minClicksForVerdict: number
+  reportDays: number
+  defaultChannels: Array<{ key: string, name: string, kind: EarthDistChannelKind, promoUrl: string, promoCode: string, settlementCycle: string, commissionNote: string }>
+  defaultTargets: Array<{ platform: EarthDistPlatform, accountLabel: string, profileUrl: string, audienceNote: string, dailyPostLimit: number }>
+}
+
+export interface EarthDistChannel {
+  id: number
+  key: string
+  name: string
+  kind: EarthDistChannelKind
+  promoUrl: string
+  promoCode: string
+  settlementCycle: string
+  commissionRule: Record<string, any>
+  sourceNote: string
+  enabled: boolean
+  notes: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface EarthDistChannelInput {
+  id?: number
+  key?: string
+  name: string
+  kind?: EarthDistChannelKind
+  promoUrl?: string
+  promoCode?: string
+  settlementCycle?: string
+  sourceNote?: string
+  notes?: string
+  enabled?: boolean
+}
+
+export interface EarthDistTarget {
+  id: number
+  platform: EarthDistPlatform
+  accountLabel: string
+  profileUrl: string
+  audienceNote: string
+  dailyPostLimit: number
+  enabled: boolean
+  notes: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface EarthDistTargetInput {
+  id?: number
+  platform: EarthDistPlatform
+  accountLabel: string
+  profileUrl?: string
+  audienceNote?: string
+  dailyPostLimit?: number
+  enabled?: boolean
+  notes?: string
+}
+
+export interface EarthDistPackage {
+  id: number
+  title: string
+  channelId: number | null
+  channelName: string
+  channelKey: string
+  resourceIds: number[]
+  resourceCount: number
+  shareUrl: string
+  sharePassword: string
+  shareNote: string
+  coverHint: string
+  keywords: string[]
+  status: EarthDistPackageStatus
+  created_at?: string
+  updated_at?: string
+}
+
+export interface EarthDistMaterial {
+  id: number
+  packageId: number
+  targetId: number | null
+  platform: EarthDistPlatform
+  variant: number
+  title: string
+  body: string
+  tags: string[]
+  cta: string
+  riskFlags: string[]
+  status: EarthDistMaterialStatus
+  actionId: number | null
+  publishedUrl: string
+  publishedAt: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface EarthDistFunnel {
+  impressions: number
+  clicks: number
+  saves: number
+  transfers: number
+  newUsers: number
+  vipOrders: number
+  revenue: number
+  cost: number
+  net: number
+  ctr: number
+  transferRate: number
+  newUserRate: number
+  revenuePer1k: number
+}
+
+export interface EarthDistMaterialVerdict extends EarthDistFunnel {
+  materialId: number
+  title: string
+  platform: string
+  status: string
+  riskFlags: string[]
+  verdict: string
+  advice: string
+  rows: number
+  dayCount: number
+}
+
+export interface EarthDistributionReport {
+  windowDays: number
+  funnel: EarthDistFunnel
+  materials: EarthDistMaterialVerdict[]
+  platforms: Array<{ platform: string } & EarthDistFunnel>
+  channels: Array<{ channelId: number, channelName: string } & EarthDistFunnel>
+  counts: {
+    packages: number
+    readyPackages: number
+    materials: number
+    pendingApproval: number
+    approved: number
+    published: number
+    risky: number
+    metricRows: number
+  }
+  compliance: string[]
+  suggestions: string[]
+  settings: EarthDistributionSettings
+  boundary: string
+}
+
+export interface EarthDistMetricsInput {
+  materialId?: number | null
+  packageId?: number | null
+  statDate?: string
+  impressions?: number
+  clicks?: number
+  saves?: number
+  transfers?: number
+  newUsers?: number
+  vipOrders?: number
+  revenue?: number
+  cost?: number
+  note?: string
+}
+
+export interface EarthDistGenerateResult {
+  success: boolean
+  package: EarthDistPackage | null
+  created: EarthDistMaterial[]
+  createdCount: number
+  skippedCount: number
+}
+
 export interface EarthDigitalProduct {
   id: number
   title: string
@@ -1290,6 +1475,26 @@ export class EarthApiClient extends ApiClient {
     return this.instance.put(`/api/earth/earning/digital-resources/${id}`, data)
   }
 
+  /** v23: 让弥娅去公开授权源找可合法转售的资源 (CC0 / 公版 / 开放许可)。 */
+  async scoutDigitalResources(data: { query?: string, provider?: string, limit?: number } = {}): Promise<{
+    success: boolean,
+    enabled: boolean,
+    created_count: number,
+    auto_verified_count: number,
+    pending_count: number,
+    blocked_count: number,
+    skipped_duplicate_count: number,
+    skipped_license_count: number,
+    skipped?: string,
+    message?: string,
+    created: Array<{ id: number, title: string, license_type: string, rights_status: string, status: string, source_name: string }>,
+    blocked: Array<{ title: string, reason: string }>,
+    errors: Array<{ provider: string, query: string, error: string }>,
+    scope: string,
+  }> {
+    return this.instance.post('/api/earth/earning/digital-resources/scout', data)
+  }
+
   async digitalProducts(status = ''): Promise<EarthDigitalProduct[]> {
     return this.instance.get('/api/earth/earning/digital-products', { params: status ? { status } : undefined })
   }
@@ -1318,7 +1523,11 @@ export class EarthApiClient extends ApiClient {
     return this.instance.get('/api/earth/earning/digital-deliveries', { params: orderId ? { order_id: orderId } : undefined })
   }
 
-  async issueDigitalDelivery(id: number, expiresHours = 72, maxDownloads = 3): Promise<{ success: boolean, delivery_id: number, order_id: number, token: string, expires_at: string, max_downloads: number, resource_manifest: Array<{ id: number, title: string, content_uri: string, checksum: string, version: string }>, warning: string }> {
+  async stageDeliveryFile(id: number): Promise<{ success: boolean, staged: boolean, message: string, manifest: { id: number, title: string, kind: string, filename: string, size: number, checksum: string } }> {
+    return this.instance.post(`/api/earth/earning/digital-resources/${id}/stage`)
+  }
+
+  async issueDigitalDelivery(id: number, expiresHours = 72, maxDownloads = 10): Promise<{ success: boolean, delivery_id: number, order_id: number, token: string, delivery_path: string, delivery_url: string, expires_at: string, max_downloads: number, resource_manifest: Array<{ id: number, title: string, kind: string, filename: string, size: number, content_uri: string, checksum: string, version: string, reason: string }>, warning: string }> {
     return this.instance.post(`/api/earth/earning/digital-orders/${id}/deliveries`, { expires_hours: expiresHours, max_downloads: maxDownloads })
   }
 
@@ -1675,6 +1884,140 @@ export class EarthApiClient extends ApiClient {
 
   async deleteMiyaShopItem(itemKey: string): Promise<{ success: boolean }> {
     return this.instance.delete(`/api/earth/miya-shop/manage/${encodeURIComponent(itemKey)}`)
+  }
+
+  // ── v24: 网盘分发中枢 (只做站内组装/草稿/审批/复盘，弥娅不登录平台、不发布、不收款) ──
+  async distributionReport(days = 0): Promise<EarthDistributionReport> {
+    return this.instance.get('/api/earth/earning/distribution/report', { params: days ? { days } : undefined })
+  }
+
+  async distributionSettings(): Promise<EarthDistributionSettings> {
+    return this.instance.get('/api/earth/earning/distribution/settings')
+  }
+
+  async distChannels(enabledOnly = false): Promise<EarthDistChannel[]> {
+    return this.instance.get('/api/earth/earning/distribution/channels', { params: enabledOnly ? { enabled_only: true } : undefined })
+  }
+
+  async upsertDistChannel(data: EarthDistChannelInput): Promise<EarthDistChannel> {
+    return this.instance.post('/api/earth/earning/distribution/channels', data)
+  }
+
+  async deleteDistChannel(id: number): Promise<{ success: boolean }> {
+    return this.instance.delete(`/api/earth/earning/distribution/channels/${id}`)
+  }
+
+  async distTargets(params?: { platform?: string, enabledOnly?: boolean }): Promise<EarthDistTarget[]> {
+    return this.instance.get('/api/earth/earning/distribution/targets', {
+      params: {
+        platform: params?.platform || undefined,
+        enabled_only: params?.enabledOnly || undefined,
+      },
+    })
+  }
+
+  async upsertDistTarget(data: EarthDistTargetInput): Promise<EarthDistTarget> {
+    return this.instance.post('/api/earth/earning/distribution/targets', data)
+  }
+
+  async deleteDistTarget(id: number): Promise<{ success: boolean }> {
+    return this.instance.delete(`/api/earth/earning/distribution/targets/${id}`)
+  }
+
+  async distPackages(status = ''): Promise<EarthDistPackage[]> {
+    return this.instance.get('/api/earth/earning/distribution/packages', { params: status ? { status } : undefined })
+  }
+
+  async createDistPackage(data: {
+    title: string
+    resourceIds?: number[] | string
+    channelId?: number | null
+    shareUrl?: string
+    sharePassword?: string
+    shareNote?: string
+    coverHint?: string
+    keywords?: string[] | string
+    status?: EarthDistPackageStatus
+  }): Promise<EarthDistPackage> {
+    return this.instance.post('/api/earth/earning/distribution/packages', data)
+  }
+
+  async updateDistPackage(id: number, data: Partial<{
+    title: string
+    resourceIds: number[] | string
+    channelId: number | null
+    shareUrl: string
+    sharePassword: string
+    shareNote: string
+    coverHint: string
+    keywords: string[] | string
+    status: EarthDistPackageStatus
+  }>): Promise<EarthDistPackage> {
+    return this.instance.put(`/api/earth/earning/distribution/packages/${id}`, data)
+  }
+
+  async deleteDistPackage(id: number): Promise<{ success: boolean }> {
+    return this.instance.delete(`/api/earth/earning/distribution/packages/${id}`)
+  }
+
+  async bindDistShare(id: number, data: { shareUrl: string, sharePassword?: string, shareNote?: string }): Promise<{ success: boolean, package: EarthDistPackage, warning?: string }> {
+    return this.instance.post(`/api/earth/earning/distribution/packages/${id}/share`, data)
+  }
+
+  async distMaterials(params?: { status?: string, platform?: string, packageId?: number, limit?: number }): Promise<EarthDistMaterial[]> {
+    return this.instance.get('/api/earth/earning/distribution/materials', {
+      params: {
+        status: params?.status || undefined,
+        platform: params?.platform || undefined,
+        package_id: params?.packageId || undefined,
+        limit: params?.limit || undefined,
+      },
+    })
+  }
+
+  async generateDistMaterials(packageId: number, data: { targetIds?: number[], variants?: number, replace?: boolean } = {}): Promise<EarthDistGenerateResult> {
+    return this.instance.post(`/api/earth/earning/distribution/packages/${packageId}/materials`, data)
+  }
+
+  async updateDistMaterial(id: number, data: Partial<{ title: string, body: string, tags: string[], cta: string, status: EarthDistMaterialStatus }>): Promise<EarthDistMaterial> {
+    return this.instance.put(`/api/earth/earning/distribution/materials/${id}`, data)
+  }
+
+  async deleteDistMaterial(id: number): Promise<{ success: boolean }> {
+    return this.instance.delete(`/api/earth/earning/distribution/materials/${id}`)
+  }
+
+  async promoteDistMaterial(id: number): Promise<{ success: boolean, material: EarthDistMaterial, action: EarthEarningActionDraft }> {
+    return this.instance.post(`/api/earth/earning/distribution/materials/${id}/promote`)
+  }
+
+  async markDistMaterialPublished(id: number, publishedUrl = ''): Promise<{ success: boolean, material: EarthDistMaterial }> {
+    return this.instance.post(`/api/earth/earning/distribution/materials/${id}/published`, { published_url: publishedUrl })
+  }
+
+  async syncDistMaterialActions(): Promise<{ success: boolean, skipped: number, approved: number, returned: number }> {
+    return this.instance.post('/api/earth/earning/distribution/materials/actions/sync')
+  }
+
+  async distMetrics(params?: { days?: number, packageId?: number }): Promise<Array<Record<string, any>>> {
+    return this.instance.get('/api/earth/earning/distribution/metrics', {
+      params: {
+        days: params?.days || undefined,
+        package_id: params?.packageId || undefined,
+      },
+    })
+  }
+
+  async recordDistMetrics(data: EarthDistMetricsInput): Promise<{ success: boolean, metric: Record<string, any>, incomeRecordId: number | null }> {
+    return this.instance.post('/api/earth/earning/distribution/metrics', data)
+  }
+
+  async deleteDistMetrics(id: number): Promise<{ success: boolean }> {
+    return this.instance.delete(`/api/earth/earning/distribution/metrics/${id}`)
+  }
+
+  async runDistributionCycle(): Promise<{ success: boolean, skipped?: string, createdMaterials?: number, submitted?: number, approved?: number, returned?: number }> {
+    return this.instance.post('/api/earth/earning/distribution/cycle')
   }
 
 }

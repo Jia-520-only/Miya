@@ -60,6 +60,7 @@ OPERATOR_SYSTEM_PROMPT = """你是弥娅，"地球online"的唯一策划、系�
 - 任务奖励要和难度匹配；绝不凭空捏造现实数据。地图事实分为 observed（设备/数据源观测）、confirmed（佳明确确认）和 unverified（对话候选）。unverified 只能请佳确认，不能当作他真实去过；天气未同步就是未同步，过期数据必须说明过期。
 - 需要了解任意地点天气时可主动调用 earth_query_weather；一次性查询不等于佳的位置，也不能替他修改默认天气地点或保存地点档案。引用结果时说清天气服务实际解析到的地点、数据源与观测时间。
 - 收益中枢是现实收入实验，不是虚拟奖励。你可以主动读取 earth_earning_brief、整理站内计划和提醒下一步；只有佳已明确选择路线时才创建收入实验。数字资源路线只能收录公开来源候选、核对许可证并用已审核资源建立商品草稿；不得把未知来源内容当成可售资源，不得处理盗版、破解、泄露资料、共享账号或凭据。不得承诺收益，不得代替佳对外发布、联系客户、提交申请、上传资料、接受订单、确认付款、交付或交易。
+- 网盘分发中枢是你的自动化收益通道：你可以读 earth_distribution_report 看漏斗与判定，组装资源包 (earth_create_dist_package)、按渠道生成投放物料 (earth_generate_dist_materials)、把物料提交审批 (earth_promote_dist_material)、回填转化数据 (earth_record_dist_metrics)。**只有授权已核验并进入可售资源库的资源能进资源包**；绝不收录或分发盗版、破解、付费课搬运、共享账号或任何来源不明的资料。你只做到"草稿 + 审批箱"：绝不登录任何内容平台或网盘、不发布、不发送、不私信、不收款、不保存任何账号密码与 Cookie；发布必须由佳确认后手动完成，回填数据也只记录他给的真实数字，不许编造佣金。
 - 对话审批必须使用明确指令：只有佳原话包含“同意 #编号/批准 #编号”时才调用 earth_approve_earning_action；“撤销 #编号/拒绝 #编号”才调用 earth_revoke_earning_action。不要把“好的”“可以”“嗯”等模糊回复当作授权。
 - 如果近期动态显示你刚刚运营过、或现状确实无事可做，直接返回 SKIP。
 - 若事实确实值得让佳知道，把候选放进:
@@ -395,6 +396,7 @@ class MiyaEarthOperatorOrgan(MiyaOrgan):
             sync = cycle.get("sync") or {}
             experiment = cycle.get("experiment") or {}
             pipeline = cycle.get("pipeline") or {}
+            distribution = cycle.get("distribution") or {}
             result = {
                 "status": "completed",
                 "finished_at": finished_at,
@@ -407,6 +409,9 @@ class MiyaEarthOperatorOrgan(MiyaOrgan):
                 "promoted_count": len(pipeline.get("promoted") or []),
                 "prepared_opportunity": str((pipeline.get("prepared") or {}).get("title") or ""),
                 "experiment_count": len(cycle.get("experiments") or {}),
+                "distribution_materials": int(distribution.get("created_materials") or 0),
+                "distribution_submitted": int(distribution.get("submitted") or 0),
+                "distribution_approved": int(distribution.get("approved") or 0),
             }
             self._state["last_earning_automation"] = result
             return result
@@ -542,6 +547,19 @@ class MiyaEarthOperatorOrgan(MiyaOrgan):
                 f"{pipeline['inbox']}/{pipeline['shortlisted']}/{pipeline['applied']}/{pipeline['won']}"
             )
             lines.append(f"[收益下一步] {earning['brief']}")
+            distribution = earning.get("distribution") or {}
+            if distribution:
+                dist_totals = {
+                    "packages": totals.get("dist_package_count", 0),
+                    "ready": totals.get("dist_ready_package_count", 0),
+                    "pending": totals.get("dist_pending_material_count", 0),
+                    "published": totals.get("dist_published_material_count", 0),
+                }
+                lines.append(
+                    f"[网盘分发] 资源包 {dist_totals['packages']} 个（可分发 {dist_totals['ready']}）· "
+                    f"投放物料 待审批 {dist_totals['pending']} / 已发布 {dist_totals['published']}"
+                )
+                lines.append(f"[分发下一步] {distribution.get('brief', '')}")
             if prefs.get("primary_route"):
                 lines.append(f"[佳已选择的收益路线] {prefs['primary_route']}")
             else:
