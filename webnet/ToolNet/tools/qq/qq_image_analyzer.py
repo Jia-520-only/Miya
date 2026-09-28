@@ -100,18 +100,19 @@ class QQImageAnalyzerTool:
             result += f"格式: {fmt}\n"
             result += f"大小: {size_kb:.1f} KB\n"
 
-            # 使用视觉模型分析
+            # QQ/chat images always use the cloud multimodal model. The local
+            # OCR route is reserved for screen observation.
             try:
-                from core.multi_vision_analyzer import analyze_image_multi_model
+                from core.image_vision_router import analyze_cloud_image
 
-                self.logger.info("[qq_image_analyzer] 调用视觉模型分析...")
-                vision_result = await analyze_image_multi_model(image_data, max_retries=2)
+                vision_result = await analyze_cloud_image(image_data)
 
-                if vision_result and vision_result.success:
-                    if vision_result.description:
-                        result += f"\n🎨 图片内容:\n{vision_result.description}"
-                    if vision_result.text_content:
-                        result += f"\n📝 识别文字:\n{vision_result.text_content}"
+                if vision_result and vision_result.get("success"):
+                    if vision_result.get("description"):
+                        result += f"\n🎨 图片内容:\n{vision_result['description']}"
+                    text_content = vision_result.get("text_content") or vision_result.get("text")
+                    if text_content:
+                        result += f"\n📝 识别文字:\n{text_content}"
                 else:
                     self.logger.warning(f"视觉分析失败: {vision_result}")
             except Exception as e:

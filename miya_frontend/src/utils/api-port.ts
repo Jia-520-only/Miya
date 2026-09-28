@@ -2,7 +2,7 @@ import { ref } from 'vue'
 
 const COMPILED_PORT = Number(import.meta.env.VITE_API_PORT) || 9800
 const COMPILED_MANAGEMENT_PORT = Number(import.meta.env.VITE_MANAGEMENT_PORT) || 9800
-const PORT_SCAN_PORTS = [8000, 8001, 8002, 9800, 9801, 9802]
+const PORT_SCAN_PORTS = [8001, 8000, 8002, 9800, 9801, 9802]
 
 export const apiPort = ref(COMPILED_PORT)
 export const managementPort = ref(COMPILED_MANAGEMENT_PORT)
@@ -54,6 +54,24 @@ async function tryHealth(port: number): Promise<boolean> {
   return false
 }
 
+export async function supportsUnifiedVision(port: number): Promise<boolean> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 1800)
+  try {
+    const res = await fetch(`http://localhost:${port}/api/camera/control`, {
+      signal: controller.signal,
+    })
+    clearTimeout(timer)
+    if (!res.ok) return false
+    const payload = await res.json().catch(() => null)
+    return payload?.success === true && typeof payload?.state?.mode === 'string'
+  }
+  catch {
+    clearTimeout(timer)
+    return false
+  }
+}
+
 export async function discoverApiPort(): Promise<number> {
   checkDynamicPort()
   if (apiPort.value !== COMPILED_PORT) return apiPort.value
@@ -61,12 +79,20 @@ export async function discoverApiPort(): Promise<number> {
   const results = await Promise.allSettled(
     PORT_SCAN_PORTS.map(port => tryHealth(port).then(ok => (ok ? port : 0)))
   )
-  for (const r of results) {
-    if (r.status === 'fulfilled' && r.value > 0) {
-      apiPort.value = r.value
-      console.log('[MIYA] Discovered API port:', r.value)
-      return r.value
+  const healthyPorts = results
+    .filter((r): r is PromiseFulfilledResult<number> => r.status === 'fulfilled' && r.value > 0)
+    .map(r => r.value)
+  for (const port of healthyPorts) {
+    if (await supportsUnifiedVision(port)) {
+      apiPort.value = port
+      console.log('[MIYA] Discovered unified vision API port:', port)
+      return port
     }
+  }
+  if (healthyPorts[0]) {
+    apiPort.value = healthyPorts[0]
+    console.log('[MIYA] Discovered API port:', healthyPorts[0])
+    return healthyPorts[0]
   }
   console.warn('[MIYA] No API port discovered, using default:', COMPILED_PORT)
   return COMPILED_PORT

@@ -43,6 +43,63 @@ class MiyaAPI:
 
     def _setup_routes(self):
         """设置所有路由"""
+        @self.router.get("/api/camera/control")
+        async def camera_control_state():
+            """Return the slash-command camera request without camera data."""
+            from core.camera_control import read_state
+
+            return {"success": True, "state": read_state()}
+
+        @self.router.post("/api/camera/control")
+        async def camera_control_update(body: dict | None = None):
+            """Allow the desktop UI to publish the same small control state."""
+            from core.camera_control import write_state
+
+            body = body or {}
+            try:
+                state = write_state(
+                    str(body.get("mode", "off")),
+                    local_only=body.get("local_only"),
+                    action_recognition=body.get("action_recognition"),
+                    autonomous=body.get("autonomous"),
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            return {"success": True, "state": state}
+
+        @self.router.get("/api/camera/request")
+        async def camera_observation_request():
+            from core.camera_control import read_observation_request
+
+            return {"success": True, "request": read_observation_request()}
+
+        @self.router.post("/api/camera/result")
+        async def camera_observation_result(body: dict | None = None):
+            from core.camera_control import publish_observation_result
+            from core.vision_context import record_camera_observation
+
+            body = body or {}
+            request_id = str(body.get("request_id", ""))
+            result = body.get("result")
+            if not request_id or not isinstance(result, dict):
+                raise HTTPException(status_code=400, detail="缺少有效的摄像头观察结果")
+            publish_observation_result(request_id, result)
+            record_camera_observation(
+                result,
+                query=str(body.get("query") or ""),
+                mode=str(body.get("mode") or "autonomous"),
+                local_only=body.get("local_only"),
+                proactive=True,
+            )
+            return {"success": True}
+
+        @self.router.get("/api/vision/context")
+        async def vision_context_state():
+            from core.vision_context import get_vision_context
+
+            store = get_vision_context()
+            return {"success": True, "stats": store.stats(), "events": store.recent(limit=24)}
+
         @self.router.get('/api/music/library')
         async def music_library():
             root = Path(__file__).resolve().parents[2]

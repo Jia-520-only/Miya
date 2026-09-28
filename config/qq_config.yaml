@@ -276,6 +276,9 @@ tools:
     enabled: true
     ocr_engine: "none"                    # 不使用 OCR 引擎
     vision_engine: "zhipu_glm_46v_flash"  # 使用智谱视觉模型
+    vision_mode: "local"                  # 本地观察视觉调度（屏幕/摄像头）：local / cloud / hybrid；聊天图片始终走云端
+    screen_analysis_mode: "local"         # 看屏幕覆盖；留空时跟随 vision_mode
+    camera_analysis_mode: "local"         # 看我路线：local 使用本机 ONNX，cloud 使用视觉模型
     detail_level: "detailed"              # detailed, basic
     nsfw_check: false
     ai_description:
@@ -311,9 +314,9 @@ tools:
 plugins:
   ocr:
     paddleocr:
-      enabled: false                      # 禁用 PaddleOCR
+      enabled: true                       # 启用本地 PaddleOCR（零 token）
       use_gpu: false
-      lang: "none"                        # 不使用任何语言
+      lang: "ch"
     tesseract:
       enabled: false                      # 禁用 Tesseract
       data_path: ""

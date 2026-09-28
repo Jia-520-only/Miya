@@ -1,7 +1,7 @@
 {
   "name": "screen_vision",
-  "displayName": "屏幕视觉",
-  "description": "让弥娅「看到」用户屏幕——截图+视觉AI分析，识别界面内容、错误弹窗、游戏场景等",
+  "displayName": "弥娅视觉",
+  "description": "统一的屏幕与摄像头视觉：看屏幕、看我一眼和按需视觉AI分析",
   "agentType": "mcp",
   "entryPoint": {
     "module": "mcpserver.screen_vision.service",
@@ -11,7 +11,7 @@
     "tools": [
       {
         "name": "look_screen",
-        "description": "截取当前屏幕并用视觉 AI 分析内容。适用场景：'我屏幕上有什么'、'这个界面怎么操作'、'帮我看看这个报错'、'右边是什么按钮'",
+        "description": "观察当前屏幕；按 config/qq_config.yaml 的统一视觉路线使用本地 OCR、云端视觉或本地优先混合模式。适用场景：'我屏幕上有什么'、'这个界面怎么操作'、'帮我看看这个报错'、'右边是什么按钮'",
         "parameters": {
           "query": "string - 要针对屏幕提出的问题（可选，默认描述屏幕上所有内容）",
           "compress": "boolean - 是否压缩截图（默认 true，1280px 宽 JPEG）"
@@ -22,6 +22,85 @@
         "description": "只截图不分析，返回截图 data URL",
         "parameters": {
           "compress": "boolean - 是否压缩（默认 true）"
+        }
+      },
+      {
+        "name": "look_me",
+        "description": "分析用户明确提供的一帧摄像头画面。不保存画面；仅适用用户明确要求弥娅看看自己时。",
+        "parameters": {
+          "image_data": "string - data:image/*;base64 摄像头画面",
+          "query": "string - 对当前画面的具体问题（可选）"
+        }
+      },
+      {
+        "name": "camera_look",
+        "description": "不打开前端，直接从本机物理摄像头采集一帧并分析；默认仅本地，不保存原图。需要云端语义理解时必须显式传 local_only=false。",
+        "parameters": {
+          "query": "string - 对当前画面的具体问题（可选）",
+          "camera_index": "integer - 摄像头编号，默认 0",
+          "width": "integer - 采集宽度，默认 640",
+          "height": "integer - 采集高度，默认 480",
+          "local_only": "boolean - 是否只允许本地模型，默认 true"
+        }
+      },
+      {
+        "name": "look_both",
+        "description": "同时分析当前屏幕截图和用户明确提供的一帧摄像头画面；会在提示中标明两个来源并要求分别辨认。不保存画面。需要视觉模型，遵从仅本地限制。",
+        "parameters": {
+          "image_data": "string - data:image/*;base64 摄像头画面",
+          "query": "string - 对屏幕与摄像头画面的联合问题（可选）",
+          "local_only": "boolean - 是否只允许本地分析；开启时该联合分析会拒绝执行"
+        }
+      },
+      {
+        "name": "request_camera_observation",
+        "description": "在用户已明确开启自主视觉后，请求桌面端观察一帧并返回文字/结构化结果；不返回原始画面，不保存画面。",
+        "parameters": {
+          "query": "string - 想确认的姿态、动作或环境问题（可选）",
+          "local_only": "boolean - 是否只允许本地模型分析（可选）"
+        }
+      },
+      {
+        "name": "camera_capabilities",
+        "description": "检查本机是否安装了可用的本地摄像头身份、表情和姿态模型。只返回能力状态，不采集摄像头。",
+        "parameters": {}
+      },
+      {
+        "name": "camera_analyze_local",
+        "description": "仅使用本机 ONNX 模型分析一帧摄像头画面，不上传、不保存原图；可输出姿态和短时序动作线索（挥手、举手、鼓掌、坐下、起身、走动等）。",
+        "parameters": {
+          "image_data": "string - data:image/*;base64 摄像头画面",
+          "identity": "boolean - 是否匹配用户主动登记的本地身份（默认 true）",
+          "emotion": "boolean - 是否输出不确定的表情线索（默认 false）",
+          "pose": "boolean - 是否输出姿态关键点与本地短时序动作线索（默认 true）",
+          "pose_history": "array - 最近最多 11 次本地关键点结果；只传派生关键点，不传原始画面"
+        }
+      },
+      {
+        "name": "camera_event",
+        "description": "记录浏览器陪伴视觉产生的本地摄像头事件，只保存文字和置信度，不保存原图。",
+        "parameters": {
+          "event": "object - kind、summary、confidence、mode"
+        }
+      },
+      {
+        "name": "camera_enroll_identity",
+        "description": "用户主动登记本地身份，只保存人脸 embedding，不保存原始照片。",
+        "parameters": {
+          "image_data": "string - data:image/*;base64 摄像头画面",
+          "name": "string - 身份名称"
+        }
+      },
+      {
+        "name": "camera_list_identities",
+        "description": "列出本机已登记身份的名称和时间，不返回特征向量。",
+        "parameters": {}
+      },
+      {
+        "name": "camera_delete_identity",
+        "description": "删除本机已登记身份及其 embedding。",
+        "parameters": {
+          "identity_id": "string - 身份 ID"
         }
       }
     ]

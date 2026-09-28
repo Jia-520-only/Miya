@@ -370,6 +370,15 @@ class ProactiveChatSystem:
         self._screen_aware_config = self._config.get(
             "screen_aware", {"enabled": True, "min_interval": 30, "max_daily_vision": 24}
         )
+        self._camera_aware_config = self._config.get(
+            "camera_aware",
+            {
+                "enabled": True,
+                "min_interval": 90,
+                "min_confidence": 0.62,
+                "events": ["wave", "sit_down", "stand_up", "walk", "scene_change", "long_still"],
+            },
+        )
 
         # 限制配置
         limits = self._config.get("limits", {})
@@ -422,6 +431,7 @@ class ProactiveChatSystem:
                 "ai": 180,
                 "ap_boredom": 300,
                 "screen_aware": 120,
+                "camera_aware": 180,
             }
         )
 
@@ -455,6 +465,8 @@ class ProactiveChatSystem:
         # Screen-Aware 实例（延迟注入）
         self._screen_aware: Optional[Any] = None
         self._last_screen_intent: Optional[Any] = None
+        self._last_camera_event_key: str = ""
+        self._last_camera_event_time: float = 0.0
 
         # === 意图持续机制 ===
         self._pending_intents: dict[int, IntentState] = {}
@@ -907,6 +919,8 @@ class ProactiveChatSystem:
             return self._ai_config.get("enabled", False)
         elif trigger_type == "screen_aware":
             return self._screen_aware_config.get("enabled", True) and self._screen_aware is not None
+        elif trigger_type == "camera_aware":
+            return bool(self._camera_aware_config.get("enabled", True))
         elif trigger_type == "continuity":
             return self._continuity_enabled
         return False
@@ -1145,6 +1159,18 @@ class ProactiveChatSystem:
         if screen_ctx:
             parts.append(screen_ctx)
 
+        # Camera observations arrive from the desktop browser through the
+        # image-free context bridge. Keep them beside the screen timeline so
+        # the proactive judge can reason about both senses together.
+        try:
+            from core.vision_context import get_vision_context
+
+            camera_ctx = get_vision_context().build_card(source="camera", limit=6)
+            if camera_ctx:
+                parts.append(camera_ctx)
+        except Exception:
+            logger.debug("[主动聊天] 读取摄像头视觉上下文失败", exc_info=True)
+
         return "\n".join(parts)
 
     def _build_screen_context(self) -> str:
@@ -1237,7 +1263,13 @@ class ProactiveChatSystem:
             if result:
                 return result
 
-        # 6. AI触发
+        # 6. 摄像头事件触发
+        if self.is_trigger_enabled("camera_aware"):
+            result = await self._check_camera_aware_trigger(target_id, context)
+            if result:
+                return result
+
+        # 7. AI触发
         if self.is_trigger_enabled("ai"):
             result = await self._check_ai_trigger(target_id, context)
             if result:
@@ -1246,6 +1278,74 @@ class ProactiveChatSystem:
         # AI 判断本轮不需要主动发言，记录检查时间避免短时间重复评估
         self._last_trigger_time[target_id] = datetime.now()
         return None
+
+    async def _check_camera_aware_trigger(self, target_id: int, context: ChatContext) -> Optional[ProactiveResult]:
+        """Turn a fresh, meaningful camera event into an optional message."""
+        import time
+
+        try:
+            from core.vision_context import get_vision_context
+            from core.camera_control import read_state
+
+            event = get_vision_context().latest(source="camera")
+            camera_state = read_state()
+        except Exception:
+            return None
+        # Camera events are eligible for proactive messaging only while the
+        # user has explicitly enabled autonomous observation.
+        if not camera_state.get("autonomous") or camera_state.get("mode") == "off":
+            return None
+        if not event or event.get("status") not in {None, "success"}:
+            return None
+        now = time.time()
+        if now - float(event.get("timestamp", 0)) > 180:
+            return None
+        kind = str(event.get("kind") or "")
+        summary = str(event.get("summary") or "")
+        event_key = f"{kind}:{summary[:120]}"
+        if event_key == self._last_camera_event_key:
+            return None
+        if now - self._last_camera_event_time < float(self._camera_aware_config.get("min_interval", 90)):
+            return None
+        allowed = self._camera_aware_config.get("events", [])
+        event_text = f"{kind} {summary}".lower()
+        event_map = {
+            "wave": ("挥手", "挥手", "好奇"),
+            "sit_down": ("坐下", "坐下", "温柔"),
+            "stand_up": ("起身", "起身", "关心"),
+            "walk": ("走动", "走动", "好奇"),
+            "scene_change": ("画面突变", "画面发生变化", "关心"),
+            "long_still": ("静止", "安静了一会儿", "关心"),
+        }
+        matched_key = next((key for key, value in event_map.items() if key in event_text or value[0] in summary), None)
+        matched = event_map.get(matched_key) if matched_key else None
+        if not matched:
+            return None
+        label, topic, mood = matched
+        if matched_key not in allowed and label not in allowed:
+            return None
+        confidence = float(event.get("confidence") or 1.0)
+        if confidence < float(self._camera_aware_config.get("min_confidence", 0.62)):
+            return None
+        if not self._check_trigger_type_cooldown(target_id, "camera_aware"):
+            return None
+        prompt = (
+            f"你是弥娅。摄像头刚刚观察到：{summary}\n"
+            f"请用{mood}的语气，对佳说一句自然的话，围绕{topic}，不超过25字。"
+        )
+        try:
+            response = await self.ai_client.chat(messages=[AIMessage(role="user", content=prompt)], tools=[], tool_choice="none")
+            message = str(response or "").strip()
+        except Exception:
+            return None
+        if len(message) < 2 or self._check_message_content_duplicate(target_id, message) or self._is_duplicate(target_id, message):
+            return None
+        self._last_camera_event_key = event_key
+        self._last_camera_event_time = now
+        self._record_trigger(target_id)
+        self._record_trigger_by_type(target_id, "camera_aware")
+        self._record_sent_message(target_id, message)
+        return ProactiveResult(True, message, "camera_aware", context)
 
     async def _check_context_trigger(self, target_id: int, context: ChatContext) -> Optional[ProactiveResult]:
         """上下文触发 - 行为期望跟进（AI 优先）"""

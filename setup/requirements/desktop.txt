@@ -14,3 +14,9 @@
 -r ../dependencies/viz.txt
 -r ../dependencies/qq_extras.txt
 -r ../dependencies/win32.txt
+
+# Local camera vision runtime (weights remain opt-in)
+-r ../dependencies/camera.txt
+
+# Local OCR runtime (models remain cached/downloaded on first use)
+-r ../dependencies/ocr.txt

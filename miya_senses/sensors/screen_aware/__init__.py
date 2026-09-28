@@ -751,6 +751,15 @@ class ScreenAwareProactive:
             if len(self._observations) > self.max_history:
                 self._observations = self._observations[-self.max_history :]
 
+            # Feed the shared image-free stream so camera and screen
+            # observations can be presented as one visual context later.
+            try:
+                from core.vision_context import record_screen_observation
+
+                record_screen_observation(obs)
+            except Exception:
+                logger.debug("[ScreenAware] 写入统一视觉上下文失败", exc_info=True)
+
             # 终端的可见日志 — 弥娅的内心独白
             tier_mark = {0: "⏭ 复用", 1: "🪟 窗口", 15: "📖 识字", 2: "👁 一瞥", 3: "🔍 细看"}.get(
                 obs.analysis_tier, "❓"

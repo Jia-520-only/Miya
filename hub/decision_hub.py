@@ -2880,6 +2880,15 @@ class DecisionHub:
                 # 【重要】告诉AI不要重复调用工具
                 image_context += "\n【注意】图片已经分析完成，不要再调用 qq_image_analyzer 工具！"
                 logger.info(f"[决策层] 图片分析结果已添加到上下文: {description[:50]}")
+            elif context.get("image_analysis_error"):
+                # OneBot 已经收到图片，但视觉后端失败时仍要明确告诉模型，
+                # 防止把“看看这张图”误解释为缺少群文件。
+                image_context = (
+                    "\n[图片消息] 用户引用的图片已收到，但视觉分析未完成。"
+                    f"\n[图片分析状态] {context['image_analysis_error']}"
+                    "\n请说明图片分析暂时不可用，不要把这条消息当作群文件上传。"
+                )
+                logger.info("[决策层] 已注入引用图片分析失败状态")
             # 【新增】如果检测到引用消息包含图片但没有分析结果，给出提示
             elif context.get("reply") and "[引用消息包含图片]" in str(context.get("reply")):
                 # 获取引用消息中的图片URL
@@ -4573,6 +4582,7 @@ class DecisionHub:
         text_cmds = command_keywords.get("text", ["/文本", "/text"])
         local_playback_cmds = command_keywords.get("local_playback", ["/本地播放", "/localplay"])
         tts_engine_cmds = command_keywords.get("tts_engine", ["/tts", "/TTS"])
+        camera_cmds = command_keywords.get("camera", ["/camera", "/摄像头", "/看我"])
 
         form_prefixes = [cmd for cmd in form_cmds if cmd.startswith("/")]
         speak_prefixes = [cmd for cmd in speak_cmds if cmd.startswith("/")]
@@ -4589,6 +4599,10 @@ class DecisionHub:
         is_local_playback_cmd = any(content_lower.strip() == cmd for cmd in local_playback_cmds)
         is_tts_engine_cmd = any(
             content_lower.startswith(cmd + " ") or content_lower.strip() == cmd for cmd in tts_engine_cmds
+        )
+        is_camera_cmd = any(
+            content_lower.startswith(cmd.lower() + " ") or content_lower.strip() == cmd.lower()
+            for cmd in camera_cmds
         )
 
         status_cmds = command_keywords.get("status", [])
@@ -4753,6 +4767,13 @@ class DecisionHub:
                 tts_engine_cmds,
             )
 
+        # 5. 摄像头陪伴视觉控制。实际摄像头在桌面浏览器中运行，命令
+        # 只发布一个不含图像的模式请求，由前端轮询并执行。
+        if is_camera_cmd:
+            if not check_command_permission():
+                return get_permission_denied_message()
+            return self._handle_camera_commands(content, camera_cmds)
+
         # 4.6. AI 唱歌命令（唱一下/点歌/唱歌 等）
         from core.singing.engine_router import (
             extract_song_name,
@@ -4902,6 +4923,45 @@ class DecisionHub:
         if auto_speak:
             msg += " (自动模式：主动观察+TTS提醒)"
         return msg
+
+    def _handle_camera_commands(self, content: str, camera_cmds: list[str]) -> str:
+        """Publish a browser-camera mode request for ``/camera`` commands."""
+        from core.camera_control import describe_state, read_state, write_state
+
+        remainder = content.strip()
+        for alias in sorted(camera_cmds, key=len, reverse=True):
+            if remainder.casefold().startswith(alias.casefold()):
+                remainder = remainder[len(alias) :].strip()
+                break
+        action = remainder.casefold() or "status"
+        state = read_state()
+        if action in {"status", "状态"}:
+            return describe_state(state)
+        if action in {"on", "开启", "开", "companion", "陪伴", "陪伴视觉"}:
+            state = write_state("companion", autonomous=False)
+            return "已请求开启摄像头陪伴视觉。桌面端会在获得摄像头权限后开始本地动作识别。\n" + describe_state(state)
+        if action in {"auto", "autonomous", "自主", "自主观察", "自动观察"}:
+            state = write_state("companion", autonomous=True)
+            return "已开启弥娅自主视觉。你授权后，弥娅可以在需要确认姿态、动作或环境时请求观察；默认本地优先、按冷却取帧。\n" + describe_state(state)
+        if action in {"off", "关闭", "关", "stop", "停止"}:
+            state = write_state("off", autonomous=False)
+            return "已请求关闭摄像头陪伴视觉。\n" + describe_state(state)
+        if action in {"once", "snapshot", "单次", "一眼", "看一眼"}:
+            state = write_state("snapshot")
+            return "已请求桌面端观察你一眼；如果浏览器尚未授权摄像头，请先在视觉页面点击一次‘看我一眼’。"
+        if action in {"local", "本地"}:
+            state = write_state("companion", local_only=True, autonomous=True)
+            return "已开启仅本地摄像头陪伴视觉；本地模型不可用时不会回退云端。\n" + describe_state(state)
+        if action in {"cloud", "云端"}:
+            state = write_state("companion", local_only=False, autonomous=True)
+            return "已开启摄像头陪伴视觉（允许按策略回退视觉模型）。\n" + describe_state(state)
+        if action in {"action on", "动作开", "动作开启"}:
+            state = write_state(state.get("mode", "off"), action_recognition=True)
+            return "本地动作识别已开启。\n" + describe_state(state)
+        if action in {"action off", "动作关", "动作关闭"}:
+            state = write_state(state.get("mode", "off"), action_recognition=False)
+            return "本地动作识别已关闭。\n" + describe_state(state)
+        return "用法：/camera on | auto | off | status | once | local | cloud | action on|off"
 
     async def _handle_tts_commands(
         self,

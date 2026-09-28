@@ -69,38 +69,12 @@ class MiyaMultiModalFusion:
     def _try_vision_llm(self, image_data: bytes) -> str:
         try:
             import asyncio
-            from core.multi_vision_analyzer import MultiVisionAnalyzer
+            from core.image_vision_router import analyze_cloud_image
 
             async def _run():
-                a = MultiVisionAnalyzer()
-                await a.initialize()
-                r = await a.analyze_image(image_data)
-                return r.description if r.success else ""
-
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(lambda: asyncio.new_event_loop().run_until_complete(_run()))
-                    return future.result(timeout=12)
-            else:
-                return loop.run_until_complete(asyncio.wait_for(_run(), timeout=12))
-        except Exception as e:
-            logger.debug(f"Vision LLM: {e}")
-            return ""
-
-    def _try_vision_llm(self, image_data: bytes) -> str:
-        try:
-            import asyncio
-            from core.multi_vision_analyzer import MultiVisionAnalyzer
-
-            async def _run():
-                a = MultiVisionAnalyzer()
-                await a.initialize()  # 初始化加载 API 配置
-                r = await a.analyze_image(image_data)
-                if r.success and r.description:
-                    return r.description
+                result = await analyze_cloud_image(image_data)
+                if result.get("success") and result.get("description"):
+                    return str(result["description"])
                 return ""
 
             loop = asyncio.get_event_loop()

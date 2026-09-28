@@ -22,7 +22,7 @@ const cards: HubCard[] = [
   { id: 'dsh-web', icon: '◈', title: 'DSH 工作台', desc: 'DSH 网页智能体界面', path: '/dsh-web', color: '#34d399' },
   { id: 'config', icon: '❖', title: '灵魂调谐', desc: '人格配置 · 模型切换', path: '/config', color: '#a5b4fc' },
   { id: 'community', icon: '✧', title: '弥娅社区', desc: '资源 · 分享 · 社区', path: '/community', color: '#7dd3fc', size: 'wide' },
-  { id: 'screen', icon: '⊙', title: '屏幕视觉', desc: '截图 · 视觉分析', path: '/screen', color: '#facc15' },
+  { id: 'screen', icon: '⊙', title: '弥娅视觉', desc: '看屏幕 · 看我 · 陪伴视觉', path: '/screen', color: '#facc15' },
   { id: 'platforms', icon: '⊡', title: '平台状态', desc: '多平台健康监控', path: '/platforms', color: '#34d399' },
 ]
 

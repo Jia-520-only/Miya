@@ -115,6 +115,7 @@ export interface DshWebAPI {
 
 export interface ElectronAPI {
   minimize: () => void
+  restore: () => void
   maximize: () => void
   close: () => void
   isMaximized: () => Promise<boolean>

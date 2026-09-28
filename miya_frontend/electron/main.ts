@@ -290,6 +290,13 @@ app.whenReady().then(async () => {
 
   // Window controls
   ipcMain.on('window:minimize', () => getMainWindow()?.minimize())
+  ipcMain.on('window:restore', () => {
+    const w = getMainWindow()
+    if (!w) return
+    if (w.isMinimized()) w.restore()
+    w.show()
+    w.focus()
+  })
   ipcMain.on('window:maximize', () => {
     const w = getMainWindow()
     if (w) {

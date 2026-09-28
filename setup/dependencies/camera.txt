@@ -1,0 +1,7 @@
+# Miya - Local camera vision (opt-in model runtime)
+# The ONNX weights are installed separately with scripts/install_camera_models.py.
+numpy>=1.26.4,<2.0.0
+onnxruntime>=1.17.0,<=1.20.1
+# OpenCV 4.12+ currently pulls NumPy 2.x on Python 3.11; keep the project
+# compatible with funasr-onnx and the core NumPy constraint.
+opencv-python-headless>=4.8.0,<4.12.0

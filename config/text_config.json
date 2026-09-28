@@ -275,6 +275,11 @@
             "/tts",
             "/TTS"
         ],
+        "camera": [
+            "/camera",
+            "/摄像头",
+            "/看我"
+        ],
         "version": [
             "版本",
             "version",
@@ -1936,6 +1941,7 @@
             {"name": "/文本", "description": "切换为文字回复模式"},
             {"name": "/本地播放", "description": "回复同时在电脑本地播放"},
             {"name": "/tts", "description": "切换TTS引擎（edge/sovits/api/status）"},
+            {"name": "/camera on|auto|off|status", "description": "开启摄像头或允许弥娅自主请求观察；默认优先本地动作识别"},
             {"name": "/版本", "description": "查看弥娅系统版本"},
             {"name": "记忆统计", "description": "查看记忆总量"},
             {"name": "记忆搜索", "description": "搜索记忆（如：记忆搜索 关键词）"},

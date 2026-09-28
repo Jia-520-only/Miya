@@ -87,6 +87,7 @@ SUBNET_CATEGORIES = {
         "mcp_web_search_search",
         "mcp_web_search_fetch",
         "mcp_screen_vision_look_screen",
+        "mcp_screen_vision_camera_look",
         "mcp_screen_vision_screenshot",
         "mcp_filesystem_read_file",
         "mcp_filesystem_write_file",

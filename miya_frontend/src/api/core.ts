@@ -171,6 +171,18 @@ export class CoreApiClient extends ApiClient {
     })
   }
 
+  async getCameraControl(): Promise<{ success: boolean, state: Record<string, any> }> {
+    return this.instance.get('/api/camera/control')
+  }
+
+  async getCameraRequest(): Promise<{ success: boolean, request: Record<string, any> | null }> {
+    return this.instance.get('/api/camera/request')
+  }
+
+  async publishCameraResult(requestId: string, result: Record<string, any>): Promise<any> {
+    return this.instance.post('/api/camera/result', { request_id: requestId, result })
+  }
+
   // ── 会话 ──
   async getSessions(): Promise<{ sessions: any[] }> {
     const res: any = await this.instance.get('/api/chat/sessions')

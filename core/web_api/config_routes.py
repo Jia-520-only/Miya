@@ -1105,6 +1105,9 @@ GENERIC_FORMS: Dict[str, Dict[str, Any]] = {
             {"key": "qq.multimedia.image.max_height", "label": "最大高度（px）", "type": "int", "min": 480, "max": 8192},
             {"key": "qq.image_recognition.ocr.enabled", "label": "图片内嵌 OCR", "type": "bool"},
             {"key": "qq.image_recognition.ai_analysis.enabled", "label": "图片 AI 分析", "type": "bool"},
+            {"key": "tools.qq_image_analyzer.vision_mode", "label": "屏幕/摄像头观察视觉路线", "type": "select", "options": ["local", "cloud", "hybrid"]},
+            {"key": "tools.qq_image_analyzer.screen_analysis_mode", "label": "屏幕视觉路线", "type": "select", "options": ["local", "cloud", "hybrid"]},
+            {"key": "tools.qq_image_analyzer.camera_analysis_mode", "label": "摄像头视觉路线", "type": "select", "options": ["local", "cloud", "hybrid"]},
         ],
     },
     "persona_identity": {

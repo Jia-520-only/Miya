@@ -35,5 +35,11 @@
 # Windows Platform Extras
 -r ../dependencies/win32.txt
 
+# Local camera vision runtime (weights remain opt-in)
+-r ../dependencies/camera.txt
+
+# Local OCR runtime (models remain cached/downloaded on first use)
+-r ../dependencies/ocr.txt
+
 # Task Scheduling
 apscheduler>=3.10.0

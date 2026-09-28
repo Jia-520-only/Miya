@@ -1,0 +1,5 @@
+# Miya - Local OCR (zero-token screen and image text recognition)
+# Models are downloaded/cached by PaddleX on first use.
+paddlepaddle>=3.0.0,<4.0.0
+paddleocr>=3.0.0,<4.0.0
+paddlex>=3.0.0,<4.0.0

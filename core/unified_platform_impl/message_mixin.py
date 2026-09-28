@@ -744,7 +744,7 @@ async def _resolve_files_and_images(
     - 文件永久保存于 data/downloads/，跨会话可用
 
     图片视觉识别（跨平台统一下沉）：
-    - 对当前消息附带的图片调用 MultiVisionAnalyzer 做视觉分析
+    - 对当前消息附带的图片统一调用云端多模态视觉模型
     - 注入 perception_data["image_analysis"] + ["has_image"]，由决策层接管
     - 受 qq_config.yaml 的 image_recognition.cross_platform 开关控制
     """
@@ -907,7 +907,8 @@ async def _analyze_platform_images(
 ) -> None:
     """对平台图片做统一视觉分析，注入 image_analysis / has_image。
 
-    仅当全局开关 + 平台开关开启时执行；失败静默回退（保留 [图片: 文件名] 摘要）。
+    仅当全局开关 + 平台开关开启时执行；聊天平台图片统一走云端多模态，
+    不读取屏幕观察的本地 OCR 路由；失败静默回退（保留 [图片: 文件名] 摘要）。
     分析结果由决策层自动注入 AI 上下文（见 decision_hub 的 [图片描述] 处理）。
     """
     if not _cross_platform_vision_enabled(platform):
@@ -916,11 +917,9 @@ async def _analyze_platform_images(
     from core.file_context import FileContext
 
     try:
-        from core.multi_vision_analyzer import get_vision_analyzer
+        from core.image_vision_router import analyze_cloud_image
     except Exception:
         return
-
-    analyzer = None
     max_images = _cross_platform_vision_max_images()
 
     from config.config_utils import get_qq_config
@@ -934,13 +933,11 @@ async def _analyze_platform_images(
         if not data:
             continue
         try:
-            if analyzer is None:
-                analyzer = await get_vision_analyzer()
-            result = await analyzer.analyze_image(data)
-            if result.success:
-                perception_data["image_analysis"] = result.to_context_dict()
+            result = await analyze_cloud_image(data)
+            if result.get("success"):
+                perception_data["image_analysis"] = result
                 perception_data["has_image"] = True
-                logger.info(f"[MessageMixin] {platform} 图片视觉分析完成: {result.description[:50]}")
+                logger.info(f"[MessageMixin] {platform} 图片视觉分析完成: {result.get('description', '')[:50]}")
                 break
         except Exception as e:
             logger.debug(f"[MessageMixin] {platform} 图片视觉分析失败: {e}")

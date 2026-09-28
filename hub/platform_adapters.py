@@ -617,6 +617,7 @@ class MobileAdapter(PlatformAdapter):
             "mcp_code_executor_execute",
             "mcp_screen_vision_look_screen",
             "mcp_screen_vision_screenshot",
+            "mcp_screen_vision_request_camera_observation",
             "mcp_filesystem_read_file",
             "mcp_filesystem_write_file",
             "mcp_filesystem_list_files",

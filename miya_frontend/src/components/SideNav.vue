@@ -30,7 +30,7 @@ const moreItems: NavItem[] = [
   { id: 'config', label: '灵魂调谐', icon: '❖', path: '/config' },
   { id: 'community', label: '弥娅社区', icon: '✧', path: '/community' },
   { id: 'hub', label: '弥娅中枢', icon: '⬡', path: '/hub' },
-  { id: 'screen', label: '屏幕视觉', icon: '⊙', path: '/screen' },
+  { id: 'screen', label: '弥娅视觉', icon: '⊙', path: '/screen' },
 ]
 
 function isActive(item: NavItem) {

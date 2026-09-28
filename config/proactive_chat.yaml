@@ -6,6 +6,12 @@ proactive_chat:
   enabled: true
   check_interval: 45  # 检查间隔（秒），更频繁
   max_daily_messages: 15  # 每日最大消息数，增加
+  # 摄像头事件主动回应：只消费本地/视觉层生成的文字事件，不保存原图
+  camera_aware:
+    enabled: true
+    min_interval: 90
+    min_confidence: 0.62
+    events: [wave, sit_down, stand_up, walk, scene_change, long_still]
   quiet_hours: [23, 0, 1, 2, 3, 4, 5, 6, 7]  # 静默时段，稍微缩短
 
   # 统一主动性协调：主动聊天、自检、地球online 共用

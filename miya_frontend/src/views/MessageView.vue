@@ -11,11 +11,52 @@ import { buildEmotionColorMap } from '@/utils/emotionColors'
 import { isPlaying, stop as stopTTS } from '@/utils/tts'
 import { setMessageViewExpanded } from '@/utils/uiState'
 import { apiUrl } from '@/utils/api-url'
+import { useCameraVision } from '@/utils/cameraVision'
 
 const isSending = ref(false)
 const messageQueue: Array<{ content: string, options?: any }> = []
 const ttsEnabled = ref(localStorage.getItem('ttsEnabled') !== 'false')
 let lastAppliedMemoryHash = ''
+const cameraVision = useCameraVision()
+
+function appendCameraReply(content: string) {
+  MESSAGES.value.push({ role: 'assistant', content })
+  saveMessages()
+}
+
+async function tryHandleCameraCommand(content: string) {
+  const normalized = content.trim().replace(/[，。！？,.!?]/g, '')
+  const stopCommand = /(关闭|停止|关掉).*(陪伴视觉|摄像头)|别看我了?|不要看我了?/.test(normalized)
+  const startCommand = /(开启|打开|启动).*(陪伴视觉|摄像头)|(陪我一会|一直陪着我).*(看|视觉)/.test(normalized)
+  const lookCommand = /(一起看|一起观察|同时看看|看看我和屏幕|看看屏幕和我|看屏幕|看看屏幕|看一下屏幕|看看我|看我一眼|看看我现在|看一下我)/.test(normalized)
+  if (!stopCommand && !startCommand && !lookCommand) return false
+
+  MESSAGES.value.push({ role: 'user', content })
+  saveMessages()
+  try {
+    if (stopCommand) {
+      cameraVision.stop()
+      appendCameraReply('好，陪伴视觉已经关闭，摄像头也停止了。')
+    } else if (startCommand) {
+      await cameraVision.startCompanion()
+      appendCameraReply('陪伴视觉已经开启。我会先在本地留意画面变化，状态栏会一直显示摄像头正在使用。')
+    } else {
+      appendCameraReply('我正在同时观察屏幕和你，稍等一下。')
+      const observation = await cameraVision.lookBoth(content)
+      const pending = MESSAGES.value[MESSAGES.value.length - 1]
+      if (pending?.role === 'assistant') pending.content = observation
+      saveMessages()
+    }
+  } catch (err: any) {
+    appendCameraReply(`这次没能打开摄像头：${err?.message || '请检查摄像头权限。'}`)
+  }
+  return true
+}
+
+function isCameraCommand(content: string) {
+  const normalized = content.trim().replace(/[，。！？,.!?]/g, '')
+  return /(关闭|停止|关掉).*(陪伴视觉|摄像头)|别看我了?|不要看我了?|(开启|打开|启动).*(陪伴视觉|摄像头)|(陪我一会|一直陪着我).*(看|视觉)|(一起看|一起观察|同时看看|看看我和屏幕|看看屏幕和我|看屏幕|看看屏幕|看一下屏幕|看看我|看我一眼|看看我现在|看一下我)/.test(normalized)
+}
 
 function parseEmotionValue(value: unknown): Record<string, unknown> | null {
   if (typeof value !== 'string') {
@@ -38,6 +79,10 @@ async function processQueue() {
 
 export function chatStream(content: string, options?: { skill?: string, images?: string[], voiceInput?: boolean }) {
   stopTTS()
+  if (!options?.images?.length && isCameraCommand(content)) {
+    void tryHandleCameraCommand(content)
+    return
+  }
   MESSAGES.value.push({ role: 'user', content: options?.images?.length ? `[截图x${options.images.length}] ${content}` : content })
   saveMessages()
   messageQueue.push({ content, options })

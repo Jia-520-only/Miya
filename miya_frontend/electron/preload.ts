@@ -23,6 +23,7 @@ function detectPlatform(): 'darwin' | 'win32' | 'linux' | 'unknown' {
 const electronAPI = {
   // Window controls
   minimize: () => ipcRenderer.send('window:minimize'),
+  restore: () => ipcRenderer.send('window:restore'),
   maximize: () => ipcRenderer.send('window:maximize'),
   close: () => ipcRenderer.send('window:close'),
   isMaximized: () => ipcRenderer.invoke('window:isMaximized'),

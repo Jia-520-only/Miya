@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "notes": "这些权重由用户主动安装；运行时不会联网。安装前请确认上游许可证和组织政策。",
+  "models": {
+    "face_detector.onnx": {
+      "feature": "face_detection",
+      "name": "YuNet face_detection_yunet_2023mar",
+      "url": "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+      "license": "Apache-2.0",
+      "input": "BGR NCHW 640x640; YuNet stride heads"
+    },
+    "face_embedder.onnx": {
+      "feature": "identity",
+      "name": "SFace face_recognition_sface_2021dec",
+      "url": "https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx",
+      "license": "Apache-2.0",
+      "input": "BGR NCHW 112x112, mean 127.5, scale 1/128",
+      "output": "128-d embedding, normalized by Miya"
+    },
+    "emotion_classifier.onnx": {
+      "feature": "emotion",
+      "name": "FER+ emotion-ferplus-8",
+      "url": "https://github.com/onnx/models/raw/main/validated/vision/body_analysis/emotion_ferplus/model/emotion-ferplus-8.onnx",
+      "license": "MIT (verify upstream before redistribution)",
+      "input": "grayscale 64x64, scale 1/255",
+      "output": "FER+ 8 logits"
+    },
+    "pose_estimator.onnx": {
+      "feature": "pose",
+      "name": "MoveNet SinglePose Lightning v4 (Kazuhito00 ONNX conversion)",
+      "url": "https://raw.githubusercontent.com/Kazuhito00/MoveNet-Python-Example/main/onnx/movenet_singlepose_lightning_4.onnx",
+      "license": "Apache-2.0 repository; source model is TensorFlow Hub MoveNet singlepose lightning v4",
+      "input": "RGB NHWC int32 192x192, pixel range 0-255",
+      "output": "17x3 [y,x,confidence]"
+    }
+  }
+}

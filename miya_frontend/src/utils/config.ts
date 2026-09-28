@@ -1,6 +1,6 @@
 import { ref, watch } from 'vue'
 import API from '@/api/core'
-import { apiPort, discoverApiPort } from '@/utils/api-port'
+import { apiPort, discoverApiPort, supportsUnifiedVision } from '@/utils/api-port'
 
 export const DEFAULT_CONFIG = {
   system: {
@@ -268,6 +268,9 @@ function connectBackend() {
       }
     }
     healthOk = await doHealthCheck(port)
+    if (healthOk && !(await supportsUnifiedVision(port))) {
+      healthOk = false
+    }
     if (!healthOk) {
       port = await discoverApiPort()
       if (port !== apiPort.value) {

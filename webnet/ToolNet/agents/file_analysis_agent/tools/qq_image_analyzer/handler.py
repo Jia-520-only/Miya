@@ -41,7 +41,7 @@ async def execute(args: Union[Dict[str, Any], Any], context: Any = None) -> str:
         logger.info(f"[qq_image_analyzer handler] args: {actual_args}, context type: {type(actual_context)}")
 
         # 调用工具
-        result = await tool.execute(actual_context, **actual_args)
+        result = await tool.execute(actual_args, actual_context)
         return result
     except Exception as e:
         logger.error(f"图片分析失败: {e}")
