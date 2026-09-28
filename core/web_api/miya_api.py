@@ -65,6 +65,10 @@ class MiyaAPI:
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
+            logger.info(
+                "[MiyaAPI] 摄像头控制状态已更新: mode=%s local_only=%s action_recognition=%s autonomous=%s",
+                state["mode"], state["local_only"], state["action_recognition"], state["autonomous"],
+            )
             return {"success": True, "state": state}
 
         @self.router.get("/api/camera/request")

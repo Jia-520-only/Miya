@@ -175,6 +175,15 @@ export class CoreApiClient extends ApiClient {
     return this.instance.get('/api/camera/control')
   }
 
+  async setCameraControl(data: {
+    mode: 'off' | 'companion' | 'snapshot'
+    local_only?: boolean
+    action_recognition?: boolean
+    autonomous?: boolean
+  }): Promise<{ success: boolean, state: Record<string, any> }> {
+    return this.instance.post('/api/camera/control', data)
+  }
+
   async getCameraRequest(): Promise<{ success: boolean, request: Record<string, any> | null }> {
     return this.instance.get('/api/camera/request')
   }

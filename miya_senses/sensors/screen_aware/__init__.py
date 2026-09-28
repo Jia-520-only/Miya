@@ -25,6 +25,7 @@ import hashlib
 import io
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,11 +34,16 @@ from typing import Any, Optional
 logger = logging.getLogger("miya_senses.screen_aware")
 
 try:
-    import imagehash
     from PIL import Image
-
-    _HAS_IMAGEHASH = True
 except ImportError:
+    Image = None
+
+try:
+    import imagehash
+
+    _HAS_IMAGEHASH = Image is not None
+except ImportError:
+    imagehash = None
     _HAS_IMAGEHASH = False
 
 _IS_WINDOWS = __import__("platform").system() == "Windows"
@@ -142,6 +148,7 @@ class ScreenAwareProactive:
         self._ocr_engine: Any = None
         self._ocr_enabled: bool = True
         self._ocr_loading: bool = False
+        self._ocr_inference_lock = threading.Lock()
         self._ocr_grace: float = max(0.0, float(ocr_startup_grace_seconds))
         self._init_time: float = time.time()
 
@@ -485,33 +492,48 @@ class ScreenAwareProactive:
 
         返回 (extracted_text, confidence)
         """
+        text, confidence, _blocks = self._analyze_with_ocr_details(img_bytes)
+        return text, confidence
+
+    def _analyze_with_ocr_details(self, img_bytes: bytes) -> tuple[str, float, list[dict[str, Any]]]:
+        """Return recognized lines with their screen coordinates for local UI reasoning."""
         engine = self._lazy_init_ocr()
         if engine is None:
-            return "", 0.0
+            return "", 0.0, []
 
         try:
-            img = Image.open(io.BytesIO(img_bytes))
-            result = engine.ocr(__import__("numpy").array(img), cls=False)
-
+            img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+            with self._ocr_inference_lock:
+                result = engine.ocr(__import__("numpy").array(img), cls=False)
             if not result or not result[0]:
-                return "", 0.0
+                return "", 0.0, []
 
-            texts: list[str] = []
+            blocks: list[dict[str, Any]] = []
             confidences: list[float] = []
             for line in result[0]:
-                if line and len(line) >= 2:
-                    text = str(line[1][0]) if line[1] else ""
-                    conf = float(line[1][1]) if len(line[1]) > 1 else 0.0
-                    if text and len(text.strip()) >= 2:
-                        texts.append(text.strip())
-                        confidences.append(conf)
+                if not line or len(line) < 2 or not line[1]:
+                    continue
+                text = str(line[1][0]).strip()
+                confidence = float(line[1][1]) if len(line[1]) > 1 else 0.0
+                if len(text) < 2:
+                    continue
+                try:
+                    box = [[float(point[0]), float(point[1])] for point in line[0]]
+                except (TypeError, ValueError, IndexError):
+                    box = []
+                blocks.append({"text": text, "confidence": confidence, "box": box})
+                confidences.append(confidence)
 
-            combined = " ".join(texts)
+            blocks.sort(key=lambda item: (
+                min((point[1] for point in item["box"]), default=0.0),
+                min((point[0] for point in item["box"]), default=0.0),
+            ))
+            combined = " ".join(item["text"] for item in blocks)
             avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
-            return combined, avg_conf
+            return combined, avg_conf, blocks
         except Exception as exc:
             logger.debug(f"[ScreenAware] OCR 分析失败: {exc}")
-            return "", 0.0
+            return "", 0.0, []
 
     @staticmethod
     def _classify_from_ocr_text(ocr_text: str) -> tuple[str, list[str], str, float]:

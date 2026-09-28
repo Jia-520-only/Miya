@@ -35,11 +35,11 @@ async function tryHandleCameraCommand(content: string) {
   saveMessages()
   try {
     if (stopCommand) {
-      cameraVision.stop()
+      cameraVision.setAlwaysOn(false)
       appendCameraReply('好，陪伴视觉已经关闭，摄像头也停止了。')
     } else if (startCommand) {
-      await cameraVision.startCompanion()
-      appendCameraReply('陪伴视觉已经开启。我会先在本地留意画面变化，状态栏会一直显示摄像头正在使用。')
+      await cameraVision.enableAlwaysOn()
+      appendCameraReply('陪伴视觉已经开启。我会在本地持续识别画面变化和动作，状态栏会显示摄像头正在使用。')
     } else {
       appendCameraReply('我正在同时观察屏幕和你，稍等一下。')
       const observation = await cameraVision.lookBoth(content)

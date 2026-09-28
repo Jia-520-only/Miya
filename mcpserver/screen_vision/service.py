@@ -5,11 +5,12 @@
 截取用户屏幕，用视觉 LLM 分析内容。
 """
 
+import asyncio
+import base64
+import binascii
 import json
 import logging
 import time
-import base64
-import binascii
 from typing import Any
 
 from .screenshot_provider import (
@@ -121,7 +122,7 @@ class ScreenVisionService:
         if route in {"local", "hybrid"}:
             try:
                 screenshot = get_screenshot_provider().capture_data_url()
-                local_result = analyze_local_screen(screenshot.data_url)
+                local_result = await asyncio.to_thread(analyze_local_screen, screenshot.data_url)
             except Exception as exc:
                 logger.info("[ScreenVision] 本地屏幕 OCR 不可用: %s", exc)
                 local_result = {"status": "unavailable", "message": f"本地 OCR 不可用：{exc}", "persisted": False}
@@ -165,9 +166,24 @@ class ScreenVisionService:
             t0 = time.monotonic()
             model_query = query
             if route == "hybrid" and local_result and local_result.get("status") == "success":
-                ocr_text = str(local_result.get("ocr_text") or local_result.get("message") or "").strip()
+                ocr_text = str(local_result.get("ocr_text") or "").strip()
                 if ocr_text:
                     model_query = f"{query}\n\n本地 OCR 识别到的文字（供参考）：{ocr_text[:4000]}"
+                accessibility = local_result.get("accessibility") or {}
+                window_title = str(accessibility.get("window_title") or "").strip()
+                if window_title:
+                    model_query += f"\n\nWindows 前台窗口标题（供参考）：{window_title[:180]}"
+                controls = accessibility.get("elements") or []
+                control_lines = []
+                for control in controls[:80]:
+                    role = str(control.get("role") or "控件")
+                    name = str(control.get("text") or "").strip()
+                    if name:
+                        state = control.get("enabled")
+                        suffix = "可用" if state is True else "不可用" if state is False else "状态未知"
+                        control_lines.append(f"[{role}] {name}（{suffix}）")
+                if control_lines:
+                    model_query += "\n\nWindows 本地 UI Automation 控件（供参考）：\n" + "\n".join(control_lines)
             description = await self._analyze_with_miya_vision(model_query, image_url)
             t_llm = time.monotonic() - t0
             logger.info(f"[ScreenVision] AI 分析: {t_llm:.2f}s")
@@ -397,12 +413,22 @@ class ScreenVisionService:
         }, ensure_ascii=False)
 
     async def _camera_capabilities(self) -> str:
+        capabilities = discover_local_camera_capabilities()
+        features = capabilities.get("features", {})
+        logger.info(
+            "[ScreenVision] 本地摄像头能力: status=%s runtime=%s pose=%s identity=%s emotion=%s",
+            capabilities.get("status"),
+            capabilities.get("runtime"),
+            bool(features.get("pose", {}).get("available")),
+            bool(features.get("identity", {}).get("available")),
+            bool(features.get("emotion", {}).get("available")),
+        )
         return json.dumps(
             {
                 "status": "success",
                 "camera_mode": self._vision_mode("camera"),
                 "vision_mode": self._vision_mode("camera"),
-                "capabilities": discover_local_camera_capabilities(),
+                "capabilities": capabilities,
             },
             ensure_ascii=False,
         )
@@ -444,7 +470,7 @@ class ScreenVisionService:
     async def _look_screen_local(self) -> dict[str, Any]:
         try:
             screenshot = get_screenshot_provider().capture_data_url()
-            return analyze_local_screen(screenshot.data_url)
+            return await asyncio.to_thread(analyze_local_screen, screenshot.data_url)
         except Exception as exc:
             logger.info("[ScreenVision] 本地屏幕 OCR 不可用: %s", exc)
             return {"status": "unavailable", "message": f"本地 OCR 不可用：{exc}", "persisted": False}
@@ -496,6 +522,10 @@ class ScreenVisionService:
             "mode": str(event.get("mode") or "companion"),
             "status": "success",
         })
+        logger.info(
+            "[ScreenVision] 摄像头事件: kind=%s summary=%s confidence=%.2f",
+            recorded.get("kind"), recorded.get("summary"), float(recorded.get("confidence") or 0),
+        )
         return json.dumps({"status": "success", "event": recorded, "persisted": False}, ensure_ascii=False)
 
     async def _camera_enroll_identity(self, call: dict[str, Any]) -> str:
@@ -519,9 +549,13 @@ class ScreenVisionService:
             )
         request = request_observation(
             str(call.get("query") or "请观察我当前的姿态、动作和环境。"),
-            local_only=call.get("local_only"),
+            local_only=(
+                call.get("local_only")
+                if call.get("local_only") is not None
+                else state.get("local_only", True)
+            ),
         )
-        result = await __import__("asyncio").to_thread(wait_for_observation_result, request["request_id"], 25.0)
+        result = await asyncio.to_thread(wait_for_observation_result, request["request_id"], 25.0)
         if result is None:
             return json.dumps(
                 {"status": "timeout", "message": "桌面端没有在时限内返回摄像头观察结果。", "request_id": request["request_id"], "persisted": False},

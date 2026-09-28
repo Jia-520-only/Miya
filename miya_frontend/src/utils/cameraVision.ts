@@ -28,14 +28,15 @@ const faceRecognitionEnabled = ref(localStorage.getItem('miya-face-recognition')
 const emotionInferenceEnabled = ref(localStorage.getItem('miya-emotion-inference') === 'true')
 const actionRecognitionEnabled = ref(localStorage.getItem('miya-action-recognition') !== 'false')
 const localOnly = ref(localStorage.getItem('miya-camera-local-only') === 'true')
+const alwaysOn = ref(localStorage.getItem('miya-camera-always-on') !== 'false')
 const localCapabilities = ref<LocalCameraCapabilities>({
   status: 'unknown',
   message: '正在检查本地视觉模型…',
 })
 
-let timer: ReturnType<typeof setInterval> | null = null
+let timer: ReturnType<typeof setTimeout> | null = null
 let lastSignature = ''
-let lastRemoteAnalysis = 0
+let lastSignatureSampleAt = 0
 let analysisInFlight = false
 let poseHistory: Array<{ keypoints: Array<{ x: number, y: number, confidence: number }> }> = []
 let previewVideo: HTMLVideoElement | null = null
@@ -44,11 +45,28 @@ let deviceChangeHandler: (() => void) | null = null
 let remotePollTimer: ReturnType<typeof setInterval> | null = null
 let remoteCommandInFlight = false
 let observationRequestInFlight = false
+let companionStartInFlight: Promise<void> | null = null
+let companionStartInFlightVersion = 0
+let companionStartVersion = 0
 let lastRemoteCommandId = localStorage.getItem('miya-camera-command-seen') || ''
 let lastObservationRequestId = localStorage.getItem('miya-camera-observation-seen') || ''
 let stableSince = 0
-let lastPublishedEvent = ''
+const lastPublishedEvents = new Map<string, number>()
+let lastPoseAnalysis = 0
+let motionWindow: number[] = []
+let motionActive = false
+let actionCandidate: { kind: string, label: string, count: number, at: number } | null = null
+let signatureCanvas: HTMLCanvasElement | null = null
+let signatureContext: CanvasRenderingContext2D | null = null
 const LONG_STILL_MS = 10 * 60 * 1000
+const MOTION_REFERENCE_SAMPLE_MS = 500
+const IDLE_SAMPLE_MS = 900
+const ACTIVE_SAMPLE_MS = 350
+const POSE_SAMPLE_MS = 1200
+const EVENT_REPEAT_COOLDOWN_MS = 90_000
+const ACTION_CONFIRM_WINDOW_MS = 4000
+const ACTION_MIN_CONFIDENCE = 0.64
+const ACTION_IMMEDIATE_CONFIDENCE = 0.86
 
 function handleStreamEnded() {
   if (!stream.value) return
@@ -178,8 +196,9 @@ async function open(modeToUse: Exclude<CameraMode, 'off'>) {
 }
 
 function stop(reason = '') {
+  companionStartVersion += 1
   if (timer) {
-    clearInterval(timer)
+    clearTimeout(timer)
     timer = null
   }
   stream.value?.getTracks().forEach(track => track.stop())
@@ -196,12 +215,17 @@ function stop(reason = '') {
   localEvent.value = ''
   localEventCode.value = 'stable'
   stableSince = 0
-  lastPublishedEvent = ''
+  lastPublishedEvents.clear()
   motionScore.value = 0
   localAction.value = ''
   localActionConfidence.value = 0
   poseHistory = []
   lastSignature = ''
+  lastSignatureSampleAt = 0
+  motionWindow = []
+  motionActive = false
+  actionCandidate = null
+  lastPoseAnalysis = 0
   analysisInFlight = false
   publishState()
 }
@@ -234,13 +258,15 @@ async function waitForMediaFrame() {
 function getSignature() {
   const source = getMediaVideo()
   if (!stream.value || source.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return ''
-  const canvas = document.createElement('canvas')
-  canvas.width = 32
-  canvas.height = 24
-  const context = canvas.getContext('2d', { willReadFrequently: true })
-  if (!context) return ''
-  context.drawImage(source, 0, 0, 32, 24)
-  const pixels = context.getImageData(0, 0, 32, 24).data
+  if (!signatureCanvas) {
+    signatureCanvas = document.createElement('canvas')
+    signatureCanvas.width = 32
+    signatureCanvas.height = 24
+    signatureContext = signatureCanvas.getContext('2d', { willReadFrequently: true })
+  }
+  if (!signatureCanvas || !signatureContext) return ''
+  signatureContext.drawImage(source, 0, 0, 32, 24)
+  const pixels = signatureContext.getImageData(0, 0, 32, 24).data
   let signature = ''
   for (let index = 0; index < pixels.length; index += 16) {
     signature += Math.round((pixels[index]! + pixels[index + 1]! + pixels[index + 2]!) / 3 / 16).toString(16)
@@ -248,18 +274,21 @@ function getSignature() {
   return signature
 }
 
-function measureMotion(signature: string) {
+function measureMotion(signature: string, sampledAt: number) {
   if (!signature || !lastSignature) {
     lastSignature = signature
+    lastSignatureSampleAt = sampledAt
     return 0
   }
+  const elapsed = Math.max(sampledAt - lastSignatureSampleAt, MOTION_REFERENCE_SAMPLE_MS)
   let difference = 0
   const length = Math.min(signature.length, lastSignature.length)
   for (let index = 0; index < length; index += 1) {
     difference += Math.abs(parseInt(signature[index]!, 16) - parseInt(lastSignature[index]!, 16))
   }
   lastSignature = signature
-  return difference / Math.max(length, 1)
+  lastSignatureSampleAt = sampledAt
+  return difference / Math.max(length, 1) * MOTION_REFERENCE_SAMPLE_MS / elapsed
 }
 
 function classifyMotion(score: number): typeof localEventCode.value {
@@ -269,10 +298,62 @@ function classifyMotion(score: number): typeof localEventCode.value {
   return 'stable'
 }
 
+function updateMotionState(score: number): { code: typeof localEventCode.value, score: number } {
+  motionWindow.push(score)
+  if (motionWindow.length > 3) motionWindow.shift()
+  const sorted = [...motionWindow].sort((left, right) => left - right)
+  const filteredScore = sorted.length === 2 ? (sorted[0]! + sorted[1]!) / 2 : (sorted[1] || 0)
+  const movingSamples = motionWindow.filter(sample => sample >= 0.65).length
+  const confirmed = movingSamples >= 2 || score >= 4.8
+  motionActive = confirmed
+  return {
+    code: score >= 4.8 ? 'scene_change' : confirmed ? classifyMotion(filteredScore) : 'stable',
+    score: score >= 4.8 ? score : filteredScore,
+  }
+}
+
+function scheduleCompanionTick(delay = motionActive ? ACTIVE_SAMPLE_MS : IDLE_SAMPLE_MS) {
+  if (mode.value !== 'companion' || !stream.value) return
+  if (timer) clearTimeout(timer)
+  timer = setTimeout(() => {
+    timer = null
+    void companionTick()
+  }, delay)
+}
+
+function confirmAction(action: any, now: number) {
+  const kind = String(action?.kind || '')
+  const label = String(action?.label || '')
+  const confidence = Number(action?.confidence || 0)
+  if (!kind || !label || kind === 'unknown' || kind === 'still' || kind === 'sitting' || kind === 'standing') {
+    actionCandidate = null
+    return false
+  }
+  if (confidence < ACTION_MIN_CONFIDENCE) {
+    actionCandidate = null
+    return false
+  }
+  if (confidence >= ACTION_IMMEDIATE_CONFIDENCE) {
+    actionCandidate = null
+    return true
+  }
+  if (actionCandidate?.kind === kind && now - actionCandidate.at <= ACTION_CONFIRM_WINDOW_MS) {
+    actionCandidate.count += 1
+    actionCandidate.label = label
+    actionCandidate.at = now
+  } else {
+    actionCandidate = { kind, label, count: 1, at: now }
+  }
+  if (actionCandidate.count < 2) return false
+  actionCandidate = null
+  return true
+}
+
 async function publishLocalEvent(kind: string, summary: string, confidence = 1) {
   const key = `${kind}:${summary}`
-  if (key === lastPublishedEvent) return
-  lastPublishedEvent = key
+  const now = Date.now()
+  if (now - (lastPublishedEvents.get(key) || 0) < EVENT_REPEAT_COOLDOWN_MS) return
+  lastPublishedEvents.set(key, now)
   try {
     await API.mcpCall('screen_vision', 'camera_event', {
       event: { kind, summary, confidence, mode: 'companion', status: 'success' },
@@ -423,97 +504,156 @@ async function deleteIdentity(identityId: string) {
 }
 
 async function companionTick() {
-  if (mode.value !== 'companion' || !stream.value || analysisInFlight) return
-  const signature = getSignature()
-  const score = measureMotion(signature)
-  motionScore.value = Number(score.toFixed(2))
-  localEventCode.value = classifyMotion(score)
-  localStorage.setItem('miya-camera-heartbeat', String(Date.now()))
-  if (localEventCode.value === 'stable') {
-    if (!stableSince) stableSince = Date.now()
-    if (Date.now() - stableSince >= LONG_STILL_MS) {
-      localEventCode.value = 'long_still'
-      localEvent.value = '本地观察中 · 长时间静止'
-      await publishLocalEvent('long_still', '画面长时间稳定，可能一直保持静止', 0.78)
-    } else {
-      localEvent.value = '本地观察中 · 画面稳定'
-    }
+  if (mode.value !== 'companion' || !stream.value) return
+  if (analysisInFlight) {
+    scheduleCompanionTick(ACTIVE_SAMPLE_MS)
     return
   }
-  stableSince = 0
-  const eventText = {
-    light_motion: '检测到轻微移动 · 仅本地判断',
-    clear_motion: '检测到明显动作 · 仅本地判断',
-    scene_change: '检测到画面突变 · 仅本地判断',
-    stable: '本地观察中 · 画面稳定',
-    long_still: '本地观察中 · 长时间静止',
-  }[localEventCode.value]
-  localEvent.value = `${eventText} · ${motionScore.value}`
-  if (localEventCode.value === 'scene_change') {
-    await publishLocalEvent('scene_change', '摄像头画面发生明显变化', 0.82)
-  }
-  const now = Date.now()
-  if (localEventCode.value === 'light_motion') return
+  try {
+    const signature = getSignature()
+    if (!signature) return
+    const now = Date.now()
+    const sample = updateMotionState(measureMotion(signature, now))
+    motionScore.value = Number(sample.score.toFixed(2))
+    localEventCode.value = sample.code
+    localStorage.setItem('miya-camera-heartbeat', String(now))
+    if (localEventCode.value === 'stable') {
+      const pendingAction = Boolean(actionCandidate && now - actionCandidate.at <= ACTION_CONFIRM_WINDOW_MS)
+      if (!pendingAction) actionCandidate = null
+      if (!stableSince) stableSince = now
+      if (now - stableSince >= LONG_STILL_MS) {
+        localEventCode.value = 'long_still'
+        localEvent.value = '本地观察中 · 长时间静止'
+        await publishLocalEvent('long_still', '画面长时间稳定，可能一直保持静止', 0.78)
+      } else {
+        localEvent.value = '本地观察中 · 画面稳定'
+      }
+      if (!pendingAction) return
+    } else {
+      stableSince = 0
+    }
+    const eventText = {
+      light_motion: '检测到轻微移动 · 仅本地判断',
+      clear_motion: '检测到明显动作 · 仅本地判断',
+      scene_change: '检测到画面突变 · 仅本地判断',
+      stable: '本地观察中 · 画面稳定',
+      long_still: '本地观察中 · 长时间静止',
+    }[localEventCode.value]
+    localEvent.value = `${eventText} · ${motionScore.value}`
+    if (localEventCode.value === 'scene_change') {
+      await publishLocalEvent('scene_change', '摄像头画面发生明显变化', 0.82)
+    }
+    const confirmingAction = Boolean(actionCandidate && now - actionCandidate.at <= ACTION_CONFIRM_WINDOW_MS)
+    if (!confirmingAction && localEventCode.value !== 'clear_motion' && localEventCode.value !== 'scene_change') return
+    if (!actionRecognitionEnabled.value || !localPoseAvailable()) {
+      localEvent.value = '本地检测到画面变化 · 姿态模型未就绪'
+      return
+    }
+    if (now - lastPoseAnalysis < POSE_SAMPLE_MS) return
 
-  if (actionRecognitionEnabled.value && localPoseAvailable()) {
+    lastPoseAnalysis = now
     analysisInFlight = true
     try {
       const action = await analyzeLocalAction()
-      if (action?.label && action.kind !== 'unknown' && action.kind !== 'still') {
+      if (!action?.label) {
+        actionCandidate = null
+        localEvent.value = '本地动作识别中'
+      } else if (action.kind === 'sitting' || action.kind === 'standing' || action.kind === 'still') {
+        actionCandidate = null
+        localEvent.value = `本地姿态 · ${action.label}`
+      } else if (confirmAction(action, now)) {
         const confidence = Number(action.confidence || 0)
         localEvent.value = `本地动作 · ${action.label} · ${confidence.toFixed(2)}`
         await publishLocalEvent(action.kind || 'motion', action.label, confidence)
-        // A confident local label is enough for the companion loop. Keep the
-        // remote vision fallback for uncertain or scene-level changes.
-        if (localOnly.value || confidence >= 0.68 || now - lastRemoteAnalysis < 90_000) {
-          analysisInFlight = false
-          return
-        }
-      } else if (localOnly.value) {
-        localEvent.value = '本地动作识别中 · 暂未确认具体动作'
-        analysisInFlight = false
-        return
+      } else {
+        localEvent.value = `本地动作待确认 · ${action.label}`
       }
     } catch (err: any) {
-      if (localOnly.value) {
-        localEvent.value = err?.message || '本地动作识别暂不可用'
-        analysisInFlight = false
-        return
-      }
+      actionCandidate = null
+      localEvent.value = err?.message || '本地动作识别暂不可用'
+    } finally {
       analysisInFlight = false
     }
-    // Local inference is complete; the optional remote fallback below owns
-    // its own in-flight lock.
-    analysisInFlight = false
-  } else if (localOnly.value) {
-    localEvent.value = '本地动作模型未就绪 · 未发送云端分析'
-    return
-  }
-
-  if (now - lastRemoteAnalysis < 90_000) return
-  lastRemoteAnalysis = now
-  analysisInFlight = true
-  try {
-    status.value = '发现变化，正在看你'
-    publishState()
-    await lookAtMe('请简短描述我刚才的姿态或动作变化，只说能从画面确认的内容。')
-    localEvent.value = '刚刚看过 · 等待下一次变化'
   } catch (err: any) {
-    error.value = err?.message || '陪伴视觉分析失败'
-    status.value = '陪伴视觉运行中'
-    publishState()
+    localEvent.value = err?.message || '本地摄像头采样失败'
   } finally {
-    analysisInFlight = false
+    if (mode.value === 'companion' && stream.value && !timer) {
+      scheduleCompanionTick()
+    }
   }
 }
 
 async function startCompanion() {
-  if (localOnly.value && !localOnlyReady()) {
-    throw new Error(localCapabilities.value.message)
+  if (mode.value === 'companion' && stream.value) return
+  if (companionStartInFlight) return companionStartInFlight
+  const startVersion = ++companionStartVersion
+  companionStartInFlightVersion = startVersion
+  companionStartInFlight = (async () => {
+    await refreshCapabilities()
+    if (startVersion !== companionStartVersion) return
+    await open('companion')
+    if (startVersion !== companionStartVersion) {
+      stop()
+      return
+    }
+    if (!timer) scheduleCompanionTick(0)
+  })()
+  try {
+    await companionStartInFlight
+  } finally {
+    if (companionStartInFlightVersion === startVersion) {
+      companionStartInFlight = null
+      if (startVersion !== companionStartVersion && alwaysOn.value && mode.value === 'off') {
+        void startCompanion()
+      }
+    }
   }
-  await open('companion')
-  if (!timer) timer = setInterval(() => { void companionTick() }, 15_000)
-  void companionTick()
+}
+
+async function startAlwaysOnCompanion() {
+  await startCompanion()
+  if (!alwaysOn.value || mode.value !== 'companion') return
+  try {
+    const response = await API.setCameraControl({
+      mode: 'companion',
+      local_only: true,
+      action_recognition: actionRecognitionEnabled.value,
+      autonomous: true,
+    })
+    const requestId = String(response?.state?.request_id || '')
+    if (requestId) {
+      lastRemoteCommandId = requestId
+      localStorage.setItem('miya-camera-command-seen', requestId)
+    }
+  } catch (err: any) {
+    error.value = err?.message || '摄像头已启动，但自主视觉状态同步失败'
+    publishState()
+    throw err
+  }
+}
+
+function setAlwaysOn(value: boolean) {
+  alwaysOn.value = value
+  localStorage.setItem('miya-camera-always-on', String(value))
+  if (!value) {
+    if (mode.value === 'companion' || companionStartInFlight) stop()
+    void API.setCameraControl({ mode: 'off', local_only: true, autonomous: false }).catch(() => {})
+    return
+  }
+  void enableAlwaysOn().catch(() => {})
+}
+
+async function enableAlwaysOn() {
+  alwaysOn.value = true
+  localStorage.setItem('miya-camera-always-on', 'true')
+  try {
+    await startAlwaysOnCompanion()
+  } catch (err: any) {
+    error.value = err?.message || '本地陪伴视觉启动失败'
+    if (mode.value === 'off') status.value = '摄像头未启用'
+    publishState()
+    throw err
+  }
 }
 
 async function syncRemoteCommand() {
@@ -523,11 +663,13 @@ async function syncRemoteCommand() {
     const response = await API.getCameraControl()
     const state = response?.state
     const requestId = String(state?.request_id || '')
-    if (!requestId || requestId === lastRemoteCommandId) return
+    if (!requestId || requestId === 'initial' || requestId === lastRemoteCommandId) return
     lastRemoteCommandId = requestId
     localStorage.setItem('miya-camera-command-seen', requestId)
     if (state.mode === 'off') {
-      if (mode.value !== 'off') stop('已按命令关闭摄像头')
+      alwaysOn.value = false
+      localStorage.setItem('miya-camera-always-on', 'false')
+      if (mode.value !== 'off' || companionStartInFlight) stop('已按命令关闭摄像头')
       return
     }
     localOnly.value = Boolean(state.local_only)
@@ -649,13 +791,13 @@ function setLocalOnly(value: boolean) {
 }
 
 export function useCameraVision() {
-  startRemoteCommandPolling()
   return {
     mode, status, error, devices, selectedDeviceId, stream, lastObservation, localEvent, localEventCode, motionScore,
     faceRecognitionEnabled, emotionInferenceEnabled, actionRecognitionEnabled, localAction, localActionConfidence,
+    alwaysOn,
     localOnly, localCapabilities,
     listDevices, refreshCapabilities, attachPreview, open, stop, lookAtMe, lookBoth, startCompanion, selectDevice,
-    setFaceRecognition, setEmotionInference, setActionRecognition, setLocalOnly, enrollIdentity, listIdentities, deleteIdentity,
-    syncRemoteCommand, startRemoteCommandPolling, stopRemoteCommandPolling,
+    setFaceRecognition, setEmotionInference, setActionRecognition, setLocalOnly, setAlwaysOn, enableAlwaysOn, enrollIdentity, listIdentities, deleteIdentity,
+    syncRemoteCommand, startRemoteCommandPolling, stopRemoteCommandPolling, startAlwaysOnCompanion,
   }
 }

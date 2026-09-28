@@ -74,8 +74,11 @@ const showStatus = useStorage('miya-show-status', true)
       <button v-if="companionActive" class="camera-status" title="打开弥娅视觉" @click="router.push('/screen')">
         <span class="camera-status-dot" />陪伴视觉
       </button>
-      <button v-if="companionActive" class="camera-stop" title="立即关闭摄像头" aria-label="立即关闭摄像头" @click="cameraVision.stop()">
+      <button v-if="companionActive" class="camera-stop" title="关闭本地摄像头识别" aria-label="关闭本地摄像头识别" @click="cameraVision.setAlwaysOn(false)">
         ×
+      </button>
+      <button v-else-if="cameraVision.error.value" class="camera-error" title="查看摄像头状态" @click="router.push('/screen')">
+        摄像头状态
       </button>
       <span class="top-time">{{ currentTime }}</span>
     </div>
@@ -184,4 +187,5 @@ const showStatus = useStorage('miya-show-status', true)
   font-size: .8rem;
   line-height: 1;
 }
+.camera-error { margin-right: 8px; border: 0; background: transparent; color: #ff9a86; font-size: .65rem; cursor: pointer; }
 </style>

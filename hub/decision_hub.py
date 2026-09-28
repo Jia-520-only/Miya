@@ -4938,10 +4938,10 @@ class DecisionHub:
         if action in {"status", "状态"}:
             return describe_state(state)
         if action in {"on", "开启", "开", "companion", "陪伴", "陪伴视觉"}:
-            state = write_state("companion", autonomous=False)
+            state = write_state("companion", local_only=True, autonomous=False)
             return "已请求开启摄像头陪伴视觉。桌面端会在获得摄像头权限后开始本地动作识别。\n" + describe_state(state)
         if action in {"auto", "autonomous", "自主", "自主观察", "自动观察"}:
-            state = write_state("companion", autonomous=True)
+            state = write_state("companion", local_only=True, autonomous=True)
             return "已开启弥娅自主视觉。你授权后，弥娅可以在需要确认姿态、动作或环境时请求观察；默认本地优先、按冷却取帧。\n" + describe_state(state)
         if action in {"off", "关闭", "关", "stop", "停止"}:
             state = write_state("off", autonomous=False)
@@ -4954,7 +4954,7 @@ class DecisionHub:
             return "已开启仅本地摄像头陪伴视觉；本地模型不可用时不会回退云端。\n" + describe_state(state)
         if action in {"cloud", "云端"}:
             state = write_state("companion", local_only=False, autonomous=True)
-            return "已开启摄像头陪伴视觉（允许按策略回退视觉模型）。\n" + describe_state(state)
+            return "已开启摄像头陪伴视觉；持续动作识别仍在本地运行，单次观察按视觉路线设置处理。\n" + describe_state(state)
         if action in {"action on", "动作开", "动作开启"}:
             state = write_state(state.get("mode", "off"), action_recognition=True)
             return "本地动作识别已开启。\n" + describe_state(state)

@@ -12,6 +12,7 @@ import TitleBar from '@/components/TitleBar.vue'
 import TopStatusBar from '@/components/TopStatusBar.vue'
 import { useElectron } from '@/composables/useElectron'
 import { useMIYARealtime } from '@/composables/useMIYARealtime'
+import { useCameraVision } from '@/utils/cameraVision'
 import { destroyParallax, initParallax } from '@/utils/parallax'
 import { isLegacyBackground } from '@/utils/backgroundAssets'
 
@@ -19,6 +20,7 @@ const FloatingView = defineAsyncComponent(() => import('@/views/FloatingView.vue
 
 const route = useRoute()
 const isElectron = !!window.electronAPI
+const cameraVision = useCameraVision()
 const { connect: connectWS, disconnect: disconnectWS } = useMIYARealtime()
 useElectron()
 
@@ -61,7 +63,7 @@ watch([isHome, homeGalleryVisible], ([home, visible]) => {
     destroyParallax()
 })
 
-onMounted(() => {
+onMounted(async () => {
   if (isHome.value && homeGalleryVisible.value)
     initParallax()
   connectWS()
@@ -71,6 +73,13 @@ onMounted(() => {
     })
     cleanupFloatingState = window.electronAPI?.floating.onStateChange((s: FloatingState) => {
       floatingState.value = s
+    })
+  }
+  await cameraVision.syncRemoteCommand()
+  cameraVision.startRemoteCommandPolling()
+  if (cameraVision.alwaysOn.value) {
+    void cameraVision.enableAlwaysOn().catch((err: any) => {
+      console.warn('[弥娅之眼] 自动启动摄像头失败:', err?.message || err)
     })
   }
 })

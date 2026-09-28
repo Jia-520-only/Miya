@@ -26,7 +26,7 @@ _VALID_MODES = {"off", "companion", "snapshot"}
 def _default_state() -> dict[str, Any]:
     return {
         "mode": "off",
-        "local_only": False,
+        "local_only": True,
         "action_recognition": True,
         "autonomous": False,
         "request_id": "initial",

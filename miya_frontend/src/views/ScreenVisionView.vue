@@ -151,12 +151,12 @@ async function doLookBoth() {
 
 async function toggleCompanion() {
   if (companionActive.value) {
-    camera.stop()
+    camera.setAlwaysOn(false)
     return
   }
   try {
     camera.attachPreview(previewVideo.value)
-    await camera.startCompanion()
+    await camera.enableAlwaysOn()
     await nextTick()
     camera.attachPreview(previewVideo.value)
   } catch {
@@ -182,6 +182,10 @@ function setActionRecognition(event: Event) {
 
 function setLocalOnly(event: Event) {
   camera.setLocalOnly((event.target as HTMLInputElement).checked)
+}
+
+function setAlwaysOn(event: Event) {
+  camera.setAlwaysOn((event.target as HTMLInputElement).checked)
 }
 
 async function enrollCurrentIdentity() {
@@ -226,6 +230,7 @@ async function removeIdentity(identityId: string) {
 }
 
 onMounted(() => {
+  camera.attachPreview(previewVideo.value)
   void camera.listDevices()
   void camera.refreshCapabilities()
   void camera.listIdentities().then((items) => { identities.value = items }).catch(() => {})
@@ -269,7 +274,7 @@ onBeforeUnmount(() => { camera.attachPreview(null) })
         </div>
         <div class="camera-preview" :class="{ active: !!camera.stream.value }">
           <video ref="previewVideo" autoplay muted playsinline />
-          <div v-if="!camera.stream.value" class="preview-placeholder"><span>◉</span><b>摄像头默认关闭</b><small>点击“一起观察”时再请求开启</small></div>
+          <div v-if="!camera.stream.value" class="preview-placeholder"><span>◉</span><b>{{ camera.error.value ? '摄像头没有启动' : camera.alwaysOn.value ? '正在等待本地摄像头' : '持续识别已关闭' }}</b><small>{{ camera.error.value || (camera.alwaysOn.value ? '前端启动后会持续本地识别' : '开启后会在本机本地识别') }}</small></div>
           <div v-if="camera.stream.value" class="preview-status"><span class="vision-state-dot active" />{{ camera.status.value }}</div>
         </div>
         <div class="camera-controls">
@@ -289,7 +294,7 @@ onBeforeUnmount(() => { camera.attachPreview(null) })
           <div class="result-label">{{ status === 'error' ? '✗ 观察状态' : '✓ 联合观察结果' }}</div>
           <div class="result-content">{{ result }}</div>
         </div>
-        <p class="privacy-note">一起观察会将本次屏幕截图与摄像头画面发送给视觉模型；摄像头只在本次操作期间开启，不保存原图。“仅本地”开启时不会发送。</p>
+        <p class="privacy-note">本次观察遵循视觉路线设置。local 只使用本地 OCR 与姿态分析；cloud 或 hybrid 会将本次屏幕截图和摄像头画面交给视觉模型。</p>
       </section>
 
       <section v-else-if="activeTab === 'screen'" class="vision-panel">
@@ -306,7 +311,8 @@ onBeforeUnmount(() => { camera.attachPreview(null) })
           <div class="result-label">{{ status === 'success' ? '✓ 分析结果' : status === 'error' ? '✗ 错误' : '⚠ 部分成功' }}</div>
           <div class="result-content">{{ result }}</div>
         </div>
-        <div v-else class="vision-empty"><span class="empty-mark">⊙</span><span>游戏、报错、网页、操作界面</span><small>截图只在你主动操作时发送给视觉模型</small></div>
+        <div v-else class="vision-empty"><span class="empty-mark">⊙</span><span>游戏、报错、网页、操作界面</span><small>local 返回本地识别的文字与位置；cloud / hybrid 会处理截图</small></div>
+        <p class="privacy-note">local 模式在本机提取文字与位置；cloud 或 hybrid 会将截图交给视觉模型。</p>
       </section>
 
       <section v-else class="vision-panel camera-panel">
@@ -317,7 +323,7 @@ onBeforeUnmount(() => { camera.attachPreview(null) })
 
         <div class="camera-preview" :class="{ active: !!camera.stream.value }">
           <video ref="previewVideo" autoplay muted playsinline />
-          <div v-if="!camera.stream.value" class="preview-placeholder"><span>◉</span><b>摄像头默认关闭</b><small>点击一次看我，或明确开启陪伴视觉</small></div>
+          <div v-if="!camera.stream.value" class="preview-placeholder"><span>◉</span><b>{{ camera.error.value ? '摄像头没有启动' : camera.alwaysOn.value ? '正在等待本地摄像头' : '持续识别已关闭' }}</b><small>{{ camera.error.value || (camera.alwaysOn.value ? '前端启动后会持续本地识别' : '开启后会在本机本地识别') }}</small></div>
           <div v-if="camera.stream.value" class="preview-status"><span class="vision-state-dot active" />{{ camera.status.value }}</div>
         </div>
 
@@ -342,7 +348,8 @@ onBeforeUnmount(() => { camera.attachPreview(null) })
         </div>
 
         <div class="camera-options">
-          <label title="初版由视觉模型提供实验性身份线索；本地人脸库将在后续模型层接入"><input type="checkbox" :checked="camera.faceRecognitionEnabled.value" @change="setFaceRecognition"><span>身份线索（实验）</span></label>
+          <label title="前端启动后自动保持摄像头本地动作识别；关闭后会立即停止"><input type="checkbox" :checked="camera.alwaysOn.value" @change="setAlwaysOn"><span>启动时持续本地识别</span></label>
+          <label title="使用本地登记的人脸特征进行身份匹配，不保存原始画面"><input type="checkbox" :checked="camera.faceRecognitionEnabled.value" @change="setFaceRecognition"><span>身份线索</span></label>
           <label title="只推测可见表情线索，不作为心理或医疗判断"><input type="checkbox" :checked="camera.emotionInferenceEnabled.value" @change="setEmotionInference"><span>表情线索（实验）</span></label>
           <label title="使用本地姿态模型和短时序关键点识别常见动作"><input type="checkbox" :checked="camera.actionRecognitionEnabled.value" @change="setActionRecognition"><span>本地动作识别</span></label>
           <label title="启用后没有本地模型就会拒绝分析，不会回退到云端"><input type="checkbox" :checked="camera.localOnly.value" @change="setLocalOnly"><span>仅本地</span></label>
@@ -367,8 +374,7 @@ onBeforeUnmount(() => { camera.attachPreview(null) })
           <small v-if="camera.localCapabilities.value.cameraMode" class="camera-route">看我：{{ camera.localCapabilities.value.cameraMode === 'local' ? '本地模型' : '云端视觉' }}</small>
           <button class="capability-refresh" title="重新检查本地模型" @click="camera.refreshCapabilities">↻</button>
         </div>
-        <p class="privacy-note">统一路线在 config/qq_config.yaml 的 tools.qq_image_analyzer.vision_mode 中设置为 local、cloud 或 hybrid。local 下“一起看”只返回本地 OCR 与姿态信号，不上传云端；cloud 下才做跨画面语义理解。</p>
-        <p class="privacy-note">默认不占用摄像头、不保存画面。陪伴模式先用本地帧差与姿态关键点识别动作，仅在本地无法确认时按冷却策略发送单帧分析。</p>
+        <p class="privacy-note">持续陪伴只在本机采样和识别动作，不上传或保存摄像头画面。单次屏幕与摄像头分析遵循 config/qq_config.yaml 中的 local、cloud 或 hybrid 路线。</p>
       </section>
     </main>
   </div>
@@ -430,7 +436,7 @@ h1 { margin: .25rem 0 0; color: #f3f7f8; font: 700 1.05rem 'Noto Serif SC', seri
 .camera-event { display: flex; align-items: center; gap: .4rem; margin-top: .7rem; color: rgba(220,230,235,.34); font: .54rem 'JetBrains Mono', monospace; }
 .camera-event.active { color: rgba(255,200,195,.7); }
 .camera-event.motion { color: rgba(255, 210, 140, .78); }
-.camera-options { display: flex; gap: 1rem; margin-top: .9rem; padding-top: .75rem; border-top: 1px solid rgba(0,173,181,.07); }
+.camera-options { display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin-top: .9rem; padding-top: .75rem; border-top: 1px solid rgba(0,173,181,.07); }
 .camera-options label { display: flex; align-items: center; gap: .35rem; color: rgba(220,230,235,.52); font-size: .62rem; }
 .camera-options input { accent-color: #00c9ca; }
 .identity-tools { margin-top: .85rem; padding-top: .75rem; border-top: 1px solid rgba(0,173,181,.07); }
