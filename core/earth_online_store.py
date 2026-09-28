@@ -8901,7 +8901,6 @@ class EarthOnlineStore:
         metrics = self.list_dist_metrics(days=window)
         packages = {int(item["id"]): item for item in self.list_dist_packages()}
         materials = {int(item["id"]): item for item in self.list_dist_materials(limit=1000)}
-        targets = {int(item["id"]): item for item in self.list_dist_targets()}
         channels = {int(item["id"]): item for item in self.list_dist_channels()}
 
         def blank() -> Dict[str, Any]:

@@ -146,12 +146,12 @@ def _detect_faces(image: Image.Image) -> list[dict[str, float]]:
     # The OpenCV Zoo YuNet export exposes three separate stride heads rather
     # than the post-processed [x,y,w,h,landmarks,score] matrix.
     if len(outputs) >= 12:
-        for head, stride in zip((0, 1, 2), (8, 16, 32)):
+        for head, stride in zip((0, 1, 2), (8, 16, 32), strict=True):
             cls = np.asarray(outputs[head]).reshape(-1)
             obj = np.asarray(outputs[3 + head]).reshape(-1)
             boxes = np.asarray(outputs[6 + head]).reshape((-1, 4))
             grid = int(round(np.sqrt(len(cls))))
-            for index, (class_score, object_score) in enumerate(zip(cls, obj)):
+            for index, (class_score, object_score) in enumerate(zip(cls, obj, strict=True)):
                 score = float(class_score * object_score)
                 if score < 0.55 or grid <= 0:
                     continue
@@ -273,7 +273,6 @@ def classify_pose_action(pose_history: list[dict[str, Any]] | None, current_pose
     latest = sequence[-1]
     left_shoulder, right_shoulder = point(5, latest), point(6, latest)
     left_wrist, right_wrist = point(9, latest), point(10, latest)
-    nose = point(0, latest)
     shoulder_y = [p[1] for p in (left_shoulder, right_shoulder) if p and p[2] >= 0.25]
     shoulder_level = sum(shoulder_y) / len(shoulder_y) if shoulder_y else None
 
@@ -289,8 +288,8 @@ def classify_pose_action(pose_history: list[dict[str, Any]] | None, current_pose
         xs = [p[0] for item in sequence if (p := point(wrist_index, item)) and p[2] >= 0.30]
         if len(xs) < 4:
             continue
-        deltas = [b - a for a, b in zip(xs, xs[1:]) if abs(b - a) >= 0.018]
-        changes = sum(1 for a, b in zip(deltas, deltas[1:]) if a * b < 0)
+        deltas = [b - a for a, b in zip(xs, xs[1:], strict=True) if abs(b - a) >= 0.018]
+        changes = sum(1 for a, b in zip(deltas, deltas[1:], strict=True) if a * b < 0)
         span = max(xs) - min(xs)
         if changes >= 2 and span >= 0.08:
             wave_scores.append(min(0.95, 0.60 + changes * 0.07 + span * 0.5))
@@ -345,7 +344,7 @@ def classify_pose_action(pose_history: list[dict[str, Any]] | None, current_pose
         separation = left_ankle[0] - right_ankle[0]
         if abs(separation) >= 0.07:
             walk_states.append(1 if separation > 0 else -1)
-    switches = sum(1 for left, right in zip(walk_states, walk_states[1:]) if left != right)
+    switches = sum(1 for left, right in zip(walk_states, walk_states[1:], strict=True) if left != right)
     if len(walk_states) >= 5 and switches >= 2:
         return {"label": "走动", "confidence": round(min(0.88, 0.62 + switches * 0.05), 3), "kind": "walk", "evidence": "双脚交替移动"}
 

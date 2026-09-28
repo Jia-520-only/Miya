@@ -111,7 +111,7 @@ def test_target_rejects_credentials():
 
 
 def test_invalid_platform_is_rejected():
-    store, _ = build_stub = _build_store()
+    store, _ = _build_store()
     with pytest.raises(ValueError):
         store.upsert_dist_target({"platform": "tiktok", "account_label": "海外号"})
 
@@ -483,8 +483,8 @@ def test_distribution_tools_registered_in_both_layers():
 
     schema_names = {item["function"]["name"] for item in EARTH_TOOLS_SCHEMA}
     toolnet_names = {tool.config["name"] for tool in toolnet_earth.get_earth_online_tools()}
-    assert DISTRIBUTION_TOOLS <= schema_names
-    assert DISTRIBUTION_TOOLS <= toolnet_names
+    assert schema_names >= DISTRIBUTION_TOOLS
+    assert toolnet_names >= DISTRIBUTION_TOOLS
     assert schema_names == toolnet_names
 
 
@@ -501,7 +501,7 @@ def test_distribution_tools_exposed_to_all_platform_tools(platform):
         schema["function"]["name"]
         for schema in PlatformToolsManager(_Subnet()).get_platform_specific_tools(platform)
     }
-    assert DISTRIBUTION_TOOLS <= names
+    assert names >= DISTRIBUTION_TOOLS
 
 
 def test_distribution_tools_registered_in_gestalt_builtin_tools():
@@ -511,6 +511,6 @@ def test_distribution_tools_registered_in_gestalt_builtin_tools():
 
     ToolRegistry()
     builtin = get_gestalt_controller_enhanced()._builtin_tools
-    assert DISTRIBUTION_TOOLS <= set(builtin)
+    assert set(builtin) >= DISTRIBUTION_TOOLS
     for name in DISTRIBUTION_TOOLS:
         assert callable(builtin[name])
