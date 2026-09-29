@@ -115,6 +115,24 @@ export function proxySetTracking(enabled: boolean): void {
   }
 }
 
+// ── 真实表情几何（来自本机摄像头测量） ──
+
+/**
+ * Drive Miya's face from what was measured on Jia's face.
+ *
+ * `params` come straight from the backend's `rig_parameters`, so the unit
+ * conversion happens in exactly one place. Only the local (same-window)
+ * controller supports this: the standalone Live2D window takes discrete
+ * commands over IPC, and streaming rig parameters through that channel at
+ * camera rate is not worth the traffic.
+ */
+export function proxySetFacialTracking(params: Record<string, number> | null, dt: number): void {
+  if (getAPI()) return
+  // @ts-expect-error dynamic require for runtime resolution
+  const { updateFacialTracking } = require('./live2dController')
+  updateFacialTracking?.(params, dt)
+}
+
 // ── 窗口控制 ──
 
 export function proxyToggleWindow(): void {

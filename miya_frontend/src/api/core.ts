@@ -192,6 +192,95 @@ export class CoreApiClient extends ApiClient {
     return this.instance.post('/api/camera/result', { request_id: requestId, result })
   }
 
+  async getVisionPresence(): Promise<{ success: boolean, presence: Record<string, any> | null }> {
+    return this.instance.get('/api/vision/presence')
+  }
+
+  async getCameraDevices(): Promise<{ success: boolean, devices: Array<Record<string, any>>, message?: string }> {
+    return this.instance.get('/api/camera/devices')
+  }
+
+  async getCameraSources(): Promise<{ success: boolean, devices: Array<Record<string, any>>, message?: string, usable_indices?: number[], sleeping_indices?: number[] }> {
+    return this.instance.get('/api/camera/sources')
+  }
+
+  async getVisionActivity(): Promise<{ success: boolean, activity: Record<string, any> | null, message?: string }> {
+    return this.instance.get('/api/vision/activity')
+  }
+
+  async getVisionAgent(): Promise<{ success: boolean, agent: Record<string, any> | null, agency?: Record<string, any> }> {
+    return this.instance.get('/api/vision/agent')
+  }
+
+  async setVisionAgent(action: 'start' | 'stop' | 'tick' | 'status', extra: Record<string, any> = {}): Promise<any> {
+    return this.instance.post('/api/vision/agent', { action, ...extra })
+  }
+
+  /** What Miya has been wanting to say while watching. */
+  async getVisionVoice(): Promise<{ success: boolean, next: Record<string, any> | null, pending: Array<Record<string, any>>, count: number }> {
+    return this.instance.get('/api/vision/voice')
+  }
+
+  /** Take (and remove) the next thing she wanted to say, or clear them all. */
+  async takeVisionVoice(action: 'take' | 'clear' = 'take'): Promise<any> {
+    return this.instance.post('/api/vision/voice', { action })
+  }
+
+  /** Miya's observation rounds: what she saw, how she read it, what she decided. */
+  async getVisionStream(): Promise<{
+    success: boolean
+    status: Record<string, any>
+    events: Array<Record<string, any>>
+    cadence: Record<string, any>
+  }> {
+    return this.instance.get('/api/vision/stream')
+  }
+
+  /** One round in full, including thumbnails when they are enabled. */
+  async getVisionEvent(eventId: string): Promise<{ success: boolean, event: Record<string, any> | null }> {
+    return this.instance.get(`/api/vision/stream/${encodeURIComponent(eventId)}`)
+  }
+
+  /** Turn thumbnail storage on or off (off also forgets what was kept). */
+  async setVisionThumbnails(enabled: boolean): Promise<{ success: boolean, status: Record<string, any> | null }> {
+    return this.instance.post('/api/vision/thumbnails', { enabled })
+  }
+
+  /**
+   * Whether what she sees can reach her voice.
+   *
+   * Exists because this failure is invisible: the observation loop and trackers
+   * all look healthy while nothing is ever submitted to the proactive chain.
+   */
+  async getVisionBridge(): Promise<{ success: boolean, bridge: Record<string, any> | null }> {
+    return this.instance.get('/api/vision/bridge')
+  }
+
+  /** Which side owns which camera, and whether a frame is currently held. */
+  async getVisionSources(): Promise<{
+    success: boolean
+    sources: Record<string, any>
+    browser_owned: number[]
+    backend_owned: number[]
+    readers_running: number[]
+  }> {
+    return this.instance.get('/api/vision/sources')
+  }
+
+  /**
+   * Absolute URL for one camera's still frame.
+   *
+   * An `<img src>` does not go through axios, so it gets no `baseURL` fallback: a
+   * relative path resolves against the page origin instead - the Vite dev server
+   * on :5173, or `file://` in a packaged build - and the picture never loads. The
+   * discovered API port is the only correct origin.
+   */
+  cameraPreviewUrl(index: number, nonce: number | string = ''): string {
+    const query = new URLSearchParams({ max_age: '10' })
+    if (nonce) query.set('_', String(nonce))
+    return `${this.endpoint}/api/vision/preview/${index}?${query.toString()}`
+  }
+
   // ── 会话 ──
   async getSessions(): Promise<{ sessions: any[] }> {
     const res: any = await this.instance.get('/api/chat/sessions')

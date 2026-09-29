@@ -1,5 +1,7 @@
 import { ref, shallowRef } from 'vue'
 import API from '@/api/core'
+import { rigCommandFromAnalysis } from '@/utils/facialTracking'
+import { proxySetFacialTracking } from '@/utils/live2dProxy'
 
 export type CameraMode = 'off' | 'snapshot' | 'companion'
 
@@ -19,11 +21,9 @@ const devices = ref<MediaDeviceInfo[]>([])
 const selectedDeviceId = ref(localStorage.getItem('miya-camera-device') || '')
 const stream = shallowRef<MediaStream | null>(null)
 const lastObservation = ref('')
+// One line about what this side is doing. It no longer carries a locally
+// invented motion score: the backend measures that, and the panel shows it.
 const localEvent = ref('')
-const localEventCode = ref<'stable' | 'light_motion' | 'clear_motion' | 'scene_change' | 'long_still'>('stable')
-const motionScore = ref(0)
-const localAction = ref('')
-const localActionConfidence = ref(0)
 const faceRecognitionEnabled = ref(localStorage.getItem('miya-face-recognition') === 'true')
 const emotionInferenceEnabled = ref(localStorage.getItem('miya-emotion-inference') === 'true')
 const actionRecognitionEnabled = ref(localStorage.getItem('miya-action-recognition') !== 'false')
@@ -33,12 +33,44 @@ const localCapabilities = ref<LocalCameraCapabilities>({
   status: 'unknown',
   message: '正在检查本地视觉模型…',
 })
+// Physical devices as OpenCV sees them. A phone-as-webcam or a Windows virtual
+// camera can open successfully while returning only black frames, so the probe
+// result matters more than the device count. Sleeping devices are re-checked
+// automatically, because a phone screen goes to sleep and wakes back up.
+const backendDevices = ref<Array<Record<string, any>>>([])
+const cameraSourcesMessage = ref('')
+const presence = ref<Record<string, any> | null>(null)
+const activity = ref<Record<string, any> | null>(null)
+// Which OpenCV index the browser's preview corresponds to. The backend cannot
+// open a device the browser is holding, so it needs to be told which index the
+// frames it receives belong to.
+const backendDeviceIndex = ref<number>(Number(localStorage.getItem('miya-camera-backend-index') ?? '') || 0)
+// Miya's own watching loop: she starts it at boot, but the desktop must be able
+// to see that she is looking and to stop her.
+const agentState = ref<Record<string, any> | null>(null)
+const agentAgency = ref<Record<string, any> | null>(null)
+// What she has been wanting to say. Without an outlet she watches all evening
+// and never gets to speak, because delivery only ran into chat platforms.
+const agentVoice = ref<Record<string, any> | null>(null)
+const agentVoiceQueue = ref<Array<Record<string, any>>>([])
+// Her observation rounds, so the page can show her working instead of only her
+// conclusions. Thumbnails are fetched per event, only when expanded.
+const visionEvents = ref<Array<Record<string, any>>>([])
+const visionStreamStatus = ref<Record<string, any>>({})
+const visionCadence = ref<Record<string, any>>({})
+const thumbnailsEnabled = ref(false)
+// Device health, so the monitor can say how many cameras actually work right now
+// instead of showing an empty box when one is asleep.
+const cameraHealth = ref<Record<string, any>>({ devices: [], usableCount: 0, count: 0, message: '' })
+// Which side holds which camera. The monitor needs this to say "预览持有 #0" and
+// to know which frames the backend can produce on its own.
+const visionSources = ref<Record<string, any>>({ sources: {}, browser_owned: [], backend_owned: [], readers_running: [] })
+// Whether her seeing can reach her speaking. Without this the page looks healthy
+// while nothing is ever submitted to the proactive chain.
+const visionBridge = ref<Record<string, any> | null>(null)
 
 let timer: ReturnType<typeof setTimeout> | null = null
-let lastSignature = ''
-let lastSignatureSampleAt = 0
 let analysisInFlight = false
-let poseHistory: Array<{ keypoints: Array<{ x: number, y: number, confidence: number }> }> = []
 let previewVideo: HTMLVideoElement | null = null
 let mediaVideo: HTMLVideoElement | null = null
 let deviceChangeHandler: (() => void) | null = null
@@ -50,23 +82,15 @@ let companionStartInFlightVersion = 0
 let companionStartVersion = 0
 let lastRemoteCommandId = localStorage.getItem('miya-camera-command-seen') || ''
 let lastObservationRequestId = localStorage.getItem('miya-camera-observation-seen') || ''
-let stableSince = 0
 const lastPublishedEvents = new Map<string, number>()
-let lastPoseAnalysis = 0
-let motionWindow: number[] = []
-let motionActive = false
-let actionCandidate: { kind: string, label: string, count: number, at: number } | null = null
 let signatureCanvas: HTMLCanvasElement | null = null
 let signatureContext: CanvasRenderingContext2D | null = null
-const LONG_STILL_MS = 10 * 60 * 1000
-const MOTION_REFERENCE_SAMPLE_MS = 500
-const IDLE_SAMPLE_MS = 900
-const ACTIVE_SAMPLE_MS = 350
-const POSE_SAMPLE_MS = 1200
+let lastFrameSharedAt = 0
+const SNAPSHOT_INTERVAL_MS = 3000
+// How often this side hands a frame to Miya. She decides what it means; the
+// preview only decides how often it can spare one.
+const FRAME_SHARE_INTERVAL_MS = 15_000
 const EVENT_REPEAT_COOLDOWN_MS = 90_000
-const ACTION_CONFIRM_WINDOW_MS = 4000
-const ACTION_MIN_CONFIDENCE = 0.64
-const ACTION_IMMEDIATE_CONFIDENCE = 0.86
 
 function handleStreamEnded() {
   if (!stream.value) return
@@ -213,19 +237,8 @@ function stop(reason = '') {
   status.value = reason || '摄像头关闭'
   error.value = reason
   localEvent.value = ''
-  localEventCode.value = 'stable'
-  stableSince = 0
   lastPublishedEvents.clear()
-  motionScore.value = 0
-  localAction.value = ''
-  localActionConfidence.value = 0
   poseHistory = []
-  lastSignature = ''
-  lastSignatureSampleAt = 0
-  motionWindow = []
-  motionActive = false
-  actionCandidate = null
-  lastPoseAnalysis = 0
   analysisInFlight = false
   publishState()
 }
@@ -255,64 +268,7 @@ async function waitForMediaFrame() {
   throw new Error('摄像头画面还没有准备好')
 }
 
-function getSignature() {
-  const source = getMediaVideo()
-  if (!stream.value || source.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return ''
-  if (!signatureCanvas) {
-    signatureCanvas = document.createElement('canvas')
-    signatureCanvas.width = 32
-    signatureCanvas.height = 24
-    signatureContext = signatureCanvas.getContext('2d', { willReadFrequently: true })
-  }
-  if (!signatureCanvas || !signatureContext) return ''
-  signatureContext.drawImage(source, 0, 0, 32, 24)
-  const pixels = signatureContext.getImageData(0, 0, 32, 24).data
-  let signature = ''
-  for (let index = 0; index < pixels.length; index += 16) {
-    signature += Math.round((pixels[index]! + pixels[index + 1]! + pixels[index + 2]!) / 3 / 16).toString(16)
-  }
-  return signature
-}
-
-function measureMotion(signature: string, sampledAt: number) {
-  if (!signature || !lastSignature) {
-    lastSignature = signature
-    lastSignatureSampleAt = sampledAt
-    return 0
-  }
-  const elapsed = Math.max(sampledAt - lastSignatureSampleAt, MOTION_REFERENCE_SAMPLE_MS)
-  let difference = 0
-  const length = Math.min(signature.length, lastSignature.length)
-  for (let index = 0; index < length; index += 1) {
-    difference += Math.abs(parseInt(signature[index]!, 16) - parseInt(lastSignature[index]!, 16))
-  }
-  lastSignature = signature
-  lastSignatureSampleAt = sampledAt
-  return difference / Math.max(length, 1) * MOTION_REFERENCE_SAMPLE_MS / elapsed
-}
-
-function classifyMotion(score: number): typeof localEventCode.value {
-  if (score >= 3.2) return 'scene_change'
-  if (score >= 1.8) return 'clear_motion'
-  if (score >= 0.65) return 'light_motion'
-  return 'stable'
-}
-
-function updateMotionState(score: number): { code: typeof localEventCode.value, score: number } {
-  motionWindow.push(score)
-  if (motionWindow.length > 3) motionWindow.shift()
-  const sorted = [...motionWindow].sort((left, right) => left - right)
-  const filteredScore = sorted.length === 2 ? (sorted[0]! + sorted[1]!) / 2 : (sorted[1] || 0)
-  const movingSamples = motionWindow.filter(sample => sample >= 0.65).length
-  const confirmed = movingSamples >= 2 || score >= 4.8
-  motionActive = confirmed
-  return {
-    code: score >= 4.8 ? 'scene_change' : confirmed ? classifyMotion(filteredScore) : 'stable',
-    score: score >= 4.8 ? score : filteredScore,
-  }
-}
-
-function scheduleCompanionTick(delay = motionActive ? ACTIVE_SAMPLE_MS : IDLE_SAMPLE_MS) {
+function scheduleCompanionTick(delay = SNAPSHOT_INTERVAL_MS) {
   if (mode.value !== 'companion' || !stream.value) return
   if (timer) clearTimeout(timer)
   timer = setTimeout(() => {
@@ -321,42 +277,29 @@ function scheduleCompanionTick(delay = motionActive ? ACTIVE_SAMPLE_MS : IDLE_SA
   }, delay)
 }
 
-function confirmAction(action: any, now: number) {
-  const kind = String(action?.kind || '')
-  const label = String(action?.label || '')
-  const confidence = Number(action?.confidence || 0)
-  if (!kind || !label || kind === 'unknown' || kind === 'still' || kind === 'sitting' || kind === 'standing') {
-    actionCandidate = null
-    return false
-  }
-  if (confidence < ACTION_MIN_CONFIDENCE) {
-    actionCandidate = null
-    return false
-  }
-  if (confidence >= ACTION_IMMEDIATE_CONFIDENCE) {
-    actionCandidate = null
-    return true
-  }
-  if (actionCandidate?.kind === kind && now - actionCandidate.at <= ACTION_CONFIRM_WINDOW_MS) {
-    actionCandidate.count += 1
-    actionCandidate.label = label
-    actionCandidate.at = now
-  } else {
-    actionCandidate = { kind, label, count: 1, at: now }
-  }
-  if (actionCandidate.count < 2) return false
-  actionCandidate = null
-  return true
-}
-
-async function publishLocalEvent(kind: string, summary: string, confidence = 1) {
-  const key = `${kind}:${summary}`
+async function publishLocalEvent(
+  kind: string,
+  summary: string,
+  confidence = 1,
+  options: { repeatable?: boolean, imageData?: string } = {},
+) {
   const now = Date.now()
-  if (now - (lastPublishedEvents.get(key) || 0) < EVENT_REPEAT_COOLDOWN_MS) return
-  lastPublishedEvents.set(key, now)
+  // Repeatable publications (sharing a frame on a slow cadence) must not be
+  // swallowed by the de-duplication window that real events rely on.
+  if (!options.repeatable) {
+    const key = `${kind}:${summary}`
+    if (now - (lastPublishedEvents.get(key) || 0) < EVENT_REPEAT_COOLDOWN_MS) return
+    lastPublishedEvents.set(key, now)
+  }
   try {
+    // A live preview holds the device, so only this side can read frames from
+    // it. The frame is captured by the caller so a failed capture cannot send an
+    // event that claims one.
+    const imageData = options.imageData || ''
     await API.mcpCall('screen_vision', 'camera_event', {
       event: { kind, summary, confidence, mode: 'companion', status: 'success' },
+      camera_index: backendDeviceIndex.value,
+      ...(imageData ? { image_data: imageData } : {}),
     })
   } catch {
     // Event publication is best effort; camera observation must keep running.
@@ -387,28 +330,55 @@ function rememberPose(data: any) {
   const pose = data?.observations?.[0]?.pose
   if (!pose?.keypoints?.length) return
   poseHistory = [...poseHistory, pose].slice(-11)
-  const action = data?.observations?.[0]?.action
-  if (action?.label) {
-    localAction.value = action.label
-    localActionConfidence.value = Number(action.confidence || 0)
-  }
 }
 
-async function analyzeLocalAction() {
-  if (!stream.value || !actionRecognitionEnabled.value || !localPoseAvailable()) return null
+let lastFacialAt = 0
+
+/**
+ * Feed a measured rig command to Miya's face.
+ *
+ * The backend already converted the geometry into rig parameters from the same
+ * frame it analysed, so no conversion happens here and no second camera is
+ * opened - the desktop preview is holding that device.
+ *
+ * Note this only runs while a preview is open: the browser owns the camera, so
+ * the backend cannot measure a face on its own. With no preview Miya keeps
+ * watching and remembering, she just does not mirror Jia's expression.
+ */
+function applyFacialTracking(data: any) {
+  const now = performance.now()
+  const dt = lastFacialAt ? Math.min(now - lastFacialAt, 200) : 16
+  lastFacialAt = now
+  const command = rigCommandFromAnalysis(data)
+  // No measurable face this tick: let the rig blend back to its own idle motion.
+  proxySetFacialTracking(command?.params ?? null, dt)
+}
+
+/**
+ * One round trip that both measures the face and updates what is on screen.
+ *
+ * It used to exist to run action classification in the browser; that is gone,
+ * because the backend classifies with real inference instead. What is left is
+ * the one thing only this side can obtain: a frame from the camera it holds.
+ */
+async function measureFaceFromPreview() {
+  if (!stream.value || !localPoseAvailable()) return
   await waitForMediaFrame()
   const response = await API.mcpCall('screen_vision', 'camera_analyze_local', {
     image_data: captureFrame(),
     identity: false,
     emotion: false,
     pose: true,
+    // Ask for face detection even though identity and emotion are off: the
+    // measured face geometry is what drives Miya's own expression.
+    faces: true,
     pose_history: poseHistory,
   })
   const raw = response?.result
   const data = typeof raw === 'string' ? JSON.parse(raw) : raw
-  if (data?.status !== 'success') return null
+  if (data?.status !== 'success') return
+  applyFacialTracking(data)
   rememberPose(data)
-  return data?.observations?.[0]?.action || null
 }
 
 async function lookAtMe(query = '') {
@@ -503,79 +473,49 @@ async function deleteIdentity(identityId: string) {
   return data
 }
 
+/**
+ * The companion loop, stripped to what only the browser can do.
+ *
+ * It used to run its own frame-difference motion detection, its own thresholds,
+ * and a second confirmation pass over the backend's action labels. All of that
+ * duplicated work the backend now does properly with ONNX and temporal
+ * accumulation, and layering invented thresholds on top of real inference was
+ * the main source of the readings feeling wrong.
+ *
+ * What remains is genuinely browser-side: this process holds the camera device,
+ * so it is the only thing that can *hand Miya frames*. Everything about what
+ * those frames mean is hers to decide.
+ */
 async function companionTick() {
   if (mode.value !== 'companion' || !stream.value) return
   if (analysisInFlight) {
-    scheduleCompanionTick(ACTIVE_SAMPLE_MS)
+    scheduleCompanionTick(SNAPSHOT_INTERVAL_MS)
     return
   }
+  const now = Date.now()
   try {
-    const signature = getSignature()
-    if (!signature) return
-    const now = Date.now()
-    const sample = updateMotionState(measureMotion(signature, now))
-    motionScore.value = Number(sample.score.toFixed(2))
-    localEventCode.value = sample.code
     localStorage.setItem('miya-camera-heartbeat', String(now))
-    if (localEventCode.value === 'stable') {
-      const pendingAction = Boolean(actionCandidate && now - actionCandidate.at <= ACTION_CONFIRM_WINDOW_MS)
-      if (!pendingAction) actionCandidate = null
-      if (!stableSince) stableSince = now
-      if (now - stableSince >= LONG_STILL_MS) {
-        localEventCode.value = 'long_still'
-        localEvent.value = '本地观察中 · 长时间静止'
-        await publishLocalEvent('long_still', '画面长时间稳定，可能一直保持静止', 0.78)
-      } else {
-        localEvent.value = '本地观察中 · 画面稳定'
+    // Hand over a frame on a steady cadence. Miya's own observation loop decides
+    // what to do with it; this side only supplies the pixels.
+    if (now - lastFrameSharedAt >= FRAME_SHARE_INTERVAL_MS) {
+      lastFrameSharedAt = now
+      const frame = captureFrame()
+      if (frame) {
+        analysisInFlight = true
+        try {
+          await publishLocalEvent('companion_frame', '预览正在把画面交给弥娅', 0.5,
+            { repeatable: true, imageData: frame })
+          status.value = '预览运行中 · 正在把画面交给弥娅'
+        } finally {
+          analysisInFlight = false
+        }
       }
-      if (!pendingAction) return
-    } else {
-      stableSince = 0
     }
-    const eventText = {
-      light_motion: '检测到轻微移动 · 仅本地判断',
-      clear_motion: '检测到明显动作 · 仅本地判断',
-      scene_change: '检测到画面突变 · 仅本地判断',
-      stable: '本地观察中 · 画面稳定',
-      long_still: '本地观察中 · 长时间静止',
-    }[localEventCode.value]
-    localEvent.value = `${eventText} · ${motionScore.value}`
-    if (localEventCode.value === 'scene_change') {
-      await publishLocalEvent('scene_change', '摄像头画面发生明显变化', 0.82)
-    }
-    const confirmingAction = Boolean(actionCandidate && now - actionCandidate.at <= ACTION_CONFIRM_WINDOW_MS)
-    if (!confirmingAction && localEventCode.value !== 'clear_motion' && localEventCode.value !== 'scene_change') return
-    if (!actionRecognitionEnabled.value || !localPoseAvailable()) {
-      localEvent.value = '本地检测到画面变化 · 姿态模型未就绪'
-      return
-    }
-    if (now - lastPoseAnalysis < POSE_SAMPLE_MS) return
-
-    lastPoseAnalysis = now
-    analysisInFlight = true
-    try {
-      const action = await analyzeLocalAction()
-      if (!action?.label) {
-        actionCandidate = null
-        localEvent.value = '本地动作识别中'
-      } else if (action.kind === 'sitting' || action.kind === 'standing' || action.kind === 'still') {
-        actionCandidate = null
-        localEvent.value = `本地姿态 · ${action.label}`
-      } else if (confirmAction(action, now)) {
-        const confidence = Number(action.confidence || 0)
-        localEvent.value = `本地动作 · ${action.label} · ${confidence.toFixed(2)}`
-        await publishLocalEvent(action.kind || 'motion', action.label, confidence)
-      } else {
-        localEvent.value = `本地动作待确认 · ${action.label}`
-      }
-    } catch (err: any) {
-      actionCandidate = null
-      localEvent.value = err?.message || '本地动作识别暂不可用'
-    } finally {
-      analysisInFlight = false
-    }
+    // Face geometry is the one measurement the backend cannot take on its own
+    // while this preview owns the camera, so measure it from here.
+    await measureFaceFromPreview()
   } catch (err: any) {
-    localEvent.value = err?.message || '本地摄像头采样失败'
+    localEvent.value = err?.message || '摄像头采样失败'
   } finally {
     if (mode.value === 'companion' && stream.value && !timer) {
       scheduleCompanionTick()
@@ -752,7 +692,23 @@ async function syncObservationRequest() {
 function startRemoteCommandPolling() {
   if (remotePollTimer) return
   void syncRemoteCommand()
-  remotePollTimer = setInterval(() => { void syncRemoteCommand(); void syncObservationRequest() }, 2500)
+  remotePollTimer = setInterval(() => {
+    void syncRemoteCommand()
+    void syncObservationRequest()
+    // Presence and activity are derived from camera ticks that already ran;
+    // reading them here keeps the UI and the conversation layer on one state.
+    void refreshPresence()
+    void refreshActivity()
+    void refreshAgentState()
+    void refreshAgentVoice()
+    void refreshVisionStream()
+    void refreshCameraHealth()
+    void refreshVisionSources()
+    void refreshVisionBridge()
+    // Sleeping cameras (a phone with its screen off) are re-probed on the
+    // backend's own schedule, so this is cheap most of the time.
+    void refreshCameraSources()
+  }, 2500)
 }
 
 function stopRemoteCommandPolling() {
@@ -768,6 +724,198 @@ function selectDevice(deviceId: string) {
     stop()
     if (wasCompanion) void startCompanion()
   }
+}
+
+async function refreshBackendDevices() {
+  return refreshCameraSources()
+}
+
+async function refreshPresence() {
+  try {
+    const response = await API.getVisionPresence()
+    presence.value = response?.presence || null
+  } catch {
+    // Presence is an optional sense; a failure must not disturb the preview.
+  }
+  return presence.value
+}
+
+async function refreshActivity() {
+  try {
+    const response = await API.getVisionActivity()
+    activity.value = response?.activity || null
+  } catch {
+    // Activity is derived; a failure must not disturb the preview.
+  }
+  return activity.value
+}
+
+async function refreshCameraSources() {
+  try {
+    const response = await API.getCameraSources()
+    backendDevices.value = Array.isArray(response?.devices) ? response.devices : []
+    cameraSourcesMessage.value = response?.message || ''
+    const usable: number[] = Array.isArray(response?.usable_indices) ? response.usable_indices : []
+    const sleeping: number[] = Array.isArray(response?.sleeping_indices) ? response.sleeping_indices : []
+    const current = Number(backendDeviceIndex.value)
+    // Keep tracking the browser's device; if it vanished, or the index we were
+    // reporting is now a sleeping one, fall back to a camera that works.
+    if (!usable.includes(current) && usable.length) {
+      setBackendDeviceIndex(usable[0]!)
+    } else if (!usable.length && sleeping.length && !sleeping.includes(current)) {
+      setBackendDeviceIndex(sleeping[0]!)
+    }
+  } catch (err: any) {
+    cameraSourcesMessage.value = err?.message || '无法读取本机摄像头状态'
+  }
+  return backendDevices.value
+}
+
+function setBackendDeviceIndex(index: number) {
+  backendDeviceIndex.value = Number(index)
+  localStorage.setItem('miya-camera-backend-index', String(backendDeviceIndex.value))
+}
+
+async function refreshAgentState() {
+  try {
+    const response = await API.getVisionAgent()
+    agentState.value = response?.agent || null
+    agentAgency.value = response?.agency || null
+  } catch {
+    // Autonomous watching is optional; never disturb the preview over it.
+  }
+  return agentState.value
+}
+
+async function refreshAgentVoice() {
+  try {
+    const response = await API.getVisionVoice()
+    agentVoiceQueue.value = Array.isArray(response?.pending) ? response.pending : []
+    agentVoice.value = response?.next || null
+  } catch {
+    // Reading her queue is best effort.
+  }
+  return agentVoice.value
+}
+
+/**
+ * Take the next thing she wanted to say.
+ *
+ * Taking removes it from her queue, so it must only be called once the message
+ * has actually been shown - not while merely polling.
+ */
+async function takeAgentVoice(): Promise<Record<string, any> | null> {
+  try {
+    const response = await API.takeVisionVoice('take')
+    const message = response?.message || null
+    await refreshAgentVoice()
+    return message
+  } catch {
+    return null
+  }
+}
+
+async function clearAgentVoice(): Promise<number> {
+  try {
+    const response = await API.takeVisionVoice('clear')
+    await refreshAgentVoice()
+    return Number(response?.cleared || 0)
+  } catch {
+    return 0
+  }
+}
+
+async function refreshVisionStream() {
+  try {
+    const response = await API.getVisionStream()
+    // Newest first: the panel reads top-down as "most recent".
+    visionEvents.value = Array.isArray(response?.events) ? [...response.events].reverse() : []
+    visionStreamStatus.value = response?.status || {}
+    visionCadence.value = response?.cadence || {}
+    thumbnailsEnabled.value = Boolean(response?.status?.thumbnails_enabled)
+  } catch {
+    // The stream is a view onto her work; never disturb the preview over it.
+  }
+  return visionEvents.value
+}
+
+/** Fetch one round including its thumbnails; call only when it is expanded. */
+async function loadVisionEvent(eventId: string): Promise<Record<string, any> | null> {
+  try {
+    const response = await API.getVisionEvent(eventId)
+    return response?.event || null
+  } catch {
+    return null
+  }
+}
+
+async function setThumbnailStorage(enabled: boolean) {
+  try {
+    const response = await API.setVisionThumbnails(enabled)
+    visionStreamStatus.value = response?.status || visionStreamStatus.value
+    thumbnailsEnabled.value = Boolean(response?.status?.thumbnails_enabled)
+    await refreshVisionStream()
+  } catch (err: any) {
+    error.value = err?.message || '无法切换缩略图存储'
+  }
+  return thumbnailsEnabled.value
+}
+
+/** Camera device health: how many can actually produce a picture right now. */
+async function refreshCameraHealth() {
+  try {
+    const payload = await API.getCameraDevices()
+    cameraHealth.value = {
+      devices: payload?.devices || [],
+      usableCount: Number((payload as any)?.usable_count ?? 0),
+      count: Number((payload as any)?.count ?? 0),
+      defaultIndex: (payload as any)?.default_index ?? null,
+      message: payload?.message || '',
+    }
+  } catch {
+    // Health is informational; never break the page over it.
+  }
+  return cameraHealth.value
+}
+
+/** Which side owns which camera, and whether a frame is currently held. */
+async function refreshVisionSources() {
+  try {
+    const payload = await API.getVisionSources()
+    if (payload?.success) {
+      visionSources.value = {
+        sources: payload.sources || {},
+        browser_owned: payload.browser_owned || [],
+        backend_owned: payload.backend_owned || [],
+        readers_running: payload.readers_running || [],
+      }
+    }
+  } catch {
+    // Same: informational only.
+  }
+  return visionSources.value
+}
+
+/** Whether her seeing can actually turn into her speaking. */
+async function refreshVisionBridge() {
+  try {
+    const payload = await API.getVisionBridge()
+    visionBridge.value = payload?.bridge || null
+  } catch {
+    // Informational only.
+  }
+  return visionBridge.value
+}
+
+async function setWatching(action: 'start' | 'stop') {
+  try {
+    const response = await API.setVisionAgent(action)
+    agentState.value = response?.agent || null
+    await refreshAgentState()
+  } catch (err: any) {
+    error.value = err?.message || '无法切换弥娅的自主观察'
+  }
+  return agentState.value
 }
 
 function setFaceRecognition(value: boolean) {
@@ -792,12 +940,17 @@ function setLocalOnly(value: boolean) {
 
 export function useCameraVision() {
   return {
-    mode, status, error, devices, selectedDeviceId, stream, lastObservation, localEvent, localEventCode, motionScore,
-    faceRecognitionEnabled, emotionInferenceEnabled, actionRecognitionEnabled, localAction, localActionConfidence,
+    mode, status, error, devices, selectedDeviceId, stream, lastObservation, localEvent,
+    faceRecognitionEnabled, emotionInferenceEnabled, actionRecognitionEnabled,
     alwaysOn,
-    localOnly, localCapabilities,
+    localOnly, localCapabilities, backendDevices, cameraSourcesMessage, presence, activity, backendDeviceIndex,
+    agentState, agentAgency, agentVoice, agentVoiceQueue,
+    visionEvents, visionStreamStatus, visionCadence, thumbnailsEnabled, cameraHealth, visionSources, visionBridge,
     listDevices, refreshCapabilities, attachPreview, open, stop, lookAtMe, lookBoth, startCompanion, selectDevice,
     setFaceRecognition, setEmotionInference, setActionRecognition, setLocalOnly, setAlwaysOn, enableAlwaysOn, enrollIdentity, listIdentities, deleteIdentity,
     syncRemoteCommand, startRemoteCommandPolling, stopRemoteCommandPolling, startAlwaysOnCompanion,
+    refreshBackendDevices, refreshPresence, refreshActivity, refreshCameraSources, setBackendDeviceIndex,
+    refreshAgentState, setWatching, refreshAgentVoice, takeAgentVoice, clearAgentVoice,
+    refreshVisionStream, loadVisionEvent, setThumbnailStorage, refreshCameraHealth, refreshVisionSources, refreshVisionBridge,
   }
 }

@@ -448,6 +448,43 @@ function computeEmotionParams(dt: number): Record<string, { value: number, blend
   return result
 }
 
+// ─── 表情几何通道（来自真实人脸测量） ─────────────────
+
+// Named distinctly from `expressionCurrent`, which belongs to the emotion
+// channel: the two are separate additive channels and must not share state.
+const facialCurrent: Record<string, number> = {}
+
+/**
+ * Apply rig parameters measured from Jia's face.
+ *
+ * `null` (no measurable face this tick) blends the offsets back to zero, so the
+ * rig returns to its own idle behaviour instead of freezing on a stale face.
+ */
+export function updateFacialTracking(params: Record<string, number> | null, dt: number) {
+  // An explicit setExpression() call is a deliberate override (a scripted pose,
+  // a manual expression); automatic geometry must not fight it.
+  if (expressionActive) {
+    for (const param of Object.keys(facialCurrent)) facialCurrent[param] = 0
+    return
+  }
+  const targets: Record<string, number> = params ? { ...params } : {}
+
+  // Reset anything driven last frame that is not targeted now.
+  for (const param of Object.keys(facialCurrent)) {
+    if (!(param in targets)) targets[param] = 0
+  }
+
+  const halfLife = params ? 12 : 30
+  const factor = smoothFactor(halfLife, dt)
+  for (const [param, target] of Object.entries(targets)) {
+    facialCurrent[param] = lerp(facialCurrent[param] ?? 0, target, factor)
+  }
+}
+
+function computeFacialTracking(): Record<string, number> {
+  return { ...facialCurrent }
+}
+
 // ─── 视觉追踪计算 ────────────────────────────────────
 
 const TRACK_PARAMS: Record<string, (x: number, y: number) => number> = {
@@ -531,6 +568,12 @@ function tick(now: number) {
       const base = merged[param] ?? 0
       merged[param] = lerp(base, trackValue, trackBlend)
     }
+  }
+
+  // 真实表情几何叠加（加性，不覆盖情绪与口型）
+  for (const [param, value] of Object.entries(computeFacialTracking())) {
+    if (Math.abs(value) < 0.0005) continue
+    merged[param] = (merged[param] ?? 0) + value
   }
 
   for (const [param, value] of Object.entries(merged)) {

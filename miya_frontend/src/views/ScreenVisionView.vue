@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import API from '@/api/core'
+import VisionBackendPanel from '@/components/VisionBackendPanel.vue'
 import { MESSAGES } from '@/utils/session'
 import { useCameraVision } from '@/utils/cameraVision'
 
@@ -22,6 +23,90 @@ const identityBusy = ref(false)
 
 const camera = useCameraVision()
 const companionActive = computed(() => camera.mode.value === 'companion')
+const devices = ref<Array<Record<string, any>>>([])
+const devicesBusy = ref(false)
+// Named distinctly from the module-level `presence` ref in cameraVision.
+const presenceState = ref<Record<string, any> | null>(null)
+const activityState = ref<Record<string, any> | null>(null)
+const sourcesMessage = ref('')
+const agentState = ref<Record<string, any> | null>(null)
+const agentAgency = ref<Record<string, any> | null>(null)
+const agentVoice = ref<Record<string, any> | null>(null)
+const agentVoiceQueue = ref<Array<Record<string, any>>>([])
+const agentBusy = ref(false)
+let presenceTimer: ReturnType<typeof setInterval> | null = null
+
+const watching = computed(() => agentState.value?.running === true)
+const herIntents = computed<Array<Record<string, any>>>(() => agentAgency.value?.intents || [])
+const activeIntentCount = computed(() => herIntents.value.filter(item => item.active).length)
+const herWantedToSay = computed(() => String(agentVoice.value?.message || ''))
+
+async function takeHerMessage() {
+  const message = await camera.takeAgentVoice()
+  if (message?.message) {
+    // Show it in the conversation so it is not merely acknowledged here.
+    pushToConversation(String(message.message), '', '弥娅看到了')
+  }
+  agentVoice.value = camera.agentVoice.value
+  agentVoiceQueue.value = camera.agentVoiceQueue.value
+}
+
+async function dismissHerMessages() {
+  await camera.clearAgentVoice()
+  agentVoice.value = camera.agentVoice.value
+  agentVoiceQueue.value = camera.agentVoiceQueue.value
+}
+
+async function toggleWatching() {
+  if (agentBusy.value) return
+  agentBusy.value = true
+  try {
+    const next = await camera.setWatching(watching.value ? 'stop' : 'start')
+    agentState.value = next
+    agentAgency.value = camera.agentAgency.value
+  } finally {
+    agentBusy.value = false
+  }
+}
+
+async function refreshAgent() {
+  agentState.value = await camera.refreshAgentState()
+  agentAgency.value = camera.agentAgency.value
+}
+
+const presenceText = computed(() => {
+  const value = presenceState.value
+  if (!value || !value.state || value.state === 'unknown') return ''
+  const atComputer = value.at_computer ? '在电脑前' : value.in_room ? '在房间里' : ''
+  return atComputer ? `${value.label}·${atComputer}` : String(value.label || '')
+})
+
+const activityText = computed(() => String(activityState.value?.phrase || ''))
+
+const usableCount = computed(() => devices.value.filter(device => device.usable !== false).length)
+const sleepingCount = computed(() => devices.value.filter(device => device.usable === false).length)
+
+async function refreshDevices() {
+  if (devicesBusy.value) return
+  devicesBusy.value = true
+  try {
+    devices.value = await camera.refreshCameraSources()
+    sourcesMessage.value = camera.cameraSourcesMessage.value
+  } finally {
+    devicesBusy.value = false
+  }
+}
+
+async function pollPresence() {
+  presenceState.value = await camera.refreshPresence()
+  activityState.value = await camera.refreshActivity()
+  agentState.value = await camera.refreshAgentState()
+  agentAgency.value = camera.agentAgency.value
+  // Read-only poll: taking her words must be an explicit action, otherwise the
+  // queue would drain itself while nobody is looking at the screen.
+  agentVoice.value = await camera.refreshAgentVoice()
+  agentVoiceQueue.value = camera.agentVoiceQueue.value
+}
 
 function pushToConversation(text: string, prompt: string, sender = '弥娅视觉') {
   MESSAGES.value.push({
@@ -233,9 +318,16 @@ onMounted(() => {
   camera.attachPreview(previewVideo.value)
   void camera.listDevices()
   void camera.refreshCapabilities()
+  void refreshDevices()
+  void pollPresence()
+  presenceTimer = setInterval(() => { void pollPresence() }, 5000)
   void camera.listIdentities().then((items) => { identities.value = items }).catch(() => {})
 })
-onBeforeUnmount(() => { camera.attachPreview(null) })
+onBeforeUnmount(() => {
+  camera.attachPreview(null)
+  if (presenceTimer) clearInterval(presenceTimer)
+  presenceTimer = null
+})
 </script>
 
 <template>
@@ -251,6 +343,9 @@ onBeforeUnmount(() => { camera.attachPreview(null) })
       <div class="vision-live-state" :class="{ active: companionActive }">
         <span class="vision-state-dot" />
         {{ companionActive ? '陪伴视觉运行中' : '摄像头关闭' }}
+      </div>
+      <div v-if="presenceText" class="vision-presence" :class="{ desk: presenceState?.at_computer }" :title="(presenceState?.reasons || []).join('；')">
+        {{ presenceText }}
       </div>
     </header>
 
@@ -341,7 +436,47 @@ onBeforeUnmount(() => { camera.attachPreview(null) })
           <button class="vision-btn companion-btn" :class="{ stop: companionActive }" :disabled="loading" @click="toggleCompanion">{{ companionActive ? '关闭陪伴视觉' : '开启陪伴视觉' }}</button>
         </div>
 
-        <div class="camera-event" :class="{ active: companionActive, motion: camera.localEventCode.value !== 'stable' }"><span class="event-dot" />{{ camera.localEvent.value || '本地视觉待机' }}</div>
+        <div class="camera-event" :class="{ active: companionActive }">
+          <span class="event-dot" />
+          {{ camera.localEvent.value || '预览待机 · 画面由弥娅自己判断' }}
+        </div>
+
+        <div class="agency-panel" :class="{ watching }">
+          <div class="agency-head">
+            <span class="agency-dot" />
+            <span class="agency-title">{{ watching ? '弥娅自己在看着你' : '弥娅的自主观察已停止' }}</span>
+            <small v-if="watching" class="agency-meta">每 {{ Math.round(agentState?.interval_seconds || 30) }} 秒 · 已看 {{ agentState?.ticks || 0 }} 次</small>
+            <button class="agency-toggle" :disabled="agentBusy" @click="toggleWatching">{{ watching ? '让她停下' : '让她看' }}</button>
+          </div>
+          <div v-if="herIntents.length" class="agency-intents">
+            <span class="agency-label">她在留意</span>
+            <ul>
+              <li v-for="intent in herIntents" :key="intent.id" :class="{ off: !intent.active }">
+                {{ intent.text }}<em v-if="!intent.speak">（只看不说）</em>
+              </li>
+            </ul>
+          </div>
+          <small v-else class="agency-empty">她还没有给自己定下想留意的事。</small>
+          <div v-if="herWantedToSay" class="agency-voice">
+            <span class="agency-label">她想对你说</span>
+            <p>{{ herWantedToSay }}</p>
+            <div class="agency-voice-actions">
+              <button class="agency-toggle" @click="takeHerMessage">说出来</button>
+              <button class="agency-toggle ghost" v-if="agentVoiceQueue.length > 1" @click="dismissHerMessages">
+                丢掉剩下 {{ agentVoiceQueue.length - 1 }} 句
+              </button>
+            </div>
+          </div>
+          <small v-if="agentState?.last_error" class="agency-warn">{{ agentState.last_error }}</small>
+        </div>
+
+        <VisionBackendPanel />
+        <div v-if="activityText || presenceText" class="vision-activity">
+          <span class="activity-label">弥娅注意到</span>
+          <span class="activity-text">{{ activityText || presenceText }}</span>
+          <small v-if="activityState?.duration >= 60" class="activity-duration">已持续约 {{ Math.floor(activityState.duration / 60) }} 分钟</small>
+          <small v-if="activityState?.recent?.length" class="activity-recent">最近的迹象：{{ activityState.recent.slice(0, 4).join(' → ') }}</small>
+        </div>
         <div v-if="camera.lastObservation.value || camera.error.value" class="vision-result" :class="camera.error.value ? 'error' : 'success'">
           <div class="result-label">{{ camera.error.value ? '✗ 摄像头状态' : '✓ 弥娅看到的' }}</div>
           <div class="result-content">{{ camera.error.value || camera.lastObservation.value }}</div>
@@ -374,6 +509,27 @@ onBeforeUnmount(() => { camera.attachPreview(null) })
           <small v-if="camera.localCapabilities.value.cameraMode" class="camera-route">看我：{{ camera.localCapabilities.value.cameraMode === 'local' ? '本地模型' : '云端视觉' }}</small>
           <button class="capability-refresh" title="重新检查本地模型" @click="camera.refreshCapabilities">↻</button>
         </div>
+
+        <div class="device-panel">
+          <div class="identity-heading">
+            <span>本机摄像头</span>
+            <small>{{ usableCount }} 个在用 · {{ sleepingCount }} 个暂无画面</small>
+            <button class="capability-refresh" title="重新探测本机摄像头" :disabled="devicesBusy" @click="refreshDevices">↻</button>
+          </div>
+          <div v-if="sourcesMessage" class="sources-message">{{ sourcesMessage }}</div>
+          <div v-if="devices.length" class="device-list">
+            <div v-for="device in devices" :key="device.index" class="device-row" :class="{ unusable: device.usable === false }">
+              <span class="device-index">#{{ device.index }}</span>
+              <span class="device-detail">
+                <template v-if="device.usable === false">{{ device.reason || '暂时没有画面' }}</template>
+                <template v-else>{{ device.width }}×{{ device.height }} · 亮度 {{ device.luminance }} · {{ device.backend }}</template>
+              </span>
+              <span class="device-tag">{{ device.usable === false ? '息屏/无画面' : '在用' }}</span>
+            </div>
+          </div>
+          <small v-else class="identity-empty">{{ devicesBusy ? '正在探测…' : '没有探测到摄像头。' }}</small>
+          <small class="privacy-note">弥娅会自动使用所有能出画面的摄像头，并持续重试暂时黑屏的那些（手机息屏后亮屏会自动接上）。</small>
+        </div>
         <p class="privacy-note">持续陪伴只在本机采样和识别动作，不上传或保存摄像头画面。单次屏幕与摄像头分析遵循 config/qq_config.yaml 中的 local、cloud 或 hybrid 路线。</p>
       </section>
     </main>
@@ -391,6 +547,41 @@ onBeforeUnmount(() => { camera.attachPreview(null) })
 .vision-sub { color: rgba(0,173,181,.42); font-size: .48rem; }
 .vision-live-state { display: flex; align-items: center; gap: .35rem; margin-left: auto; color: rgba(220,230,235,.36); font-size: .52rem; white-space: nowrap; }
 .vision-live-state.active { color: #ff807d; }
+.vision-presence { padding: .22rem .45rem; border: 1px solid rgba(0,173,181,.16); border-radius: 3px; color: rgba(0,255,245,.6); font: .5rem 'JetBrains Mono', monospace; letter-spacing: .06em; white-space: nowrap; }
+.vision-presence.desk { color: #8ef5c8; border-color: rgba(110,240,180,.32); background: rgba(60,200,150,.08); }
+.device-panel { margin-top: .7rem; padding: .6rem; border: 1px solid rgba(0,173,181,.1); border-radius: 4px; background: rgba(0,0,0,.28); }
+.device-list { display: flex; flex-direction: column; gap: .3rem; margin: .45rem 0; }
+.device-row { display: flex; align-items: center; gap: .5rem; padding: .3rem .45rem; border-radius: 3px; background: rgba(0,173,181,.05); font-size: .62rem; }
+.device-row.unusable { background: rgba(255,112,110,.07); color: rgba(255,175,170,.78); }
+.device-index { font: .58rem 'JetBrains Mono', monospace; color: rgba(0,255,245,.62); }
+.device-detail { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.device-tag { font: .5rem 'JetBrains Mono', monospace; opacity: .6; }
+.sources-message { margin: .35rem 0 .1rem; color: rgba(220,230,235,.5); font-size: .6rem; }
+.vision-activity { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem; margin-top: .5rem; padding: .5rem .6rem; border: 1px solid rgba(0,255,245,.14); border-radius: 4px; background: rgba(0,173,181,.06); }
+.activity-label { color: rgba(0,255,245,.5); font: .5rem 'JetBrains Mono', monospace; letter-spacing: .08em; }
+.activity-text { color: #eaffff; font-size: .72rem; }
+.activity-duration { color: rgba(255,220,150,.7); font-size: .58rem; }
+.activity-recent { flex-basis: 100%; color: rgba(200,215,220,.4); font-size: .55rem; }
+.agency-panel { margin-top: .55rem; padding: .6rem; border: 1px solid rgba(0,173,181,.12); border-radius: 4px; background: rgba(0,0,0,.3); }
+.agency-panel.watching { border-color: rgba(255,112,110,.28); background: rgba(255,112,110,.05); }
+.agency-head { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; }
+.agency-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(180,190,195,.35); }
+.agency-panel.watching .agency-dot { background: #ff706e; box-shadow: 0 0 10px rgba(255,92,92,.75); }
+.agency-title { color: #eaffff; font-size: .72rem; }
+.agency-meta { color: rgba(200,215,220,.45); font: .55rem 'JetBrains Mono', monospace; }
+.agency-toggle { margin-left: auto; min-height: 26px; padding: .3rem .6rem; border: 1px solid rgba(0,173,181,.2); border-radius: 3px; background: rgba(0,173,181,.08); color: rgba(0,255,245,.75); font-size: .62rem; cursor: pointer; }
+.agency-toggle:disabled { opacity: .4; cursor: not-allowed; }
+.agency-intents { margin-top: .5rem; }
+.agency-label { color: rgba(0,255,245,.48); font: .5rem 'JetBrains Mono', monospace; letter-spacing: .08em; }
+.agency-intents ul { margin: .3rem 0 0; padding-left: 1.1rem; color: rgba(225,235,238,.8); font-size: .62rem; line-height: 1.6; }
+.agency-intents li.off { opacity: .35; text-decoration: line-through; }
+.agency-intents em { color: rgba(200,215,220,.45); font-style: normal; }
+.agency-empty { display: block; margin-top: .4rem; color: rgba(200,210,215,.3); font-size: .58rem; }
+.agency-warn { display: block; margin-top: .4rem; color: rgba(255,175,170,.75); font-size: .58rem; }
+.agency-voice { margin-top: .55rem; padding: .55rem .6rem; border: 1px solid rgba(255,180,120,.22); border-radius: 4px; background: rgba(255,180,120,.06); }
+.agency-voice p { margin: .3rem 0 0; color: #fff3e6; font-size: .74rem; line-height: 1.6; }
+.agency-voice-actions { display: flex; gap: .4rem; margin-top: .45rem; }
+.agency-toggle.ghost { color: rgba(220,230,235,.5); border-color: rgba(0,173,181,.14); background: transparent; }
 .vision-state-dot, .event-dot { width: 6px; height: 6px; display: inline-block; border-radius: 50%; background: rgba(180,190,195,.35); }
 .vision-live-state.active .vision-state-dot, .vision-state-dot.active, .camera-event.active .event-dot { background: #ff706e; box-shadow: 0 0 10px rgba(255,92,92,.7); }
 .vision-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; max-width: 680px; width: 100%; margin: 0 auto; }
