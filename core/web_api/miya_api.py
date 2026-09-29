@@ -104,6 +104,287 @@ class MiyaAPI:
             store = get_vision_context()
             return {"success": True, "stats": store.stats(), "events": store.recent(limit=24)}
 
+        @self.router.get("/api/vision/presence")
+        async def vision_presence_state():
+            """Whether Jia is at the computer, from derived signals only.
+
+            Deliberately a *read*: this endpoint is polled every few seconds by
+            the desktop panel, and calling ``evaluate()`` here advanced the
+            presence state machine - so the panel's own polling is what consumed
+            each transition, and the slower consumers that actually speak about
+            an arrival (Miya's bridge and her proactive poll) never saw one.
+            """
+            try:
+                from mcpserver.screen_vision.presence import get_presence_tracker
+
+                snapshot = get_presence_tracker().snapshot()
+                return {"success": True, "presence": snapshot.to_dict()}
+            except Exception as exc:  # noqa: BLE001 - the endpoint must not 500 on an optional sense
+                logger.debug("[MiyaAPI] 读取在场状态失败: %s", exc)
+                return {"success": False, "presence": None, "message": str(exc)}
+
+        @self.router.get("/api/vision/activity")
+        async def vision_activity_state():
+            """What Jia has been doing lately, in plain language."""
+            try:
+                from mcpserver.screen_vision.activity import get_activity_tracker
+
+                snapshot = get_activity_tracker().snapshot()
+                return {"success": True, "activity": snapshot.to_dict(), "message": snapshot.describe()}
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[MiyaAPI] 读取活动状态失败: %s", exc)
+                return {"success": False, "activity": None, "message": str(exc)}
+
+        @self.router.get("/api/vision/agent")
+        async def vision_agent_state():
+            """Whether Miya is watching on her own, and what she is watching for."""
+            try:
+                from mcpserver.screen_vision.vision_agent import get_vision_agency, get_vision_agent
+
+                return {
+                    "success": True,
+                    "agent": get_vision_agent().state(),
+                    "agency": get_vision_agency().describe(),
+                }
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[MiyaAPI] 读取自主视觉状态失败: %s", exc)
+                return {"success": False, "agent": None, "message": str(exc)}
+
+        @self.router.get("/api/vision/voice")
+        async def vision_voice():
+            """What Miya has been wanting to say while watching.
+
+            Without this the desktop had no way to hear her: she watches all
+            evening and the queue only drains into a chat platform, which is
+            silent whenever no conversation is active.
+            """
+            try:
+                from mcpserver.screen_vision.vision_agent import get_vision_agent
+
+                agent = get_vision_agent()
+                pending = agent.peek_messages()
+                return {
+                    "success": True,
+                    "next": pending[0] if pending else None,
+                    "pending": pending,
+                    "count": len(pending),
+                    "agent": agent.state(),
+                }
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[MiyaAPI] 读取待说消息失败: %s", exc)
+                return {"success": False, "next": None, "pending": [], "message": str(exc)}
+
+        @self.router.post("/api/vision/voice")
+        async def vision_voice_take(body: dict | None = None):
+            """Take (and remove) the next thing Miya wanted to say."""
+            body = body or {}
+            try:
+                from mcpserver.screen_vision.vision_agent import get_vision_agent
+
+                agent = get_vision_agent()
+                if str(body.get("action") or "take").lower() == "clear":
+                    cleared = len(agent.peek_messages())
+                    agent.clear_messages()
+                    return {"success": True, "cleared": cleared}
+                message = agent.take_message()
+                return {"success": True, "message": message, "count": len(agent.peek_messages())}
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[MiyaAPI] 取走待说消息失败: %s", exc)
+                return {"success": False, "message": None, "error": str(exc)}
+
+        @self.router.get("/api/vision/stream")
+        async def vision_stream_state():
+            """Miya's observation rounds: what she saw, how she read it, what she did.
+
+            This is the camera backend made visible - the panel reads it to show
+            her working instead of only her conclusions.
+            """
+            try:
+                from mcpserver.screen_vision.vision_agent import get_vision_agent
+                from mcpserver.screen_vision.vision_stream import get_vision_stream
+
+                stream = get_vision_stream()
+                return {
+                    "success": True,
+                    "status": stream.status(),
+                    "events": stream.recent(limit=40, include_thumbnails=False),
+                    "cadence": get_vision_agent().cadence(),
+                }
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[MiyaAPI] 读取观察过程失败: %s", exc)
+                return {"success": False, "events": [], "message": str(exc)}
+
+        @self.router.get("/api/vision/stream/{event_id}")
+        async def vision_stream_event(event_id: str):
+            """One round in full, including its thumbnails when they are enabled."""
+            try:
+                from mcpserver.screen_vision.vision_stream import get_vision_stream
+
+                event = get_vision_stream().get(event_id)
+                if event is None:
+                    raise HTTPException(status_code=404, detail="没有这条观察记录")
+                return {"success": True, "event": event}
+            except HTTPException:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[MiyaAPI] 读取单条观察失败: %s", exc)
+                return {"success": False, "event": None, "message": str(exc)}
+
+        @self.router.post("/api/vision/thumbnails")
+        async def vision_thumbnails_toggle(body: dict | None = None):
+            """Turn thumbnail storage on or off.
+
+            Off by default, and turning it off also forgets whatever was stored,
+            so this switch means what it says.
+            """
+            body = body or {}
+            try:
+                from mcpserver.screen_vision.vision_stream import get_vision_stream
+
+                enabled = bool(body.get("enabled"))
+                status = get_vision_stream().set_thumbnails_enabled(enabled)
+                logger.info("[MiyaAPI] 摄像头缩略图存储: %s", "开启" if enabled else "关闭")
+                return {"success": True, "status": status}
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[MiyaAPI] 缩略图开关失败: %s", exc)
+                return {"success": False, "status": None, "message": str(exc)}
+
+        @self.router.get("/api/vision/sources")
+        async def vision_sources():
+            """Which side owns which camera, and whether a frame is being held."""
+            try:
+                from mcpserver.screen_vision.camera_stream import get_camera_pool
+
+                return {"success": True, **get_camera_pool().describe()}
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[MiyaAPI] 读取取帧来源失败: %s", exc)
+                return {"success": False, "sources": {}, "message": str(exc)}
+
+        @self.router.get("/api/vision/bridge")
+        async def vision_bridge():
+            """Whether what she sees can actually reach her voice.
+
+            Added because the failure mode here is invisible: the observation loop
+            and the trackers all look healthy while nothing is ever submitted.
+            """
+            try:
+                from mcpserver.screen_vision.proactive import get_camera_bridge
+
+                bridge = get_camera_bridge()
+                stats = bridge.stats()
+                stats["owner_target_id"] = ""
+                try:
+                    from mcpserver.screen_vision.proactive import _owner_target_id
+
+                    stats["owner_target_id"] = _owner_target_id()
+                except Exception:
+                    pass
+                stats["bridge_interval_seconds"] = 20.0
+                return {"success": True, "bridge": stats}
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[MiyaAPI] 读取摄像头桥接状态失败: %s", exc)
+                return {"success": False, "bridge": None, "message": str(exc)}
+
+        @self.router.get("/api/vision/preview/{index}")
+        async def vision_preview(index: int, max_age: float = 5.0):
+            """Serve the newest frame of one camera as a plain JPEG.
+
+            This is how the panel shows the angles the browser is not holding: the
+            backend already holds those devices, so it hands out a frame instead of
+            the page opening a second camera the OS would refuse.
+            """
+            import asyncio as _asyncio
+            import base64 as _base64
+            import time as _time
+
+            from fastapi.responses import Response
+
+            try:
+                from mcpserver.screen_vision.camera_stream import get_camera_pool
+
+                pool = get_camera_pool()
+                buffer = pool.latest(index, max_age=max_age)
+                if buffer is None:
+                    # Ask for a persistent reader and wait for *it*. Opening the
+                    # device here instead - which this used to do - is the very
+                    # thing this endpoint's own docstring warns about: the reader
+                    # then reads black, one of the two gets "Unknown C++ exception",
+                    # and they take turns releasing the device forever. The panel
+                    # polls every three seconds, so the whole app repeated that.
+                    pool.start_reader(index)
+                    deadline = _time.monotonic() + max(1.0, min(float(max_age) + 3.0, 8.0))
+                    while buffer is None and _time.monotonic() < deadline:
+                        await _asyncio.sleep(0.2)
+                        buffer = pool.latest(index, max_age=max_age)
+                    if buffer is None:
+                        raise HTTPException(status_code=404, detail="这一路暂时没有画面")
+                payload = buffer.image_data.partition(",")[2]
+                if not payload:
+                    raise HTTPException(status_code=404, detail="这一路暂时没有画面")
+                return Response(content=_base64.b64decode(payload), media_type="image/jpeg",
+                                headers={"Cache-Control": "no-store"})
+            except HTTPException:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[MiyaAPI] 预览取帧失败 #%s: %s", index, exc)
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        @self.router.post("/api/vision/agent")
+        async def vision_agent_control(body: dict | None = None):
+            """Let the desktop stop or restart her watching, and set its cadence."""
+            import asyncio as _asyncio
+
+            body = body or {}
+            action = str(body.get("action") or "status").lower()
+            try:
+                from mcpserver.screen_vision.vision_agent import get_vision_agent
+
+                agent = get_vision_agent()
+                if action in {"stop", "off", "pause"}:
+                    state = await agent.stop()
+                elif action in {"start", "on", "resume"}:
+                    interval = body.get("interval_seconds")
+                    try:
+                        interval_value = float(interval) if interval is not None else None
+                    except (TypeError, ValueError):
+                        interval_value = None
+                    state = agent.start(interval_seconds=interval_value, mode=str(body.get("mode") or "") or None)
+                elif action == "tick":
+                    return {"success": True, **(await agent.tick(interpret=body.get("interpret", True)))}
+                else:
+                    state = agent.state()
+                return {"success": True, "agent": state}
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[MiyaAPI] 自主视觉控制失败: %s", exc)
+                return {"success": False, "agent": None, "message": str(exc)}
+
+        @self.router.get("/api/camera/sources")
+        async def camera_sources():
+            """Every camera the backend can currently see, including sleeping ones."""
+            try:
+                from mcpserver.screen_vision.camera_manager import get_camera_manager
+
+                manager = get_camera_manager()
+                manager.scan()
+                return {"success": True, **manager.describe()}
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[MiyaAPI] 摄像头状态读取失败: %s", exc)
+                return {"success": False, "devices": [], "message": str(exc)}
+
+        @self.router.get("/api/camera/devices")
+        async def camera_devices():
+            """Enumerate physical camera indices, optionally with a health probe."""
+            import asyncio as _asyncio
+
+            try:
+                from mcpserver.screen_vision.camera_devices import list_camera_devices
+
+                result = await _asyncio.to_thread(list_camera_devices)
+                return {"success": True, **result}
+            except Exception as exc:  # noqa: BLE001 - a missing device must not break the UI
+                logger.debug("[MiyaAPI] 摄像头设备枚举失败: %s", exc)
+                return {"success": False, "devices": [], "message": str(exc)}
+
         @self.router.get('/api/music/library')
         async def music_library():
             root = Path(__file__).resolve().parents[2]

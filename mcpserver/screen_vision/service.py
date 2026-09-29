@@ -10,6 +10,8 @@ import base64
 import binascii
 import json
 import logging
+import os
+import threading
 import time
 from typing import Any
 
@@ -54,6 +56,120 @@ def _validate_camera_image(image_url: str) -> str | None:
     return None
 
 
+# A vision provider that is out of balance will keep answering 429 for a while.
+# Remembering that avoids paying a network round trip on every later request.
+_CLOUD_COOLDOWN_FALLBACK_SECONDS = float(os.getenv("MIYA_VISION_CLOUD_COOLDOWN", "600"))
+_cloud_blocked_until = 0.0
+_cloud_block_reason = ""
+_cloud_lock = threading.Lock()
+
+
+def _cloud_cooldown_seconds() -> float:
+    """Read the cooldown from config so operators can tune it without code."""
+    try:
+        from config.config_utils import get_qq_config
+
+        configured = get_qq_config(
+            "tools", "qq_image_analyzer", "camera_cloud_cooldown_seconds",
+            default=_CLOUD_COOLDOWN_FALLBACK_SECONDS,
+        )
+        return max(30.0, float(configured))
+    except (TypeError, ValueError):
+        return _CLOUD_COOLDOWN_FALLBACK_SECONDS
+    except Exception:
+        return _CLOUD_COOLDOWN_FALLBACK_SECONDS
+
+
+# Capabilities that mean a model can be handed an image. Verified empirically:
+# `multimodal` + `image_description` is how the DeepSeek route is labelled, and
+# it reads images correctly, so a filter that only looked for `vision_understanding`
+# silently dropped the one fallback that was actually alive.
+IMAGE_CAPABILITIES = ("vision_understanding", "image_description", "multimodal")
+
+
+def _is_image_model(model: dict[str, Any]) -> bool:
+    if str(model.get("type") or "") in {"vision", "multimodal"}:
+        return True
+    caps = model.get("capabilities") or []
+    return any(cap in caps for cap in IMAGE_CAPABILITIES)
+
+
+def _cloud_blocked() -> tuple[bool, str]:
+    with _cloud_lock:
+        if time.time() < _cloud_blocked_until:
+            return True, _cloud_block_reason
+    return False, ""
+
+
+# Models that answered "suspended" or "insufficient balance" are remembered per
+# model key: rotating away from them is what keeps one dead provider from
+# consuming every vision request.
+_image_failed: dict[str, float] = {}
+_image_ok: dict[str, float] = {}
+_IMAGE_FAIL_MEMORY_SECONDS = float(os.getenv("MIYA_VISION_FAIL_MEMORY", "1800"))
+
+
+def _note_image_model_result(key: str, *, ok: bool) -> None:
+    with _cloud_lock:
+        if ok:
+            _image_ok[key] = time.time()
+            _image_failed.pop(key, None)
+        else:
+            _image_failed[key] = time.time()
+
+
+def _image_failed_models() -> dict[str, float]:
+    """Models excluded for now; entries expire so a topped-up key recovers."""
+    now = time.time()
+    with _cloud_lock:
+        return {key: at for key, at in _image_failed.items() if now - at < _IMAGE_FAIL_MEMORY_SECONDS}
+
+
+def _healthy_vision_models() -> dict[str, float] | None:
+    """Models proven working recently, or ``None`` when nothing has been proven."""
+    now = time.time()
+    with _cloud_lock:
+        proven = {key: at for key, at in _image_ok.items() if now - at < _IMAGE_FAIL_MEMORY_SECONDS}
+    return proven or None
+
+
+def _vision_health_snapshot() -> dict[str, Any]:
+    now = time.time()
+    with _cloud_lock:
+        failed = {k: round(now - v, 1) for k, v in _image_failed.items() if now - v < _IMAGE_FAIL_MEMORY_SECONDS}
+        ok = {k: round(now - v, 1) for k, v in _image_ok.items() if now - v < _IMAGE_FAIL_MEMORY_SECONDS}
+        blocked = max(0.0, _cloud_blocked_until - now)
+        reason = _cloud_block_reason
+    return {
+        "healthy_models": sorted(ok),
+        "failed_models": sorted(failed),
+        "seconds_since_failure": failed,
+        "cooldown_remaining": round(blocked, 1),
+        "cooldown_reason": reason,
+    }
+
+
+def _note_cloud_failure(status_code: int, body: str) -> None:
+    """Quota and credit failures are sticky; other errors are transient."""
+    global _cloud_blocked_until, _cloud_block_reason
+    marker = f"{status_code} {body[:200]}"
+    sticky = status_code in {401, 402, 403, 429} or "1113" in body or "insufficient" in body.lower()
+    if not sticky:
+        return
+    cooldown = _cloud_cooldown_seconds()
+    with _cloud_lock:
+        _cloud_blocked_until = time.time() + cooldown
+        _cloud_block_reason = f"视觉模型暂时不可用（{marker}）"
+    logger.warning("[ScreenVision] 云端视觉进入 %ss 冷却: %s", int(cooldown), marker)
+
+
+def _note_cloud_success() -> None:
+    global _cloud_blocked_until, _cloud_block_reason
+    with _cloud_lock:
+        _cloud_blocked_until = 0.0
+        _cloud_block_reason = ""
+
+
 class ScreenVisionService:
     """屏幕视觉 MCP 服务"""
 
@@ -75,11 +191,29 @@ class ScreenVisionService:
             elif tool_name == "camera_look":
                 return await self._camera_look(tool_call)
             elif tool_name == "camera_capabilities":
-                return await self._camera_capabilities()
+                return await self._camera_capabilities(tool_call)
+            elif tool_name == "camera_devices":
+                return await self._camera_devices(tool_call)
+            elif tool_name == "camera_scan":
+                return self._camera_scan(tool_call)
+            elif tool_name == "camera_fuse":
+                return await self._camera_fuse(tool_call)
+            elif tool_name == "camera_activity":
+                return self._camera_activity(tool_call)
+            elif tool_name == "camera_watch":
+                return await self._camera_watch(tool_call)
+            elif tool_name == "camera_intent":
+                return self._camera_intent(tool_call)
+            elif tool_name == "camera_impressions":
+                return self._camera_impressions(tool_call)
+            elif tool_name == "vision_health":
+                return self._vision_health(tool_call)
             elif tool_name == "camera_analyze_local":
                 return await self._camera_analyze_local(tool_call)
             elif tool_name == "camera_event":
                 return self._camera_event(tool_call)
+            elif tool_name == "camera_presence":
+                return self._camera_presence(tool_call)
             elif tool_name == "camera_enroll_identity":
                 return await self._camera_enroll_identity(tool_call)
             elif tool_name == "camera_list_identities":
@@ -94,7 +228,7 @@ class ScreenVisionService:
                 return json.dumps(
                     {
                         "error": f"未知工具: {tool_name}",
-                        "available": ["look_screen", "look_me", "camera_look", "look_both", "camera_capabilities", "camera_analyze_local", "camera_enroll_identity", "camera_list_identities", "camera_delete_identity", "screenshot"],
+                        "available": ["look_screen", "look_me", "camera_look", "look_both", "camera_capabilities", "camera_devices", "camera_scan", "camera_fuse", "camera_activity", "camera_watch", "camera_intent", "camera_impressions", "camera_analyze_local", "camera_event", "camera_presence", "camera_enroll_identity", "camera_list_identities", "camera_delete_identity", "vision_health", "screenshot"],
                     },
                     ensure_ascii=False,
                 )
@@ -251,12 +385,34 @@ class ScreenVisionService:
                         pose_history=call.get("pose_history") if isinstance(call.get("pose_history"), list) else None,
                     )
                     if force_local or local_result.get("status") == "success":
+                        self._observe_presence(local_result, call)
                         self._record_camera_result(local_result, call, mode="local")
+                        # Hybrid means "local first, cloud only for what local
+                        # cannot answer" - not "local always wins". Without
+                        # this the cloud leg was unreachable dead code.
+                        if route == "hybrid" and self._should_deepen_with_cloud(local_result, call):
+                            deepened = await self._deepen_camera_with_cloud(
+                                image_url, query, local_result, call
+                            )
+                            if deepened is not None:
+                                return json.dumps(deepened, ensure_ascii=False)
                         return json.dumps(local_result, ensure_ascii=False)
                 except (ValueError, FileNotFoundError, RuntimeError) as exc:
                     logger.info("[ScreenVision] 本地摄像头分析不可用: %s", exc)
                     if force_local:
                         return json.dumps(local_only_error(), ensure_ascii=False)
+        blocked, reason = _cloud_blocked()
+        if blocked:
+            logger.info("[ScreenVision] 云端视觉处于冷却期，跳过本次上传: %s", reason)
+            return json.dumps(
+                {
+                    "status": "partial",
+                    "message": f"{reason}；本次没有上传画面，只保留了本地信号。",
+                    "source": "camera_local_degraded",
+                    "persisted": False,
+                },
+                ensure_ascii=False,
+            )
         try:
             compressed = compress_screenshot_data_url(image_url, max_width=1024, quality=76)
             description = await self._analyze_with_miya_vision(query, compressed)
@@ -267,18 +423,79 @@ class ScreenVisionService:
             logger.error(f"[ScreenVision] 摄像头视觉分析失败: {exc}")
             return json.dumps({"status": "error", "message": f"摄像头视觉分析失败: {exc}"}, ensure_ascii=False)
 
+    @staticmethod
+    def _should_deepen_with_cloud(local_result: dict[str, Any], call: dict[str, Any]) -> bool:
+        """Decide whether a hybrid camera request is worth one cloud call.
+
+        Local ONNX produces geometry only: identity, expression, posture. It has
+        nothing to say about *what is going on*. So the cloud leg is reserved
+        for requests that actually asked a semantic question, or for images that
+        are semantically interesting precisely because no face was found.
+        """
+        query = str(call.get("query") or "").strip()
+        # The companion loop's own boilerplate prompt is not a user question.
+        if not query or query.startswith("请观察我当前的画面"):
+            return False
+        if len(query) < 8:
+            return False
+        observations = local_result.get("observations") or []
+        first = observations[0] if observations and isinstance(observations[0], dict) else {}
+        # A face is the one case local models already cover well; a frame with
+        # no face at all is exactly where a vision model adds information.
+        return not first.get("box") and not first.get("face_signals")
+
+    async def _deepen_camera_with_cloud(
+        self,
+        image_url: str,
+        query: str,
+        local_result: dict[str, Any],
+        call: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Add one cloud reading on top of a local result, or give up quietly."""
+        blocked, reason = _cloud_blocked()
+        if blocked:
+            local_result["cloud_skipped"] = reason
+            return None
+        try:
+            note = str(local_result.get("message") or "")
+            augmented = (
+                f"{query}\n\n本机本地模型已经给出这些几何线索，请以此为基础补充你从画面里看到的内容，"
+                f"不要与本地结论冲突：{note}"
+            )
+            compressed = compress_screenshot_data_url(image_url, max_width=1024, quality=76)
+            description = await self._analyze_with_miya_vision(augmented, compressed)
+            result = {
+                "status": "success",
+                "message": f"本地线索：{note}\n云端理解：{description}",
+                "local": local_result,
+                "source": "camera_local_and_cloud",
+                "sources": ["camera_local", "camera_cloud"],
+                "persisted": False,
+            }
+            self._observe_presence(local_result, call)
+            self._record_camera_result(result, call, mode="hybrid")
+            return result
+        except Exception as exc:  # noqa: BLE001 - local already succeeded; never fail the request
+            logger.info("[ScreenVision] 混合路线云端深化失败，保留本地结果: %s", exc)
+            local_result["cloud_skipped"] = str(exc)
+            return None
+
     async def _camera_look(self, call: dict[str, Any]) -> str:
         """Capture and analyze one physical camera frame without the frontend."""
         from .camera_capture import capture_camera_frame
+        from .camera_manager import get_camera_manager, resolve_capture_index
 
+        manager = get_camera_manager()
+        capture_index = resolve_capture_index(call)
         try:
             captured = await __import__("asyncio").to_thread(
                 capture_camera_frame,
-                call.get("camera_index", 0),
-                width=call.get("width", 640),
-                height=call.get("height", 480),
+                capture_index,
+                width=call.get("width", 1280),
+                height=call.get("height", 720),
             )
         except (ValueError, RuntimeError) as exc:
+            manager.note_result(capture_index, luminance=None, usable=False)
             return json.dumps({"status": "error", "message": str(exc), "persisted": False}, ensure_ascii=False)
 
         analysis_call = dict(call)
@@ -294,6 +511,7 @@ class ScreenVisionService:
             "height": captured["height"],
         }
         result["persisted"] = False
+        manager.note_result(capture_index, luminance=result.get("luminance"), usable=result.get("status") == "success")
         return json.dumps(result, ensure_ascii=False)
 
     @staticmethod
@@ -412,7 +630,7 @@ class ScreenVisionService:
             "persisted": False,
         }, ensure_ascii=False)
 
-    async def _camera_capabilities(self) -> str:
+    async def _camera_capabilities(self, call: dict[str, Any] | None = None) -> str:
         capabilities = discover_local_camera_capabilities()
         features = capabilities.get("features", {})
         logger.info(
@@ -423,15 +641,37 @@ class ScreenVisionService:
             bool(features.get("identity", {}).get("available")),
             bool(features.get("emotion", {}).get("available")),
         )
-        return json.dumps(
-            {
-                "status": "success",
-                "camera_mode": self._vision_mode("camera"),
-                "vision_mode": self._vision_mode("camera"),
-                "capabilities": capabilities,
-            },
-            ensure_ascii=False,
-        )
+        payload: dict[str, Any] = {
+            "status": "success",
+            "camera_mode": self._vision_mode("camera"),
+            "vision_mode": self._vision_mode("camera"),
+            "capabilities": capabilities,
+        }
+        # Probing physical devices opens hardware, so it stays opt-in instead of
+        # running on every capability poll from the desktop.
+        if (call or {}).get("include_devices"):
+            from .camera_devices import list_camera_devices
+
+            payload["devices"] = await asyncio.to_thread(list_camera_devices)
+        return json.dumps(payload, ensure_ascii=False)
+
+    async def _camera_devices(self, call: dict[str, Any]) -> str:
+        """Enumerate OpenCV camera indices with a one-frame health probe."""
+        from .camera_devices import list_camera_devices
+
+        probe = call.get("probe", True)
+        if isinstance(probe, str):
+            probe = probe.strip().lower() not in {"false", "0", "no", "off"}
+        try:
+            result = await asyncio.to_thread(
+                list_camera_devices,
+                width=int(call.get("width") or 640),
+                height=int(call.get("height") or 480),
+                probe=bool(probe),
+            )
+        except (TypeError, ValueError) as exc:
+            return json.dumps({"status": "error", "message": f"摄像头枚举参数无效: {exc}", "devices": []}, ensure_ascii=False)
+        return json.dumps(result, ensure_ascii=False)
 
     def _vision_mode(self, source: str) -> str:
         """Read the unified route, with legacy per-source compatibility."""
@@ -483,8 +723,12 @@ class ScreenVisionService:
         # The low-level local tool only runs explicitly requested features;
         # callers such as the companion loop pass pose=true when available.
         pose_requested = bool(call.get("pose", False))
+        # Face detection is separately requestable: expression geometry needs it
+        # even when identity and emotion are both off.
+        faces_requested = call.get("faces")
+        detect_faces = bool(identity_requested or bool(call.get("emotion", False)) or _as_bool(faces_requested))
         requested = []
-        if identity_requested or bool(call.get("emotion", False)):
+        if detect_faces:
             requested.append("face_detection")
         if identity_requested:
             requested.append("identity")
@@ -500,14 +744,266 @@ class ScreenVisionService:
                     identity=bool(call.get("identity", True)),
                     emotion=bool(call.get("emotion", False)),
                     pose=pose_requested,
+                    faces=detect_faces,
                     pose_history=call.get("pose_history") if isinstance(call.get("pose_history"), list) else None,
             )
+            self._observe_presence(result, call)
             self._record_camera_result(result, call, mode="local")
             return json.dumps(result, ensure_ascii=False)
         except ValueError as exc:
             return json.dumps({"status": "error", "message": str(exc), "persisted": False}, ensure_ascii=False)
         except (FileNotFoundError, RuntimeError) as exc:
             return json.dumps({"status": "unavailable", "message": str(exc), "persisted": False}, ensure_ascii=False)
+
+    @staticmethod
+    def _observe_presence(result: dict[str, Any], call: dict[str, Any]) -> None:
+        """Feed one local result into the shared presence and activity trackers."""
+        try:
+            from .presence import presence_from_local_result
+
+            motion = call.get("motion_score")
+            presence_from_local_result(result, motion=float(motion or 0.0))
+        except (TypeError, ValueError):
+            logger.debug("[ScreenVision] 在场状态更新失败", exc_info=True)
+        try:
+            from .activity import observe_action
+
+            observations = result.get("observations") or []
+            first = observations[0] if observations and isinstance(observations[0], dict) else {}
+            action = first.get("action") if isinstance(first.get("action"), dict) else None
+            if action:
+                observe_action(action)
+        except Exception:
+            logger.debug("[ScreenVision] 活动累积更新失败", exc_info=True)
+
+    @staticmethod
+    def _camera_activity(call: dict[str, Any]) -> str:
+        """Report what Jia has been doing, and surface a change at most once."""
+        from .activity import (
+            activity_card,
+            activity_change_card,
+            get_activity_tracker,
+            take_activity_change,
+        )
+
+        tracker = get_activity_tracker()
+        payload: dict[str, Any] = {
+            "status": "success",
+            "activity": tracker.snapshot().to_dict(),
+            "message": tracker.snapshot().describe(),
+            "card": activity_card(),
+        }
+        pending = activity_change_card()
+        if pending:
+            payload["change_card"] = pending
+        if _as_bool(call.get("consume_change")):
+            # Consuming is opt-in so a read-only caller cannot swallow the change
+            # that the conversation layer was about to use.
+            change = take_activity_change()
+            if change is not None:
+                payload["change"] = change.to_dict()
+        return json.dumps(payload, ensure_ascii=False)
+
+    @staticmethod
+    def _camera_scan(call: dict[str, Any]) -> str:
+        """Re-discover every usable camera, picking up a phone that woke up."""
+        from .camera_manager import get_camera_manager
+
+        manager = get_camera_manager()
+        manager.scan(force=True)
+        return json.dumps({"status": "success", **manager.describe()}, ensure_ascii=False)
+
+    # ===== 弥娅自己掌控摄像头 =====
+
+    async def _camera_watch(self, call: dict[str, Any]) -> str:
+        """Start or stop Miya's own watching loop, and let her set the cadence."""
+        from .vision_agent import get_vision_agent
+
+        agent = get_vision_agent()
+        action = str(call.get("action") or "status").strip().lower()
+        if action in {"start", "on", "resume"}:
+            interval = call.get("interval_seconds")
+            try:
+                interval_value = float(interval) if interval is not None else None
+            except (TypeError, ValueError):
+                interval_value = None
+            state = agent.start(interval_seconds=interval_value, mode=str(call.get("mode") or "").strip() or None)
+        elif action in {"stop", "off", "pause"}:
+            state = await agent.stop()
+        elif action in {"tick", "look", "now"}:
+            result = await agent.tick(interpret=not _as_bool(call.get("skip_interpret")))
+            return json.dumps({"status": "success", **result}, ensure_ascii=False)
+        else:
+            state = agent.state()
+        from .vision_agent import get_vision_agency
+
+        return json.dumps(
+            {"status": "success", "agent": state, "agency": get_vision_agency().describe()},
+            ensure_ascii=False,
+        )
+
+    @staticmethod
+    def _camera_intent(call: dict[str, Any]) -> str:
+        """Miya writes down what she wants to watch for, in her own words."""
+        from .vision_agent import get_vision_agency
+
+        agency = get_vision_agency()
+        action = str(call.get("action") or "list").strip().lower()
+        if action in {"add", "set", "want"}:
+            intent = agency.add_intent(
+                str(call.get("text") or ""),
+                speak=not _as_bool(call.get("silent", False)),
+                note=str(call.get("note") or ""),
+                source=str(call.get("source") or "miya"),
+            )
+            if intent is None:
+                return json.dumps({"status": "error", "message": "观察意图不能为空。"}, ensure_ascii=False)
+            return json.dumps({"status": "success", "intent": intent.to_dict(), **agency.describe()}, ensure_ascii=False)
+        if action in {"remove", "delete", "forget"}:
+            removed = agency.remove_intent(str(call.get("intent_id") or ""))
+            return json.dumps({"status": "success" if removed else "error",
+                               "message": "已删除" if removed else "没有找到这个观察意图",
+                               **agency.describe()}, ensure_ascii=False)
+        if action in {"enable", "disable"}:
+            changed = agency.set_intent_active(str(call.get("intent_id") or ""), action == "enable")
+            return json.dumps({"status": "success" if changed else "error",
+                               "message": "已更新" if changed else "没有找到这个观察意图",
+                               **agency.describe()}, ensure_ascii=False)
+        return json.dumps({"status": "success", **agency.describe()}, ensure_ascii=False)
+
+    @staticmethod
+    def _camera_impressions(call: dict[str, Any]) -> str:
+        """What Miya has noticed lately, and whether she has something to say."""
+        from .vision_agent import get_vision_agency, get_vision_agent
+
+        agency = get_vision_agency()
+        agent = get_vision_agent()
+        try:
+            limit = max(1, min(int(call.get("limit") or 8), 50))
+        except (TypeError, ValueError):
+            limit = 8
+        payload: dict[str, Any] = {
+            "status": "success",
+            "impressions": [item.to_dict() for item in agency.impressions(limit=limit)],
+            "memory_card": agency.memory_card(limit=limit),
+            "intent_card": agency.intent_card(),
+            "agent": agent.state(),
+        }
+        pending = agent.peek_messages()
+        payload["pending_messages"] = pending
+        payload["message"] = pending[0] if pending else None
+        if _as_bool(call.get("consume_message")):
+            payload["message"] = agent.take_message()
+            payload["pending_messages"] = agent.peek_messages()
+        return json.dumps(payload, ensure_ascii=False)
+
+    async def _camera_fuse(self, call: dict[str, Any]) -> str:
+        """Look through every usable camera at once and fuse what they see.
+
+        A browser can only open one camera at a time, so genuine multi-camera
+        coverage lives here: each usable index is captured separately and the
+        derived observations are merged into one reading of what Jia is doing.
+        """
+        from .camera_capture import capture_camera_frame
+        from .camera_manager import fuse_observations, get_camera_manager, narrative_for_fused
+        from .activity import get_activity_tracker
+
+        manager = get_camera_manager()
+        manager.scan()
+        indices = manager.usable_indices()
+        requested = call.get("indices")
+        if isinstance(requested, list) and requested:
+            wanted = []
+            for value in requested:
+                try:
+                    wanted.append(max(0, int(value)))
+                except (TypeError, ValueError):
+                    continue
+            indices = wanted or indices
+        if call.get("camera_index") is not None:
+            try:
+                indices = [max(0, int(call["camera_index"]))]
+            except (TypeError, ValueError):
+                pass
+        if not indices:
+            return json.dumps({
+                "status": "unavailable",
+                "message": "现在没有任何摄像头能出画面；如果用的是手机，请确认它没有息屏。",
+                "persisted": False,
+            }, ensure_ascii=False)
+
+        width = int(call.get("width") or 1280)
+        height = int(call.get("height") or 720)
+        observations: list[dict[str, Any]] = []
+        failures: list[dict[str, Any]] = []
+        for index in indices:
+            try:
+                captured = await asyncio.to_thread(capture_camera_frame, index, width=width, height=height)
+            except (ValueError, RuntimeError) as exc:
+                manager.note_result(index, luminance=None, usable=False)
+                failures.append({"index": index, "message": str(exc)})
+                continue
+            try:
+                result = analyze_local_frame(
+                    captured["image_data"],
+                    identity=bool(call.get("identity", True)),
+                    emotion=bool(call.get("emotion", False)),
+                    pose=bool(call.get("pose", True)),
+                    pose_history=call.get("pose_history") if isinstance(call.get("pose_history"), list) else None,
+                )
+            except (ValueError, FileNotFoundError, RuntimeError) as exc:
+                failures.append({"index": index, "message": str(exc)})
+                continue
+            manager.note_result(index, luminance=result.get("luminance"), usable=result.get("status") == "success")
+            if result.get("status") != "success":
+                failures.append({"index": index, "message": str(result.get("message") or "没有得到有效画面"),
+                                 "blank_frame": bool(result.get("blank_frame"))})
+                continue
+            observations.append({"index": index, "result": result})
+
+        fused = fuse_observations(observations)
+        action = fused.get("action") or {}
+        if action:
+            get_activity_tracker().observe(
+                str(action.get("kind") or ""),
+                str(action.get("label") or ""),
+                confidence=float(action.get("confidence") or 0.0),
+            )
+        # Present the fused reading to the presence model as one combined sample.
+        self._observe_presence({"observations": [{
+            "face_signals": fused.get("face_signals"),
+            "pose_quality": fused.get("pose_quality"),
+            "action": action,
+        }], "faces": fused.get("faces"), "luminance": None}, call)
+
+        activity = get_activity_tracker().snapshot()
+        fused["message"] = narrative_for_fused(fused, activity=activity.phrase, duration=activity.duration)
+        fused["activity"] = activity.to_dict()
+        fused["failures"] = failures
+        fused["source"] = "camera_fused"
+        fused["persisted"] = False
+        self._record_camera_result(fused, call, mode="fused")
+        return json.dumps(fused, ensure_ascii=False)
+
+    @staticmethod
+    def _camera_presence(call: dict[str, Any]) -> str:
+        """Report whether Jia is at the computer, from derived signals only."""
+        from .presence import get_presence_tracker
+
+        tracker = get_presence_tracker()
+        try:
+            motion = float(call.get("motion_score") or 0.0)
+        except (TypeError, ValueError):
+            motion = 0.0
+        if call.get("faces_in_frame") is not None or motion or call.get("report_frame"):
+            tracker.note_frame(motion=motion)
+            if call.get("faces_in_frame") is not None:
+                tracker.observe(faces=int(call.get("faces_in_frame") or 0), motion=motion)
+        snapshot = tracker.snapshot() if not call.get("refresh") else tracker.evaluate()
+        return json.dumps(
+            {"status": "success", "presence": snapshot.to_dict(), "message": snapshot.describe()},
+            ensure_ascii=False,
+        )
 
     @staticmethod
     def _camera_event(call: dict[str, Any]) -> str:
@@ -526,7 +1022,40 @@ class ScreenVisionService:
             "[ScreenVision] 摄像头事件: kind=%s summary=%s confidence=%.2f",
             recorded.get("kind"), recorded.get("summary"), float(recorded.get("confidence") or 0),
         )
-        return json.dumps({"status": "success", "event": recorded, "persisted": False}, ensure_ascii=False)
+        # The desktop preview owns the device while it is running, so the frame it
+        # sends here is the only way the backend can see through that camera.
+        frame = str(call.get("image_data") or event.get("image_data") or "").strip()
+        if frame.startswith("data:image/"):
+            from .camera_manager import get_camera_manager
+
+            try:
+                index = call.get("camera_index") if call.get("camera_index") is not None else event.get("camera_index")
+                get_camera_manager().remember_browser_frame(index=index, data_url=frame)
+                # Also publish into the shared pool: the preview owns that device,
+                # so this frame is the only way anything else can see through it.
+                if index is not None:
+                    from .camera_capture import thumbnail_from_data_url
+                    from .camera_stream import get_camera_pool
+
+                    get_camera_pool().publish_browser_frame(
+                        int(index), frame, thumbnail=thumbnail_from_data_url(frame))
+            except (TypeError, ValueError):
+                logger.debug("[ScreenVision] 缓存浏览器帧失败", exc_info=True)
+        # The companion loop already sends a motion score with every event, so
+        # this is the cheapest place to keep the presence model current.
+        presence: dict[str, Any] | None = None
+        try:
+            from .presence import get_presence_tracker
+
+            motion = event.get("motion_score")
+            snapshot = get_presence_tracker().note_frame(motion=float(motion or 0.0))
+            presence = snapshot.to_dict()
+        except (TypeError, ValueError):
+            logger.debug("[ScreenVision] 事件附带在场状态失败", exc_info=True)
+        return json.dumps(
+            {"status": "success", "event": recorded, "presence": presence, "persisted": False},
+            ensure_ascii=False,
+        )
 
     async def _camera_enroll_identity(self, call: dict[str, Any]) -> str:
         try:
@@ -615,13 +1144,10 @@ class ScreenVisionService:
             "用中文回答。"
         )
 
-        # 优先走 model-bridge
-        api_key, base_url, model_id = self._resolve_vision_model()
+        candidates = self._vision_candidates()
 
-        # 调用
         import httpx
 
-        base_url = base_url.rstrip("/")
         user_content: list[dict[str, Any]] = [{"type": "text", "text": query}]
         for label, image_url in sources:
             user_content.append({"type": "text", "text": f"以下是【{label}】。"})
@@ -632,32 +1158,89 @@ class ScreenVisionService:
             {"role": "user", "content": user_content},
         ]
 
+        errors: list[str] = []
+        sticky_status = 0
         async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                f"{base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": model_id,
-                    "messages": messages,
-                    "max_tokens": 1024,
-                    "temperature": 0.7,
-                },
-            )
+            for key, api_key, base_url, model_id in candidates:
+                try:
+                    response = await client.post(
+                        f"{base_url.rstrip('/')}/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": model_id,
+                            "messages": messages,
+                            "max_tokens": 1024,
+                            "temperature": 0.7,
+                        },
+                    )
+                except Exception as exc:  # noqa: BLE001 - try the next provider
+                    errors.append(f"{key}: {type(exc).__name__}: {exc}")
+                    _note_image_model_result(key, ok=False)
+                    continue
+                if response.status_code != 200:
+                    # A single provider being out of balance must not cool down
+                    # the whole route: remember it per model and rotate instead.
+                    _note_image_model_result(key, ok=False)
+                    errors.append(f"{key} 返回 {response.status_code}: {response.text[:160]}")
+                    logger.info("[ScreenVision] 视觉模型 %s 不可用，换下一个", key)
+                    if response.status_code in {401, 402, 403, 429} and not sticky_status:
+                        # Keep the real status: the global cooldown is only
+                        # armed after every candidate failed, and a synthesised
+                        # status would lose the "out of balance" signal.
+                        sticky_status = response.status_code
+                    continue
+                data = response.json()
+                content = (data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
+                if not content:
+                    _note_image_model_result(key, ok=False)
+                    errors.append(f"{key} 返回了空内容")
+                    continue
+                _note_image_model_result(key, ok=True)
+                _note_cloud_success()
+                return content
 
-            if response.status_code != 200:
-                raise RuntimeError(f"视觉 LLM 返回 {response.status_code}: {response.text[:500]}")
+        # Nothing worked. Now, and only now, cool the whole route down.
+        _note_cloud_failure(sticky_status or 503, " | ".join(errors[:3]))
+        raise RuntimeError("所有视觉模型都不可用: " + (" | ".join(errors[:3]) or "没有配置可用模型"))
 
-            data = response.json()
-            return data.get("choices", [{}])[0].get("message", {}).get("content", "无法分析截图")
+    @staticmethod
+    def _vision_health(call: dict[str, Any]) -> str:
+        """Report which vision models are working right now.
 
-    def _resolve_vision_model(self) -> tuple[str, str, str]:
+        Configuration alone cannot answer this: several endpoints are suspended
+        for non-payment, so health has to come from actual calls.
         """
-        从 multi_model_config.json 的 vision_preferences 获取视觉模型配置。
+        service = ScreenVisionService()
+        try:
+            candidates = service._vision_candidates()
+        except Exception as exc:  # noqa: BLE001
+            return json.dumps({"status": "error", "message": str(exc),
+                               "health": _vision_health_snapshot()}, ensure_ascii=False)
+        try:
+            requested = int(call.get("limit") or 0)
+        except (TypeError, ValueError):
+            requested = 0
+        # No limit means "show the whole chain"; a limit of 0 must not be read
+        # as an empty slice.
+        shown = candidates[:max(1, min(requested, len(candidates)))] if requested > 0 else candidates
+        return json.dumps({
+            "status": "success",
+            "candidates": [{"key": key, "model": name, "base_url": base_url}
+                           for key, _api_key, base_url, name in shown],
+            "health": _vision_health_snapshot(),
+            "message": f"共有 {len(candidates)} 个配置可用的视觉模型，按优先级排列。",
+        }, ensure_ascii=False)
 
-        读取 env_key → 环境变量获取 api_key，而不是直接读 api_key 字段。
+    def _vision_candidates(self) -> list[tuple[str, str, str, str]]:
+        """All usable vision models, best first, as (key, api_key, base_url, name).
+
+        Only models that have a key are returned. Which of them is *actually*
+        healthy is discovered by calling them: several configured endpoints are
+        suspended for non-payment, and picking one blind used to burn the whole
+        request before falling back.
         """
         import json
         from pathlib import Path
@@ -666,43 +1249,59 @@ class ScreenVisionService:
 
         miya_root = Path(__file__).resolve().parent.parent.parent
         cfg_path = miya_root / "config" / "multi_model_config.json"
-
         if not cfg_path.exists():
             raise RuntimeError("[ScreenVision] 模型配置文件不存在: multi_model_config.json")
 
-        try:
-            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
-            models = cfg.get("models", {})
-            vision_prefs = cfg.get("vision_preferences", {}).get("model_preferences", {})
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        models = cfg.get("models", {})
+        prefs = (cfg.get("vision_preferences") or {}).get("model_preferences") or {}
+        active_vision = (cfg.get("vision_preferences") or {}).get("active_vision")
 
-            # 试 primary → secondary 顺序
-            for key in [vision_prefs.get("primary"), vision_prefs.get("secondary")]:
-                if not key or key not in models:
-                    continue
-                m = models[key]
-                env_key = m.get("env_key", "")
-                api_key = get_api_key(env_key) if env_key else ""
-                base_url = m.get("base_url", "")
-                model_name = m.get("name", "")
+        # Honour the configured intent first, then the declared fallbacks, then
+        # anything else that can see an image.
+        ordered_keys: list[str] = []
+        for key in (active_vision, prefs.get("primary"), prefs.get("secondary"), prefs.get("fallback")):
+            if isinstance(key, str) and key and key not in ordered_keys:
+                # "@active_vision" is a pointer, not a model name.
+                ordered_keys.append(key[1:] if key.startswith("@") else key)
+        if active_vision and active_vision not in ordered_keys:
+            ordered_keys.insert(0, active_vision)
+        ordered_keys = [key for key in ordered_keys if key in models]
+        for key, model in models.items():
+            if key in ordered_keys or not isinstance(model, dict):
+                continue
+            if _is_image_model(model):
+                ordered_keys.append(key)
 
-                if api_key and model_name:
-                    logger.info(f"[ScreenVision] 使用视觉模型: {key} → {model_name} @ {base_url}")
-                    return api_key, base_url, model_name
-                else:
-                    logger.warning(f"[ScreenVision] 模型 {key} 缺少 api_key (env:{env_key}) 或 name")
+        candidates: list[tuple[str, str, str, str]] = []
+        healthy = _healthy_vision_models()
+        previously_bad = _image_failed_models()
+        for key in ordered_keys:
+            model = models.get(key)
+            if not isinstance(model, dict):
+                continue
+            if not _is_image_model(model):
+                continue
+            if model.get("enabled") is False:
+                continue
+            if key in previously_bad and (healthy is None or key not in healthy):
+                continue
+            api_key = get_api_key(model.get("env_key", "")) if model.get("env_key") else ""
+            base_url = str(model.get("base_url") or "").rstrip("/")
+            name = str(model.get("name") or "")
+            if not api_key or not base_url or not name:
+                continue
+            candidates.append((key, api_key, base_url, name))
 
-            # 回退：找一个 type=vision 或 capabilities 含 vision 的
-            for model_key, m in models.items():
-                if m.get("type") == "vision" or "vision" in m.get("capabilities", []):
-                    env_key = m.get("env_key", "")
-                    api_key = get_api_key(env_key) if env_key else ""
-                    if api_key:
-                        logger.info(f"[ScreenVision] 回退视觉模型: {model_key}")
-                        return api_key, m.get("base_url", ""), m.get("name", "")
+        if not candidates:
+            raise RuntimeError(
+                "[ScreenVision] 未找到可用的视觉模型。请在 multi_model_config.json 中配置 vision_preferences"
+            )
+        return candidates
 
-        except Exception as e:
-            logger.error(f"[ScreenVision] 解析模型配置失败: {e}")
-
-        raise RuntimeError(
-            "[ScreenVision] 未找到可用的视觉模型。请在 multi_model_config.json 中配置 vision_preferences"
-        )
+    def _resolve_vision_model(self) -> tuple[str, str, str]:
+        """Pick the best configured vision model (key, base_url, name)."""
+        candidates = self._vision_candidates()
+        key, api_key, base_url, name = candidates[0]
+        logger.info(f"[ScreenVision] 使用视觉模型: {key} → {name} @ {base_url}")
+        return api_key, base_url, name
