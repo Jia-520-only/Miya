@@ -18,10 +18,11 @@
       "priority": 1
     },
     "model_preferences": {
-      "primary": "@active_vision",
-      "secondary": "glm_4_5v_vision",
-      "fallback": "simple_analysis",
-      "disabled_models": []
+      "primary": "kimi_k2_vision",
+      "secondary": "deepseek_v4_flash_official",
+      "fallback": "glm_4_5v_vision",
+      "disabled_models": [],
+      "note": "primary/secondary 都经过实测可读图，且分属不同供应商；glm 仅作最后兜底（当前额度耗尽）。"
     }
   },
   "models": {

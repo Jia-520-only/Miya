@@ -101,6 +101,7 @@ class MiyaProactiveOrgan(MiyaOrgan):
                             message,
                             key=f"soul:{message[:32]}",
                             trigger_type="soul_proactive",
+                            source="soul",
                         ),
                         self._spine._loop,
                     )

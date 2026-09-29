@@ -195,6 +195,12 @@ class MiyaDaemon:
             if dh and getattr(dh, "proactive_chat", None) and dh.proactive_chat.is_enabled():
                 await dh.start_proactive_background()
                 logger.info("✅ 主动聊天后台轮询已启动")
+            # Her camera is her own sense, not a side effect of proactive chat:
+            # it must start even when proactive messages are turned off. The same
+            # goes for the bridge that lets what she sees reach her voice.
+            if dh:
+                await dh.start_vision_agency_background()
+                await dh.start_camera_proactive_background()
         except Exception as e:
             logger.error(f"❌ Miya 核心初始化失败: {e}", exc_info=True)
             raise

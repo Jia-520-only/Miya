@@ -278,7 +278,25 @@ tools:
     vision_engine: "zhipu_glm_46v_flash"  # 使用智谱视觉模型
     vision_mode: "local"                  # 本地观察视觉调度（屏幕/摄像头）：local / cloud / hybrid；聊天图片始终走云端
     screen_analysis_mode: "local"         # 看屏幕覆盖；留空时跟随 vision_mode
-    camera_analysis_mode: "local"         # 看我路线：local 使用本机 ONNX，cloud 使用视觉模型
+    camera_analysis_mode: "hybrid"        # 看我路线：local 用本机 ONNX，hybrid = 本地常驻 + 语义提问时才调用云端，cloud 全程云端
+    camera_cloud_cooldown_seconds: 600    # 云端视觉额度耗尽（401/402/403/429）后的静默冷却秒数，冷却期内不上传画面
+
+    # 弥娅自主摄像头视觉：她自己决定何时看、留意什么、要不要开口。
+    # autostart 为 true 时，守护进程启动后会让她自己开始观察（仍受 /camera off 与
+    # autonomous=关 约束）。seed_intents 只在她的意图为空时写入一次，之后她自己改过的不会被覆盖。
+    camera_agency:
+      autostart: true                     # 开机就让弥娅自己开始看
+      autostart_delay_seconds: 20         # 等桌面端先拿稳摄像头，避免前后端抢设备
+      interval_seconds: 30                # 变化时她看一次的间隔（5～3600）
+      adaptive: true                      # 自适应节奏：静时放慢、变时加快，省下大量模型调用
+      slow_interval_seconds: 120          # 画面一直没变化时放慢到这个间隔
+      slow_after_unchanged: 3             # 连续几轮读到同样的东西后开始放慢
+      thumbnails: false                   # 是否保存缩略图（默认关闭：不存画面是原本的承诺）
+      mode: "auto"                        # auto 用她自己的模型解读；local 只用本地信号；silent 只看只记不说话
+      seed_intents:                       # 初始观察意图，用自然语言写
+        - "想留意佳在不在电脑前，离开和回来都记一下"
+        - "想知道佳大多在做什么，是工作、看视频还是玩游戏"
+        - "留意佳有没有太久没休息"
     detail_level: "detailed"              # detailed, basic
     nsfw_check: false
     ai_description:

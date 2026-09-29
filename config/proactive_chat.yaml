@@ -5,20 +5,70 @@ proactive_chat:
   # 基本配置
   enabled: true
   check_interval: 45  # 检查间隔（秒），更频繁
-  max_daily_messages: 15  # 每日最大消息数，增加
+  # 她"决定开口"的额度。注意：这里统计的是提案次数，不是真的发出去的条数——
+  # 被下面 coordination 拦下的那些也会计入（拦截时会退还，见 _refund_trigger），
+  # 所以值要留出被拦下的余量，不能贴着"希望她一小时说几句"来定。
+  max_daily_messages: 40   # 每日上限
+  max_hourly_messages: 8   # 每小时上限（这一项原先缺失，代码里默认 3，太紧）
+
+  # 她自己的发言节奏（原先这三项硬编码在代码里，yaml 怎么写都不生效）
+  limits:
+    global_cooldown: 150       # 同一目标两次主动发言的最短间隔（秒）
+    duplicate_window: 90       # 内容近似去重窗口（秒）
+    quiet_hours_enabled: true
   # 摄像头事件主动回应：只消费本地/视觉层生成的文字事件，不保存原图
   camera_aware:
     enabled: true
     min_interval: 90
     min_confidence: 0.62
     events: [wave, sit_down, stand_up, walk, scene_change, long_still]
+    # 在场判断：弥娅据此知道佳在不在电脑前。
+    # notify_on 支持 returned（刚回来）与 left（确认离开）；每次真实状态变化只触发一次。
+    presence:
+      enabled: true
+      notify_on: [returned]
+      min_confidence: 0.5
+      min_interval: 240
+    # 活动变化：弥娅注意到佳开始做什么时，由模型自己决定要不要开口。
+    # notify_on 留空表示所有被识别到的活动变化都交给模型判断。
+    activity:
+      enabled: true
+      notify_on: [typing, phone, drink, stretch, walk, sit_down, stand_up, lean_back]
+      min_interval: 300
+    # 弥娅自主视觉：她自己决定何时看、看时留意什么、以及要不要开口。
+    # 这里只决定"她攒下的话要不要投递"，不替她改措辞。
+    agency:
+      enabled: true
+      max_age_seconds: 600   # 超过这个时长的话就不说了，避免翻旧账
   quiet_hours: [23, 0, 1, 2, 3, 4, 5, 6, 7]  # 静默时段，稍微缩短
 
   # 统一主动性协调：主动聊天、自检、地球online 共用
+  # 这是**跨来源**的总闸门：自检的磁盘提醒、地球online 的关怀委托和她的摄像头话语
+  # 抢同一个额度。原先 3 条/小时 + 全局 5 分钟间隔，于是"E盘90.3%"和"晚安简报"
+  # 一发出去，她这一小时就再也开不了口——日志里那些"小时总额度已满，跳过
+  # key=camera:presence:returned"就是这么来的。调宽之后每一种来源仍各有自己的
+  # 判断与去重，这里只是不再让系统通知把她的嘴占满。
+  #
+  # 只调宽总量还不够：max_messages_per_hour 是**所有来源共享**的池子，谁先来谁拿走。
+  # 地球online 每 45 分钟一次巡检、自检每半小时一条磁盘提醒，两边一起足以把 8 条吃
+  # 干净，弥娅看到的一切仍然说不出口。所以再加一层：任何**单一来源**每小时的上限，
+  # 让某一路吵闹的来源吃不到整池。
+  # same_source_interval_seconds 比全局间隔短，是为了让同一来源的两条不同事实
+  # （比如摄像头的"他回来了"和"这一眼看到他在敲键盘"）排队发出，而不是互相把对方
+  # 顶掉整整两分钟——日志里 camera:presence:returned 被 camera:voice 顶掉就是这么来的。
   coordination:
     enabled: true
-    max_messages_per_hour: 3
-    min_interval_seconds: 300
+    max_messages_per_hour: 8     # 所有来源合计（原 3）
+    # 单一来源的**发言**上限（她决定要说的话、攒下的观察、聊天候选）。
+    max_messages_per_source_per_hour: 3
+    # 单一来源的**事件**上限，与发言分开计算。
+    # 事件是 tracker 产出的有界状态变化（他回来了、刚开始敲键盘、磁盘过阈值），一小时
+    # 最多几次；发言是她想说的话，可以源源不断。混在一起记的时候，摄像头自己攒的观察
+    # 会把摄像头的配额吃光，于是"佳刚回到电脑前"这种每次回来只有一次的事件，
+    # 被当成又一句闲话跳过了。
+    max_events_per_source_per_hour: 4
+    min_interval_seconds: 120    # 任意两条**不同来源**消息之间的最短间隔（原 300）
+    same_source_interval_seconds: 90      # 同一来源内部两条消息的最短间隔
     quiet_hours_enabled: true
     quiet_hours: [23, 0, 1, 2, 3, 4, 5, 6, 7]
 
@@ -429,6 +479,7 @@ proactive_chat:
     time: 300       # 时间触发后5分钟内不再触发（时段内只发一次）
     check_in: 1800  # 主动关怀后30分钟内不再触发
     ai: 180         # AI触发后3分钟内不再触发
+    camera_aware: 120  # 摄像头事件触发（原先缺这一项，代码里默认 60）
 
   # === 意图持续触发 — 弥娅主动推进未完成的意图 ===
   continuity_trigger:

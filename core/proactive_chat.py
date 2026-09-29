@@ -17,9 +17,10 @@ import contextlib
 import hashlib
 import logging
 import random
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from core.ai_client import AIMessage
 
@@ -77,6 +78,10 @@ def _normalize_config(raw: dict) -> dict:
     enabled = raw.get("enabled", default["enabled"])
     quiet_hours = raw.get("quiet_hours", default["limits"]["quiet_hours"])
     max_daily = raw.get("max_daily_messages", default["limits"]["max_daily_per_target"])
+    # 这一段的三个限制以前被硬编码在下面，yaml 里怎么写都不生效（global_cooldown
+    # 300 / duplicate_window 60 / quiet_hours_enabled True）。她是限频的最后一层，
+    # 佳要能调，就必须真的读文件。
+    limits_raw = raw.get("limits") if isinstance(raw.get("limits"), dict) else {}
 
     # 上下文触发
     ctx_trigger = raw.get("context_trigger", {})
@@ -156,12 +161,12 @@ def _normalize_config(raw: dict) -> dict:
             "ai": ai_cfg,
         },
         "limits": {
-            "global_cooldown": 300,
+            "global_cooldown": limits_raw.get("global_cooldown", default["limits"]["global_cooldown"]),
             "max_daily_per_target": max_daily,
             "max_hourly_per_target": raw.get("max_hourly_messages", default["limits"]["max_hourly_per_target"]),
-            "duplicate_window": 60,
+            "duplicate_window": limits_raw.get("duplicate_window", default["limits"]["duplicate_window"]),
             "quiet_hours": quiet_hours,
-            "quiet_hours_enabled": True,
+            "quiet_hours_enabled": limits_raw.get("quiet_hours_enabled", True),
         },
         "trigger_type_cooldown": raw.get("trigger_type_cooldown", {}),
         "user_message_cooldown": raw.get("user_message_cooldown", 5),
@@ -171,6 +176,10 @@ def _normalize_config(raw: dict) -> dict:
         "scene": _normalize_scene_config(raw.get("scene_awareness", {})),
         "platform_routing": _normalize_platform_routing_config(raw.get("platform_routing", {})),
         "coordination": _normalize_coordination_config(raw.get("coordination", {})),
+        # 感官触发：屏幕（弥娅之眼）与摄像头。以前这两段在这里被丢掉，
+        # 导致 yaml 里的开关对运行中的系统完全无效。
+        "screen_aware": _normalize_screen_aware_config(raw.get("screen_aware")),
+        "camera_aware": _normalize_camera_aware_config(raw.get("camera_aware")),
     }
 
 
@@ -182,6 +191,69 @@ def _normalize_coordination_config(raw: dict) -> dict:
         "min_interval_seconds": raw.get("min_interval_seconds", 300),
         "quiet_hours_enabled": raw.get("quiet_hours_enabled", True),
         "quiet_hours": raw.get("quiet_hours", [23, 0, 1, 2, 3, 4, 5, 6, 7]),
+    }
+
+
+def get_default_camera_aware_config() -> dict:
+    """摄像头主动触发的默认配置（yaml 里缺项或整段缺失时使用）。
+
+    与 ``config/proactive_chat.yaml`` 的 ``camera_aware`` 段一一对应，是唯一的
+    默认值来源：``ProactiveChatSystem.__init__`` 与配置归一化共用它，避免两处
+    各写一份默认值而慢慢走样。
+    """
+    return {
+        "enabled": True,
+        "min_interval": 90,
+        "min_confidence": 0.62,
+        "events": ["wave", "sit_down", "stand_up", "walk", "scene_change", "long_still"],
+        # 在场判断：notify_on 支持 returned（刚回来）与 left（确认离开）
+        "presence": {
+            "enabled": True,
+            "notify_on": ["returned"],
+            "min_confidence": 0.5,
+            "min_interval": 240,
+        },
+        # 活动变化：notify_on 留空表示所有识别到的活动变化都交给模型判断
+        "activity": {
+            "enabled": True,
+            "notify_on": ["typing", "phone", "drink", "stretch", "walk", "sit_down", "stand_up", "lean_back"],
+            "min_interval": 300,
+        },
+        # 弥娅自主视觉：只决定"她攒下的话要不要投递"
+        "agency": {
+            "enabled": True,
+            "max_age_seconds": 600,
+        },
+    }
+
+
+def _normalize_camera_aware_config(raw: Any) -> dict:
+    """把 yaml 的 camera_aware 段补全默认值后原样带下去。
+
+    ``_normalize_config`` 以前用一张固定的键列表重建配置，把 ``camera_aware``
+    （以及 ``screen_aware``）整段丢掉了：于是在 ``config/proactive_chat.yaml`` 里
+    写的开关全部静默失效——presence / activity / agency 关不掉，
+    ``agency.max_age_seconds`` 也改不动，一律落回代码里的硬编码默认值。
+    """
+    default = get_default_camera_aware_config()
+    source = raw if isinstance(raw, dict) else {}
+    merged = dict(default)
+    for key, value in source.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            # 段内是部分配置时保留同段其余默认值，而不是整段覆盖
+            merged[key] = {**merged[key], **value}
+        else:
+            merged[key] = value
+    return merged
+
+
+def _normalize_screen_aware_config(raw: Any) -> dict:
+    """弥娅之眼（屏幕感知）开关与节奏。"""
+    source = raw if isinstance(raw, dict) else {}
+    return {
+        "enabled": source.get("enabled", True),
+        "min_interval": source.get("min_interval", 30),
+        "max_daily_vision": source.get("max_daily_vision", 24),
     }
 
 
@@ -315,6 +387,38 @@ class ProactiveResult:
     message: Optional[str]
     trigger_type: str
     context: Optional[ChatContext] = None
+    # 触发层是否已经自己投递过这条消息（例如走统一协调器、且只有投递成功才取走她攒下的话）。
+    # 后台轮询据此避免再发一次：全局冷却只是碰巧挡住了重复，不是设计。
+    delivered: bool = False
+    # 提案阶段为了去重而先记下的簿记，在**没发出去**时用它撤销。
+    # 以前这些记账发生在提案时、且只在被拒时退掉每日/每小时额度，其余（"这类事件刚刚
+    # 提过"、"这句话说过了"、"这个变化我消费了"）全部保留——于是一条被协调器拦下的
+    # 消息，会静默地让同类消息在接下来几分钟到半小时内再也发不出来。
+    rollback: Optional[Callable[[], None]] = None
+    # 真正投递成功后才该做的收尾（例如把"这个变化我已经用过了"落定）。
+    on_delivered: Optional[Callable[[], None]] = None
+
+    def undo(self) -> None:
+        """撤销提案阶段记下的账；重复调用是安全的。"""
+        callback, self.rollback = self.rollback, None
+        self.on_delivered = None
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception:  # noqa: BLE001 - 撤销失败不该盖住"没发出去"这个事实
+            logger.debug("[主动聊天] 回滚提案簿记失败", exc_info=True)
+
+    def settle(self) -> None:
+        """投递成功后的收尾；重复调用是安全的。"""
+        callback, self.on_delivered = self.on_delivered, None
+        self.rollback = None
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception:  # noqa: BLE001
+            logger.debug("[主动聊天] 投递后收尾失败", exc_info=True)
 
 
 @dataclass
@@ -367,17 +471,12 @@ class ProactiveChatSystem:
         self._emotion_config = triggers.get("emotion", {})
         self._check_in_config = triggers.get("check_in", {})
         self._ai_config = triggers.get("ai", {})
+        # 归一化后这两段一定存在；兜底只为防止 _config 被外部替换
         self._screen_aware_config = self._config.get(
-            "screen_aware", {"enabled": True, "min_interval": 30, "max_daily_vision": 24}
+            "screen_aware", _normalize_screen_aware_config(None)
         )
         self._camera_aware_config = self._config.get(
-            "camera_aware",
-            {
-                "enabled": True,
-                "min_interval": 90,
-                "min_confidence": 0.62,
-                "events": ["wave", "sit_down", "stand_up", "walk", "scene_change", "long_still"],
-            },
+            "camera_aware", get_default_camera_aware_config()
         )
 
         # 限制配置
@@ -467,6 +566,9 @@ class ProactiveChatSystem:
         self._last_screen_intent: Optional[Any] = None
         self._last_camera_event_key: str = ""
         self._last_camera_event_time: float = 0.0
+        self._last_presence_key: str = ""
+        self._last_presence_time: float = 0.0
+        self._last_activity_time: float = 0.0
 
         # === 意图持续机制 ===
         self._pending_intents: dict[int, IntentState] = {}
@@ -872,24 +974,15 @@ class ProactiveChatSystem:
                         result = await self.check_and_respond(target_id)
 
                         if result and result.should_respond and result.message:
-                            if self._send_callback:
-                                ctx = result.context
-                                chat_type = ctx.chat_type if ctx else "private"
-                                target = target_id
-                                if chat_type == "group" and ctx:
-                                    target = ctx.target_id
-                                platform = ctx.platform if ctx else "terminal"
-
-                                try:
-                                    await self._send_callback(
-                                        result.message, target, chat_type, platform, result.trigger_type
-                                    )
-                                    logger.info(
-                                        f"[主动聊天] [后台] [{result.trigger_type}] "
-                                        f"target={target_id} -> {result.message[:30]}"
-                                    )
-                                except Exception as e:
-                                    logger.error(f"[主动聊天] 发送回调失败: {e}")
+                            if result.delivered:
+                                # 触发层已经自己投递过（只有投递成功才会返回这个结果），
+                                # 再走一遍发送出口就是同一条消息发两遍。
+                                logger.info(
+                                    "[主动聊天] [后台] [%s] target=%s 已投递 -> %s",
+                                    result.trigger_type, target_id, result.message[:30],
+                                )
+                                continue
+                            await self._deliver_background_result(target_id, result)
                     except Exception as e:
                         logger.warning(f"[主动聊天] 后台检查 target={target_id} 失败: {e}")
                         continue
@@ -1057,7 +1150,12 @@ class ProactiveChatSystem:
         return True
 
     def _is_duplicate(self, target_id: int, message: str) -> bool:
-        """检查重复消息"""
+        """检查重复消息，并把这次提案记进缓存。
+
+        注意它**总会**写入 `_message_cache`，包括返回 False 的情况——那正是"这条我刚
+        提过"的记忆。提案被下游拒绝时用 `_forget_message_proposal` 撤销，否则一句没能
+        发出去的话会让她在 `_duplicate_window` 内再也不敢说同样的话。
+        """
         if not message:
             return True
 
@@ -1081,6 +1179,42 @@ class ProactiveChatSystem:
 
         return False
 
+    def _forget_message_proposal(self, target_id: int, message: str) -> None:
+        """撤销一次没能投递出去的提案留下的记账。
+
+        清掉内容去重记忆、`_message_cache` 里的指纹、同类触发的冷却时间戳，并退还
+        每日/每小时额度。调用方随后可以重新提案同一件事。
+        """
+        if not message:
+            return
+        prefix = message[:20] if len(message) > 20 else message
+        history = self._sent_messages_history.get(target_id)
+        if history:
+            self._sent_messages_history[target_id] = [
+                (msg, stamp) for msg, stamp in history
+                if (msg[:20] if len(msg) > 20 else msg) != prefix
+            ]
+        self._message_cache.pop(
+            hashlib.md5(f"{target_id}:{message[:50]}".encode()).hexdigest(), None)
+        by_type = self._last_trigger_by_type.get(target_id)
+        if by_type:
+            # The camera's own three sub-triggers share this one cooldown slot, so
+            # a rejected line used to silence the next real event for 180 seconds.
+            by_type.pop("camera_aware", None)
+
+    def _remember_message(self, target_id: int, message: str) -> None:
+        """记下"这句话真的说出去了"。
+
+        与 `_forget_message_proposal` 对称：`_is_duplicate` 把"检查"和"记录"揉在
+        一起，所以投递之前调用它就会给一句还没发出去的话打上"已说过"的戳。现在由
+        投递成功的路径显式记录，检查那一侧保持只读。
+        """
+        if not message:
+            return
+        self._message_cache[
+            hashlib.md5(f"{target_id}:{message[:50]}".encode()).hexdigest()
+        ] = datetime.now()
+
     def _record_trigger(self, target_id: int):
         """记录触发"""
         now = datetime.now()
@@ -1095,6 +1229,72 @@ class ProactiveChatSystem:
         if target_id not in self._hourly_count:
             self._hourly_count[target_id] = []
         self._hourly_count[target_id].append(now)
+
+    def _refund_trigger(self, target_id: int):
+        """把一次"没能发出去"的提案还给她的额度。
+
+        ``_record_trigger`` 记的是**提案**，而统一协调器拦下的提案根本没到佳那里。
+        让它照样占额度，等于一条系统通知就能把她一小时的嘴堵上——日志里那 5 条被
+        拦下的摄像头话语，就是这么变成"她什么也没想说"的。额度应该只统计真的
+        送到他面前的句子。
+
+        只退还小时/每日额度，``_last_trigger_time`` 不退：她确实想过一次，
+        下一轮稍微退让一点是合理的节奏。
+        """
+        today = datetime.now().date()
+        daily = self._daily_count.get(target_id)
+        if daily and daily.get("date") == today:
+            daily["count"] = max(0, int(daily.get("count", 0)) - 1)
+        stamps = self._hourly_count.get(target_id)
+        if stamps:
+            stamps.pop()
+
+    async def _deliver_background_result(self, target_id: int, result: ProactiveResult) -> bool:
+        """把一个后台提案交到发送出口，并如实记录它有没有真的出去。
+
+        返回佳是否真的收到了。被统一协调器拦下的提案不花她任何额度——它根本没发出去，
+        不该占这一小时的预算。以前这里无条件写"已发送"，于是日志说着"发了"，
+        而她其实一个字都没到佳面前。
+        """
+        if not result.message:
+            return False
+        ctx = result.context
+        chat_type = ctx.chat_type if ctx else "private"
+        target = ctx.target_id if (ctx and chat_type == "group") else target_id
+        platform = ctx.platform if ctx else "terminal"
+
+        if not self._send_callback:
+            self._refund_trigger(target_id)
+            result.undo()
+            logger.info(
+                "[主动聊天] [后台] [%s] target=%s 没有发送出口，未发送（额度已退还）",
+                result.trigger_type, target_id,
+            )
+            return False
+        try:
+            sent = await self._send_callback(
+                result.message, target, chat_type, platform, result.trigger_type
+            )
+        except Exception as e:
+            logger.error(f"[主动聊天] 发送回调失败: {e}")
+            self._refund_trigger(target_id)
+            result.undo()
+            return False
+        # 发送出口返回 False 表示被统一协调器拦下（限频/静默/去重）。
+        if sent is False:
+            self._refund_trigger(target_id)
+            result.undo()
+            logger.info(
+                "[主动聊天] [后台] [%s] target=%s 被协调器拦下，未发送（额度已退还）: %s",
+                result.trigger_type, target_id, result.message[:30],
+            )
+            return False
+        logger.info(
+            "[主动聊天] [后台] [%s] target=%s -> %s",
+            result.trigger_type, target_id, result.message[:30],
+        )
+        result.settle()
+        return True
 
     def _calculate_scene_profile(self, context: ChatContext) -> float:
         """Layer1 场景感知概率衰减 → 返回最终概率乘数 [0, 1]"""
@@ -1170,6 +1370,42 @@ class ProactiveChatSystem:
                 parts.append(camera_ctx)
         except Exception:
             logger.debug("[主动聊天] 读取摄像头视觉上下文失败", exc_info=True)
+
+        # Presence answers "is Jia at the computer right now", which is a
+        # different question from "what did the camera see recently".
+        try:
+            from mcpserver.screen_vision.presence import presence_card
+
+            presence_ctx = presence_card()
+            if presence_ctx:
+                parts.append(presence_ctx)
+        except Exception:
+            logger.debug("[主动聊天] 读取在场状态失败", exc_info=True)
+
+        # What Jia has actually been doing, accumulated over minutes rather than
+        # read off a single frame.
+        try:
+            from mcpserver.screen_vision.activity import activity_card
+
+            activity_ctx = activity_card()
+            if activity_ctx:
+                parts.append(activity_ctx)
+        except Exception:
+            logger.debug("[主动聊天] 读取活动状态失败", exc_info=True)
+
+        # Her own watching notes: the impressions she wrote while looking, in her
+        # own words, over the last few minutes. The tracker above says "typing";
+        # this says what she made of it. Without it she judges the present from a
+        # single sensor line, which is the difference between a dashboard and
+        # someone who has been sitting with you.
+        try:
+            from mcpserver.screen_vision.vision_agent import get_vision_agency
+
+            watch_ctx = get_vision_agency().memory_card(limit=6)
+            if watch_ctx:
+                parts.append(watch_ctx)
+        except Exception:
+            logger.debug("[主动聊天] 读取弥娅的观察印象失败", exc_info=True)
 
         return "\n".join(parts)
 
@@ -1269,6 +1505,26 @@ class ProactiveChatSystem:
             if result:
                 return result
 
+        # 6.5 在场变化触发（回来 / 离开）
+        if self.is_trigger_enabled("camera_aware"):
+            result = await self._check_presence_trigger(target_id, context)
+            if result:
+                return result
+
+        # 6.6 弥娅自己在观察中已经决定要说的话。
+        # 放在"再问一次该不该说"前面：她已经想过一遍的句子，优先于现场重新判断；
+        # 否则每一次活动变化都会把它挤到下一轮，而它是有寿命的。
+        if self.is_trigger_enabled("camera_aware"):
+            result = await self._check_miya_vision_trigger(target_id, context)
+            if result:
+                return result
+
+        # 6.7 活动变化触发（开始敲键盘 / 看手机 / 起身走动…）：由她自己判断要不要开口
+        if self.is_trigger_enabled("camera_aware"):
+            result = await self._check_activity_trigger(target_id, context)
+            if result:
+                return result
+
         # 7. AI触发
         if self.is_trigger_enabled("ai"):
             result = await self._check_ai_trigger(target_id, context)
@@ -1345,7 +1601,293 @@ class ProactiveChatSystem:
         self._record_trigger(target_id)
         self._record_trigger_by_type(target_id, "camera_aware")
         self._record_sent_message(target_id, message)
-        return ProactiveResult(True, message, "camera_aware", context)
+        return ProactiveResult(
+            True, message, "camera_aware", context,
+            rollback=lambda: self._forget_camera_event_proposal(target_id, message, event_key),
+        )
+
+    def _forget_camera_event_proposal(self, target_id: int, message: str, event_key: str) -> None:
+        """Undo a camera-event proposal that never went out.
+
+        ``_last_camera_event_key`` has no time window, so writing it for a
+        rejected message used to mean that same kind of event (a "坐下", say)
+        could never trigger again for the life of the process.
+        """
+        if self._last_camera_event_key == event_key:
+            self._last_camera_event_key = ""
+            self._last_camera_event_time = 0.0
+        self._forget_camera_proposal(target_id, message)
+
+    async def _check_presence_trigger(self, target_id: int, context: ChatContext) -> Optional[ProactiveResult]:
+        """Greet a return or note a departure, driven by derived signals only.
+
+        The tracker raises ``transition`` exactly once per real state change, so
+        this path never repeats itself for a single arrival or departure.
+        """
+        config = self._camera_aware_config.get("presence") or {}
+        if not config.get("enabled", True):
+            return None
+        notify_on = {str(item) for item in config.get("notify_on", ["returned"])}
+        try:
+            from core.camera_control import read_state
+            from mcpserver.screen_vision.presence import get_presence_tracker
+
+            camera_state = read_state()
+            snapshot = get_presence_tracker().snapshot()
+        except Exception:
+            return None
+        # Presence messages stay behind the same consent gate as camera events.
+        if not camera_state.get("autonomous") or camera_state.get("mode") == "off":
+            return None
+        transition = str(snapshot.transition or "")
+        if transition not in notify_on:
+            return None
+        confidence = float(snapshot.confidence or 0)
+        if confidence < float(config.get("min_confidence", 0.5)):
+            return None
+        # Keyed on *when* the change happened, not on how long ago a face was last
+        # seen. `last_face_seconds` is small by construction whenever "returned" is
+        # produced (a return means a face was just detected), so the key was always
+        # "returned:0" - and because it was written before delivery, one rejected
+        # greeting closed this path for the rest of the process.
+        transition_key = f"{transition}:{round(float(snapshot.updated_at or 0.0), 3)}"
+        if transition_key == getattr(self, "_last_presence_key", ""):
+            return None
+        # Throttling, quiet hours and de-duplication belong to the unified
+        # coordinator, which every background source now passes through. Keeping a
+        # second copy of those rules here is how the camera ended up governed by
+        # limits nothing else obeyed.
+        mood = "温柔" if transition == "returned" else "关心"
+        topic = "佳刚回到电脑前" if transition == "returned" else "佳暂时离开了电脑"
+        prompt = (
+            f"你是弥娅。摄像头判断：{snapshot.describe()}（依据：{'、'.join(snapshot.reasons) or '视觉线索'}）\n"
+            f"请用{mood}的语气，对佳说一句自然的话，围绕{topic}，不超过25字。"
+            "如果不确定或此刻不适合说话，回复 SKIP。"
+        )
+        try:
+            response = await self.ai_client.chat(messages=[AIMessage(role="user", content=prompt)], tools=[], tool_choice="none")
+            message = str(response or "").strip()
+        except Exception:
+            return None
+        if message.upper().startswith("SKIP") or len(message) < 2:
+            return None
+        if self._check_message_content_duplicate(target_id, message) or self._is_duplicate(target_id, message):
+            return None
+        self._last_presence_key = transition_key
+        self._record_trigger(target_id)
+        self._record_trigger_by_type(target_id, "camera_aware")
+        self._record_sent_message(target_id, message)
+        # Bookkeeping for a message that may still be refused downstream. Without
+        # this, one throttled greeting marked the arrival as already-greeted and
+        # she stayed silent about it for the rest of the process.
+        return ProactiveResult(True, message, "camera_aware", context,
+                               rollback=lambda: self._forget_presence_proposal(target_id, transition_key, message))
+
+    def _forget_presence_proposal(self, target_id: int, transition_key: str, message: str) -> None:
+        """Undo the bookkeeping of a presence greeting that never went out."""
+        if getattr(self, "_last_presence_key", "") == transition_key:
+            self._last_presence_key = ""
+        self._forget_message_proposal(target_id, message)
+        self._refund_trigger(target_id)
+
+    async def _check_activity_trigger(self, target_id: int, context: ChatContext) -> Optional[ProactiveResult]:
+        """React to a change in what Jia is doing, if the model judges it worth it.
+
+        The activity tracker decides *what* changed; the model decides *whether*
+        to speak - there is no duration threshold in the code, because "he has
+        been typing for ninety minutes" is a judgement, not a rule. That makes
+        this the single place Miya decides whether to talk about what he is
+        doing: the camera bridge only remembers it.
+
+        She decides with everything she perceives - presence, the accumulated
+        activity, her own watching notes, the conversation, how she feels - not
+        with the one line the tracker produced.
+        """
+        config = self._camera_aware_config.get("activity") or {}
+        if not config.get("enabled", True):
+            return None
+        try:
+            from core.camera_control import read_state
+            from mcpserver.screen_vision.activity import activity_change_card
+
+            camera_state = read_state()
+        except Exception:
+            return None
+        if not camera_state.get("autonomous") or camera_state.get("mode") == "off":
+            return None
+        card = activity_change_card()
+        if not card:
+            return None
+        # Throttling belongs to the unified coordinator now; the local interval and
+        # trigger-type cooldown were a second, divergent set of rules.
+        prompt = (
+            "你是弥娅，正陪在佳身边。下面这些是你此刻真正感知到的：\n"
+            f"{self._build_deep_context(context)}\n\n"
+            f"{card}\n"
+            "他刚刚的这个变化，你要不要开口？像一个人那样判断，而不是像告警器："
+            "他在专心、他刚被打断、他已经很久没歇、或者这句话现在说出来只是打扰——"
+            "那就不说，只回复 SKIP。什么时候开口、说什么都由你定。"
+            "要开口就用一句不超过 25 字的自然口语，语气贴合你当下的形态；"
+            "不要说摄像头、识别、置信度这类字眼，也不要报流水账。"
+        )
+        try:
+            response = await self.ai_client.chat(messages=[AIMessage(role="user", content=prompt)], tools=[], tool_choice="none")
+            message = str(response or "").strip()
+        except Exception:
+            return None
+        if message.upper().startswith("SKIP") or len(message) < 2:
+            # The model declined, but the change is still news for later context,
+            # so it is deliberately not consumed here.
+            return None
+        if self._check_message_content_duplicate(target_id, message) or self._is_duplicate(target_id, message):
+            return None
+        self._record_trigger(target_id)
+        self._record_trigger_by_type(target_id, "camera_aware")
+        self._record_sent_message(target_id, message)
+        return ProactiveResult(
+            True, message, "camera_aware", context,
+            rollback=lambda: self._forget_camera_proposal(target_id, message),
+            # The change was only peeked at, so it is used up on the way out.
+            on_delivered=self._consume_activity_change,
+        )
+
+    @staticmethod
+    def _consume_activity_change() -> None:
+        """Mark the peeked activity change as reported, once it really went out."""
+        try:
+            from mcpserver.screen_vision.activity import take_activity_change
+
+            take_activity_change()
+        except Exception:  # noqa: BLE001 - consuming is best effort
+            logger.debug("[主动聊天] 取走活动变化失败", exc_info=True)
+
+    def _forget_camera_proposal(self, target_id: int, message: str) -> None:
+        """Undo the bookkeeping of a camera line that never went out.
+
+        The activity change is consumed on the way out rather than on the way in:
+        consuming it at proposal time destroyed the observation even when the
+        coordinator refused the message, so a change nobody ever heard about could
+        not be offered again.
+        """
+        self._forget_message_proposal(target_id, message)
+        self._refund_trigger(target_id)
+
+    async def _check_miya_vision_trigger(self, target_id: int, context: ChatContext) -> Optional[ProactiveResult]:
+        """Use what Miya herself decided was worth saying while watching.
+
+        This is the end of the chain: Miya chose when to look, interpreted the
+        frame with her own mind, judged it notable, and wrote the sentence. The
+        code here only delivers it - it does not second-guess the wording.
+
+        Delivery goes through the unified coordinator, which owns throttling,
+        quiet hours and de-duplication. Her line is only removed from the queue
+        once the coordinator has actually taken it, so a rejected message is not
+        silently destroyed.
+        """
+        config = self._camera_aware_config.get("agency") or {}
+        if not config.get("enabled", True):
+            return None
+        try:
+            from core.camera_control import read_state
+            from mcpserver.screen_vision.vision_agent import get_vision_agent
+
+            camera_state = read_state()
+        except Exception:
+            return None
+        if not camera_state.get("autonomous") or camera_state.get("mode") == "off":
+            return None
+        agent = get_vision_agent()
+        pending = agent.peek_messages()
+        if not pending:
+            return None
+        now = time.time()
+        earliest = pending[0]
+        if now - float(earliest.get("at", now)) > float(config.get("max_age_seconds", 600)):
+            # Stale by the time she could say it; drop rather than blurt it out.
+            agent.take_message()
+            return None
+        message = str(earliest.get("message") or "").strip()
+        if len(message) < 2:
+            agent.take_message()
+            return None
+        # Only the *read-only* history check here. `_is_duplicate` both checks and
+        # records, so calling it before delivery meant a refused line was marked as
+        # already-said; the next poll (45s later, inside its 90s window) then saw
+        # it as a duplicate and destroyed it. Everything she decided to say died on
+        # the first rejection, which is why the log filled with rising
+        # `camera:voice:...:N` sequence numbers and not one delivered line.
+        if self._check_message_content_duplicate(target_id, message):
+            # This one really was said before, so dropping it is correct.
+            agent.take_message()
+            return None
+        # Ask the one coordinator first; only then does her line leave the queue.
+        delivered = await self._deliver_via_coordinator(
+            target_id, message, context, fact_key=str(earliest.get("at") or "")
+        )
+        if not delivered:
+            return None
+        logger.info("[主动聊天] [弥娅自主视觉] target=%s: %s", target_id, message)
+        # Already delivered above, through the one coordinator. Saying so keeps the
+        # background loop from handing the same line to the send outlet a second
+        # time and calling it sent when the coordinator refused it.
+        return ProactiveResult(True, message, "camera_aware", context, delivered=True)
+
+    async def _deliver_via_coordinator(
+        self,
+        target_id: int,
+        message: str,
+        context: ChatContext,
+        *,
+        fact_key: str = "",
+    ) -> bool:
+        """Send one already-decided line through the unified proactive coordinator.
+
+        Falls back to the ordinary trigger bookkeeping when the coordinator is not
+        wired up, so this never becomes a silent dead end.
+
+        ``fact_key`` identifies *this line*; a retry of the same line must present
+        the same key, or the coordinator's own cooldown cannot recognise it.
+        """
+        from core.proactive_coordinator import get_proactive_coordinator
+
+        coordinator = get_proactive_coordinator()
+        if coordinator is None:
+            return False
+        platform = getattr(context, "platform", "terminal") or "terminal"
+        chat_type = getattr(context, "chat_type", "private") or "private"
+        # One line, one stable key. A per-attempt counter used to make every retry
+        # look like a fresh event, so whether it went out depended only on how much
+        # of the hourly budget was left.
+        identity = fact_key or str(int(time.time()))
+        ok = await coordinator.submit_message(
+            message,
+            key=f"camera:voice:{target_id}:{identity}",
+            target_id=str(target_id),
+            chat_type=chat_type,
+            platform=platform,
+            trigger_type="camera_aware",
+            # Grouped with the camera's own presence events rather than with
+            # proactive_chat: they are both things Miya saw.
+            source="camera",
+            # A line she already decided to say is her voice, not a state change;
+            # the two draw on separate budgets so her small talk cannot starve the
+            # one event that actually matters.
+            kind="voice",
+        )
+        if not ok:
+            return False
+        try:
+            from mcpserver.screen_vision.vision_agent import get_vision_agent
+
+            get_vision_agent().take_message()
+        except Exception:
+            logger.debug("[主动聊天] 取走已发送的观察消息失败", exc_info=True)
+        self._record_trigger(target_id)
+        self._record_trigger_by_type(target_id, "camera_aware")
+        self._record_sent_message(target_id, message)
+        # Now that it really went out, it is fair to remember it as said.
+        self._remember_message(target_id, message)
+        return True
 
     async def _check_context_trigger(self, target_id: int, context: ChatContext) -> Optional[ProactiveResult]:
         """上下文触发 - 行为期望跟进（AI 优先）"""

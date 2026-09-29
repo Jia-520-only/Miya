@@ -458,6 +458,13 @@ class PromptManager:
             if screen_context:
                 extra_context += "\n[弥娅看向屏幕] " + screen_context + "\n"
 
+            # Her camera, kept separate from the screen: "what is on the monitor"
+            # and "who is in front of it" are different senses, and merging them
+            # made her conflate the two.
+            vision_context = additional_context.get("vision_context", "")
+            if vision_context:
+                extra_context += "\n" + vision_context + "\n"
+
             if extra_context:
                 user_prompt = extra_context + user_prompt
                 logger.info("[PromptManager] 已添加消息上下文（感知/搜索/引用/文件/媒体/图片/群聊）")

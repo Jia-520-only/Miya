@@ -508,6 +508,15 @@ class DecisionHub:
             self.proactive_chat.set_personality(self.personality)
             self.proactive_chat.set_prompt_manager(self.prompt_manager)
 
+            # 弥娅用自己的对话模型来理解她看到的东西，而不是另开一个
+            # （常常没有额度的）视觉端点。这样"看"和"说"是同一个心智。
+            try:
+                from mcpserver.screen_vision.vision_agent import set_chat_client
+
+                set_chat_client(self.ai_client)
+            except Exception as e:
+                logger.warning(f"[决策层] 摄像头解读器接入对话模型失败: {e}")
+
             try:
                 from pathlib import Path
 
@@ -629,6 +638,13 @@ class DecisionHub:
                         chat_type=chat_type,
                         platform=platform,
                         trigger_type=trigger_type or "proactive_chat",
+                        # Attribute the message to the organ that produced it. Every
+                        # camera line (presence, activity, her own observations) used
+                        # to be booked as "proactive_chat", so the camera's words
+                        # competed with the AI trigger for one quota while the
+                        # camera's own events had another - and neither could see
+                        # the other.
+                        source="camera" if trigger_type == "camera_aware" else "proactive_chat",
                     )
                 await self._dispatch_proactive_message(
                     message=message,
@@ -856,6 +872,14 @@ class DecisionHub:
             )
 
             if result and result.should_respond and result.message:
+                if result.delivered:
+                    # 触发层已经通过统一协调器投递过这条消息（只有投递成功才会返回这个结果）。
+                    # 再走一次分发就是同一条内容发两遍。
+                    logger.info(
+                        "[决策层] 主动消息已由触发层投递，跳过重复分发: %s", result.message[:30]
+                    )
+                    return result
+
                 ctx_platform = result.context.platform if result.context else None
                 platform = ctx_platform or perception.get("platform", "terminal")
                 target_to_send = result.context.target_id if result.context else target_id
@@ -1458,6 +1482,49 @@ class DecisionHub:
             await self.proactive_chat.start_background_loop()
         else:
             logger.info("[决策层] 主动聊天系统未启用，跳过后台轮询")
+        await self.start_vision_agency_background()
+        await self.start_camera_proactive_background()
+
+    async def start_camera_proactive_background(self):
+        """把摄像头的所见接入统一主动链路（记忆/形态/情绪/上下文一起带上）。
+
+        和观察循环刻意分开：看见和开口是两种节奏，而之前缺的正是中间那一步。
+        它自己也不判断"该不该说"——那是统一协调器的事，这里只负责把事实带上
+        上下文提交上去。
+        """
+        if getattr(self, "_camera_bridge_task", None) is not None:
+            return
+        try:
+            from mcpserver.screen_vision.proactive import get_camera_bridge
+
+            bridge = get_camera_bridge()
+            if bridge.start():
+                logger.info("[决策层] 摄像头已接入统一主动链路")
+        except Exception as exc:
+            logger.warning(f"[决策层] 摄像头接入主动链路失败: {exc}")
+
+    async def start_vision_agency_background(self):
+        """让弥娅在开机后自己开始观察（佳要求的）。
+
+        仍然尊重同意边界：`/camera off` 或关闭自主观察时不会自启。
+        自启本身放在后台任务里，因为要等桌面端先拿稳摄像头。
+        """
+        # Idempotent: this hook is reachable from more than one startup path.
+        if getattr(self, "_vision_autostart_task", None) is not None:
+            return
+        try:
+            from mcpserver.screen_vision.vision_agent import autostart_after_delay, should_autostart
+
+            allowed, reason = should_autostart()
+            if not allowed:
+                logger.info("[决策层] 弥娅自主视觉开机自启跳过: %s", reason)
+                return
+            task = asyncio.create_task(autostart_after_delay())
+            # Hold a reference so the task is not garbage collected mid-wait.
+            self._vision_autostart_task = task
+            logger.info("[决策层] 弥娅自主视觉将在启动稳定后自行开始观察")
+        except Exception as e:
+            logger.warning(f"[决策层] 弥娅自主视觉开机自启失败: {e}")
 
     async def _handle_smart_emoji(self, response: str, perception: dict):
         """智能表情包发送 - 根据回复内容自动选择表情包
@@ -2926,6 +2993,21 @@ class DecisionHub:
             except Exception:
                 pass
 
+            # 【弥娅的摄像头】她自己的观察循环看到的东西。
+            # 这一块以前缺失：观察循环、在场判断、活动累积、印象记忆全都在跑，
+            # 却没有任何一条进入回复上下文——所以佳问"你在摄像头里看到我了吗"，
+            # 她只能如实回答"摄像头那一路我没接进来"。现在接上。
+            vision_context = ""
+            try:
+                from mcpserver.screen_vision.vision_context import vision_context_card
+
+                card = vision_context_card()
+                if card:
+                    vision_context = card
+                    logger.info(f"[决策层] 弥娅的摄像头: {card[:120]}...")
+            except Exception:
+                logger.debug("[决策层] 读取摄像头上下文失败", exc_info=True)
+
             # 【陪玩】注入陪玩画面（如果游戏陪玩引擎活跃）
             try:
                 from core.game_play.engine import get_game_play_engine
@@ -3001,6 +3083,8 @@ class DecisionHub:
                     "image_context": image_context,
                     # 【陪玩】屏幕画面上下文
                     "screen_context": screen_context,
+                    # 【摄像头】弥娅自己的观察循环看到的东西
+                    "vision_context": vision_context,
                     # 【谛听】群聊上下文摘要
                     "group_chat_context": group_chat_context,
                     # 【意识感知】时间、地点、活动感知

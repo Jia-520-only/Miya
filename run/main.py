@@ -898,6 +898,11 @@ def main():
             # 启动主动聊天后台轮询
             if miya.decision_hub and miya.decision_hub.proactive_chat:
                 asyncio.create_task(miya.decision_hub.start_proactive_background())
+            elif miya.decision_hub:
+                # 弥娅的摄像头是她的感官，不依赖主动聊天是否开启。
+                # 看见之后能不能开口，同样不该取决于主动聊天开关。
+                asyncio.create_task(miya.decision_hub.start_vision_agency_background())
+                asyncio.create_task(miya.decision_hub.start_camera_proactive_background())
 
             while True:
                 try:
