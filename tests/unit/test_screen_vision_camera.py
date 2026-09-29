@@ -2,19 +2,43 @@ import asyncio
 import json
 from pathlib import Path
 
+import pytest
+
 from mcpserver.screen_vision.service import ScreenVisionService
 from mcpserver.screen_vision import local_camera
 from core.vision_context import VisionContextStore, record_camera_observation
-import importlib.util
+# Import the real module object: the service reaches camera control through
+# ``core.camera_control``, so a separately loaded copy would not be patched and
+# the test would silently read the developer's live control file instead.
+from core import camera_control
 
 
-_CONTROL_SPEC = importlib.util.spec_from_file_location("camera_control_test", "core/camera_control.py")
-camera_control = importlib.util.module_from_spec(_CONTROL_SPEC)
-assert _CONTROL_SPEC.loader is not None
-_CONTROL_SPEC.loader.exec_module(camera_control)
+@pytest.fixture(autouse=True)
+def _no_live_camera_inventory(monkeypatch):
+    """Keep capture-index selection independent of the developer's hardware.
+
+    The camera manager remembers which indices really deliver frames, so without
+    this a machine with a working second camera would change which index these
+    tests exercise.
+    """
+    from mcpserver.screen_vision import camera_manager
+
+    # The service uses the module-level singleton, so patch that instance.
+    monkeypatch.setattr(camera_manager.get_camera_manager(), "usable_indices", lambda: [])
+
+
+@pytest.fixture(autouse=True)
+def _fresh_adaptive_state():
+    """Learned mouth/pose state must not leak between tests."""
+    local_camera.reset_adaptive_state()
+    yield
+    local_camera.reset_adaptive_state()
 
 
 def _pose(*, left_wrist=(0.3, 0.6), right_wrist=(0.7, 0.6), nose=(0.5, 0.35)):
+    # Every joint is confident: a realistic skeleton. The local classifier now
+    # refuses to name an action from a mostly-unconfident skeleton, so fixtures
+    # that assert a specific action must supply a usable one.
     points = [{"x": 0.5, "y": 0.5, "confidence": 0.9} for _ in range(17)]
     points[0].update(x=nose[0], y=nose[1])
     points[5].update(x=0.4, y=0.5)
@@ -40,14 +64,153 @@ def _body_pose(*, sitting=False, left_wrist=(0.3, 0.6), right_wrist=(0.7, 0.6), 
     return pose
 
 
+def _frame_with_face(size: tuple[int, int] = (640, 480)):
+    """A real image, so normalized face boxes must be converted to pixels."""
+    from PIL import Image
+
+    return Image.new("RGB", size, (140, 140, 140))
+
+
+def _normalized_face(**overrides):
+    """A YuNet-shaped detection: normalized [0,1] box plus 5 landmarks.
+
+    Deliberately normalized, because that is what ``_detect_faces`` returns - and
+    feeding those values to ``int()`` is what produced a 0x0 crop.
+    """
+    face = {"x": 0.35, "y": 0.20, "width": 0.30, "height": 0.40, "score": 0.95,
+            "keypoints": [
+                {"x": 0.60, "y": 0.30},   # right eye
+                {"x": 0.40, "y": 0.30},   # left eye
+                {"x": 0.50, "y": 0.40},   # nose
+                {"x": 0.59, "y": 0.52},   # right mouth corner
+                {"x": 0.41, "y": 0.52},   # left mouth corner
+            ]}
+    face.update(overrides)
+    return face
+
+
+def test_normalized_face_box_is_converted_to_pixels():
+    """Regression: a normalized box fed to int() collapsed to a 0x0 crop.
+
+    That empty crop was handed to the identity and emotion models, so both
+    answered a constant - which is what "本地模型识别不准" actually was.
+    """
+    face = _normalized_face()
+    crop = local_camera._face_crop(_frame_with_face(), face)
+    # A 0.30 x 0.40 box on 640x480 is ~192x192 plus the margin.
+    assert crop.width > 100 and crop.height > 100
+    assert crop.width < 640 and crop.height < 480
+
+
+def test_face_crop_rejects_a_box_it_cannot_convert():
+    """A box that cannot yield a real area must fail loudly, not silently."""
+    degenerate = _normalized_face(x=0.5, y=0.5, width=0.0, height=0.0)
+    with pytest.raises(ValueError):
+        local_camera._face_crop(_frame_with_face(), degenerate)
+    with pytest.raises(ValueError):
+        local_camera._face_crop(_frame_with_face(), {"x": "bad", "y": 0.2, "width": 0.3, "height": 0.4})
+
+
+def test_two_different_frames_do_not_yield_the_same_face_crop():
+    """The old bug made every frame crop to the same empty image."""
+    from PIL import Image
+
+    left_frame = Image.new("RGB", (640, 480), (10, 10, 10))
+    right_frame = Image.new("RGB", (640, 480), (250, 250, 250))
+    face = _normalized_face()
+    assert local_camera._face_crop(left_frame, face).tobytes() \
+        != local_camera._face_crop(right_frame, face).tobytes()
+
+
+def test_analysis_reports_a_crop_failure_instead_of_feeding_a_black_image(monkeypatch):
+    monkeypatch.setattr(local_camera, "_decode_image", lambda _d: _frame_with_face())
+    monkeypatch.setattr(local_camera, "frame_luminance", lambda _i: 90.0)
+    monkeypatch.setattr(local_camera, "_detect_faces",
+                        lambda _i, threshold=None: [_normalized_face(width=0.0, height=0.0)])
+
+    def must_not_run(*_args, **_kwargs):
+        raise AssertionError("身份/表情模型不能拿到无效裁剪")
+
+    monkeypatch.setattr(local_camera, "_embedding", must_not_run)
+    monkeypatch.setattr(local_camera, "_emotion", must_not_run)
+
+    result = local_camera.analyze_local_frame(
+        "data:image/jpeg;base64,ZmFrZQ==", identity=True, emotion=True, pose=False
+    )
+    assert "face_crop_error" in result
+    assert "identity" not in result["observations"][0]
+    assert "emotion" not in result["observations"][0]
+
+
+def test_autonomous_analysis_uses_the_shared_pose_sequence(monkeypatch):
+    """The backend path must supply temporal history it never sent before.
+
+    Without it every temporal branch in the classifier was unreachable, so the
+    observation loop could only ever report a static posture.
+    """
+    monkeypatch.setattr(local_camera, "_decode_image", lambda _d: _frame_with_face())
+    monkeypatch.setattr(local_camera, "frame_luminance", lambda _i: 90.0)
+    monkeypatch.setattr(local_camera, "_detect_faces", lambda _i, threshold=None: [])
+    monkeypatch.setattr(local_camera, "_pose", lambda _i: _pose())
+
+    # Stand in for the persistent reader's dense sampling.
+    for offset in range(6):
+        local_camera._pose_sequence.record(_pose(left_wrist=(0.30 + 0.02 * offset, 0.30)),
+                                           key=0, at=1000.0 + offset, force=True)
+
+    result = local_camera.analyze_local_frame(
+        "data:image/jpeg;base64,ZmFrZQ==", identity=False, pose=True, pose_key=0
+    )
+    action = result["observations"][0]["action"]
+    # A history was available, so this is not the "no skeleton" bail-out.
+    assert action["kind"] != "low_confidence"
+
+
+def test_observe_frame_pose_is_rate_limited():
+    """Sampling must be throttled by the interval, not run per frame at 20Hz."""
+    import numpy as np
+
+    frame = np.zeros((48, 64, 3), dtype=np.uint8)
+    calls: list[int] = []
+
+    def fake_keypoints(_frame):
+        calls.append(1)
+        return [{"x": 0.5, "y": 0.5, "confidence": 0.9} for _ in range(17)]
+
+    original = local_camera._keypoints_from_bgr
+    local_camera._keypoints_from_bgr = fake_keypoints
+    try:
+        assert local_camera.observe_frame_pose(frame, key=0, at=100.0) is True
+        assert local_camera.observe_frame_pose(frame, key=0, at=100.2) is False
+        assert local_camera.observe_frame_pose(frame, key=0, at=100.0 + local_camera.POSE_SEQUENCE_SAMPLE_SECONDS) is True
+    finally:
+        local_camera._keypoints_from_bgr = original
+    assert len(calls) == 2, "节流没有生效"
+
+
 def test_pose_action_classifier_detects_raised_hand_and_wave():
-    raised = local_camera.classify_pose_action([], _pose(left_wrist=(0.3, 0.2), right_wrist=(0.7, 0.2)))
+    raised = local_camera.classify_pose_action([], _pose(left_wrist=(0.42, 0.2), right_wrist=(0.58, 0.2)))
     assert raised["kind"] == "raised_hand"
-    assert "手" in raised["label"]
+    assert "举起" in raised["label"]
 
     history = [_pose(left_wrist=(x, 0.3)) for x in (0.32, 0.55, 0.34, 0.57)]
     waved = local_camera.classify_pose_action(history, _pose(left_wrist=(0.33, 0.3)))
     assert waved["kind"] == "wave"
+    assert "挥手" in waved["label"]
+
+
+def test_pose_action_classifier_tells_a_stretch_apart_from_a_raise():
+    """Arms high and opened outward is a stretch; high and together is a raise."""
+    stretched = local_camera.classify_pose_action([], _pose(left_wrist=(0.16, 0.18), right_wrist=(0.84, 0.18)))
+    assert stretched["kind"] == "stretch"
+    assert "伸懒腰" in stretched["label"]
+
+
+def test_pose_action_classifier_reports_resting_hands_not_typing():
+    """Hands on the desk without travel must not be called typing."""
+    still = _pose(left_wrist=(0.46, 0.56), right_wrist=(0.54, 0.56))
+    result = local_camera.classify_pose_action([still] * 3, still)
+    assert result["kind"] != "typing"
 
 
 def test_pose_action_classifier_is_conservative_when_still():
@@ -350,21 +513,19 @@ def test_configured_local_camera_mode_uses_onnx_without_cloud_fallback(monkeypat
 
 
 def test_camera_analysis_mode_reads_qq_image_analyzer_config(monkeypatch):
+    """The camera route is read from the unified key and its own override key."""
     service = ScreenVisionService()
-    captured = {}
+    seen: list[tuple] = []
 
     def fake_get_qq_config(*path, default=None):
-        captured["path"] = path
-        captured["default"] = default
+        seen.append(path)
         return "local"
 
     monkeypatch.setattr("config.config_utils.get_qq_config", fake_get_qq_config)
 
     assert service._camera_analysis_mode() == "local"
-    assert captured == {
-        "path": ("tools", "qq_image_analyzer", "vision_mode"),
-        "default": "",
-    }
+    assert ("tools", "qq_image_analyzer", "vision_mode") in seen
+    assert ("tools", "qq_image_analyzer", "camera_analysis_mode") in seen
 
 
 def test_local_screen_route_uses_ocr_without_cloud_fallback(monkeypatch):
@@ -440,15 +601,10 @@ def test_unified_vision_mode_reads_from_qq_config(monkeypatch):
 
 def test_per_source_vision_mode_overrides_shared_route(monkeypatch):
     service = ScreenVisionService()
+    overrides = {"vision_mode": "cloud", "camera_analysis_mode": "local", "screen_analysis_mode": "hybrid"}
 
     def fake_get_qq_config(*path, default=None):
-        if path[-1] == "vision_mode":
-            return "cloud"
-        if path[-1] == "camera_analysis_mode":
-            return "local"
-        if path[-1] == "screen_analysis_mode":
-            return "hybrid"
-        return default
+        return overrides.get(path[-1], default)
 
     monkeypatch.setattr("config.config_utils.get_qq_config", fake_get_qq_config)
 
@@ -492,10 +648,9 @@ def test_camera_capabilities_are_read_only():
 
 def test_local_identity_store_keeps_embeddings_only(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("MIYA_CAMERA_IDENTITY_DIR", str(tmp_path))
-    monkeypatch.setattr(local_camera, "_decode_image", lambda _data: object())
-    monkeypatch.setattr(local_camera, "_detect_faces", lambda _image: [{"x": 0, "y": 0, "width": 10, "height": 10, "score": 0.99}])
-    monkeypatch.setattr(local_camera, "_face_crop", lambda image, _face: image)
-    monkeypatch.setattr(local_camera, "_embedding", lambda _image: [1.0, 0.0, 0.0])
+    monkeypatch.setattr(local_camera, "_decode_image", lambda _data: _frame_with_face())
+    monkeypatch.setattr(local_camera, "_detect_faces", lambda _image, threshold=None: [_normalized_face()])
+    monkeypatch.setattr(local_camera, "_embedding", lambda _image, **_kwargs: [1.0, 0.0, 0.0])
 
     result = local_camera.enroll_identity("data:image/jpeg;base64,ZmFrZQ==", "我")
 
@@ -552,6 +707,8 @@ def test_camera_control_state_and_observation_request_are_image_free(monkeypatch
 
 
 def test_autonomous_observation_requires_explicit_enable(monkeypatch, tmp_path: Path):
+    # Control paths must be redirected: otherwise the test reads whatever the
+    # developer's desktop last wrote and never exercises the consent branch.
     monkeypatch.setattr(camera_control, "_STATE_PATH", tmp_path / "control.json")
     monkeypatch.setattr(camera_control, "_REQUEST_PATH", tmp_path / "request.json")
     monkeypatch.setattr(camera_control, "_RESULT_PATH", tmp_path / "result.json")
@@ -562,6 +719,26 @@ def test_autonomous_observation_requires_explicit_enable(monkeypatch, tmp_path: 
         "query": "弥娅看看我",
     })))
     assert result["status"] == "consent_required"
+
+
+def test_autonomous_observation_runs_when_desktop_state_enables_it(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(camera_control, "_STATE_PATH", tmp_path / "control.json")
+    monkeypatch.setattr(camera_control, "_REQUEST_PATH", tmp_path / "request.json")
+    monkeypatch.setattr(camera_control, "_RESULT_PATH", tmp_path / "result.json")
+    camera_control.write_state("companion", autonomous=True, local_only=True)
+    service = ScreenVisionService()
+
+    def fake_wait(request_id: str, _timeout: float = 25.0):
+        return {"status": "success", "message": "本地动作：挥手", "request_id": request_id}
+
+    monkeypatch.setattr(camera_control, "wait_for_observation_result", fake_wait)
+    result = json.loads(asyncio.run(service.handle_handoff({
+        "tool_name": "request_camera_observation",
+        "query": "弥娅看看我",
+    })))
+
+    assert result["status"] == "success"
+    assert result["message"] == "本地动作：挥手"
 
 
 def test_vision_context_strips_image_payloads_and_builds_camera_card():

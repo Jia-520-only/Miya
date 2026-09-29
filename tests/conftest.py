@@ -381,6 +381,48 @@ def cleanup_after_test():
     gc.collect()
 
 
+@pytest.fixture(autouse=True)
+def _no_real_camera_hardware(monkeypatch):
+    """Keep every unit test off the physical cameras.
+
+    Probing real devices opens hardware, which is slow and can block inside
+    OpenCV, and it made results depend on which cameras the developer had
+    plugged in. Tests that need inventory supply their own fake devices.
+    """
+    try:
+        from mcpserver.screen_vision import camera_devices, camera_manager
+    except Exception:  # pragma: no cover - vision is optional
+        yield
+        return
+
+    monkeypatch.setattr(camera_devices, "list_camera_devices",
+                        lambda **_kwargs: {"status": "success", "devices": [], "count": 0,
+                                           "usable_count": 0, "message": "测试中不访问真实摄像头"})
+    manager = camera_manager.get_camera_manager()
+    monkeypatch.setattr(manager, "_sources", {})
+    monkeypatch.setattr(manager, "_browser_frame", None)
+    monkeypatch.setattr(manager, "_last_scan", 0.0)
+    monkeypatch.setattr(manager, "_scanning", False)
+    try:
+        from mcpserver.screen_vision.camera_stream import get_camera_pool
+
+        pool = get_camera_pool()
+        pool.stop_all()
+    except Exception:  # pragma: no cover - vision is optional
+        pool = None
+    yield
+    # Leave no cross-test residue: a stale _last_scan made later scans return a
+    # cached inventory, so results depended on test order. A leaked reader thread
+    # would also keep holding a real camera.
+    if pool is not None:
+        pool.stop_all()
+        pool._buffers = {}
+    manager._sources = {}
+    manager._browser_frame = None
+    manager._last_scan = 0.0
+    manager._scanning = False
+
+
 # ==================== 测试装饰器 ====================
 def skip_if_no_api_key(api_key_env_var: str = "AI_API_KEY"):
     """如果没有API密钥则跳过测试"""
