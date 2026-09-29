@@ -83,7 +83,11 @@ function seconds(value: unknown): string {
 
 function deviceLabel(index: unknown): string {
   if (index === -1 || index === null || index === undefined) return '浏览器那一路'
-  return `#${index}`
+  // The backend reports DirectShow names per index. A bare "#2" told nobody
+  // whether that was the laptop, the phone, or the 4K camera.
+  const name = camera.backendNames?.value?.[String(index)]
+    || camera.cameraHealth?.value?.names?.[String(index)]
+  return name ? `${name}` : `#${index}`
 }
 
 function backendFrameUrl(index: number): string {
@@ -122,7 +126,10 @@ async function toggleThumbnails() {
 }
 
 async function toggleWatching() {
-  await camera.setWatching(!agent.value.running)
+  // The backend reads the verb `start` / `stop`; passing `!running` sent the
+  // literal `true`, which matched neither branch and silently did nothing - so
+  // the button that is supposed to stop her watching never stopped anything.
+  await camera.setWatching(agent.value.running ? 'stop' : 'start')
 }
 
 async function speakNext() {
@@ -187,7 +194,10 @@ onBeforeUnmount(() => {
         <li v-for="device in health.devices" :key="device.index" class="cap-device" :class="{ bad: !device.usable }">
           <span class="cap-device-name">{{ deviceLabel(device.index) }}</span>
           <span class="cap-device-state">
-            <template v-if="device.usable">可用 · 亮度 {{ Math.round(device.luminance || 0) }}</template>
+            <template v-if="device.usable">
+              可用 · 亮度 {{ Math.round(device.luminance || 0) }}
+              <template v-if="device.sees_people"> · 看到人</template>
+            </template>
             <template v-else>{{ device.reason || '暂时没有画面' }}</template>
           </span>
           <span v-if="sources.sources?.[device.index]" class="cap-device-owner">
@@ -198,12 +208,12 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- The angles the backend holds. The browser-held one is the big preview above. -->
-    <div v-if="sources.backend_owned?.length" class="cap-sources">
+    <div v-if="sources.backendOwned?.length" class="cap-sources">
       <span class="cap-label">弥娅自己看到的画面</span>
       <div class="cap-sources-strip">
-        <figure v-for="index in sources.backend_owned" :key="index" class="cap-source">
+        <figure v-for="index in sources.backendOwned" :key="index" class="cap-source">
           <img :src="backendFrameUrl(index)" alt="" class="cap-source-media">
-          <figcaption>#{{ index }} · 约 1 帧/3 秒</figcaption>
+          <figcaption>{{ deviceLabel(index) }} · 约 1 帧/3 秒</figcaption>
         </figure>
       </div>
     </div>

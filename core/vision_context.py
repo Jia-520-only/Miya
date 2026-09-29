@@ -142,6 +142,45 @@ def record_camera_observation(
     return event
 
 
+def record_camera_event(
+    *,
+    kind: str,
+    summary: str,
+    confidence: float = 0.0,
+    mode: str = "autonomous",
+    status: str = "success",
+    camera_indices: list[int] | None = None,
+    faces: int | None = None,
+) -> dict[str, Any]:
+    """Record one derived camera event from Miya's own observation loop.
+
+    Two producers write here and they must both be able to: the desktop preview,
+    which hands frames over through ``/api/camera/result``, and Miya's own
+    autonomous loop, which owns the camera when no window is open. Only the
+    browser path used to write, so with the desktop app closed the camera-aware
+    trigger read an empty store and could never fire - she watched all evening
+    and the one path that turns seeing into speaking saw nothing at all.
+
+    Derived values only: the caller passes a gesture kind and a sentence, never a
+    frame.
+    """
+    text = str(summary or "").strip()
+    if not text:
+        return {}
+    return _store.add(
+        {
+            "source": "camera",
+            "kind": str(kind or "observation"),
+            "summary": text[:1000],
+            "confidence": float(confidence or 0.0),
+            "mode": str(mode or "autonomous"),
+            "status": str(status or "success"),
+            "camera_indices": list(camera_indices or []),
+            "faces": faces,
+        }
+    )
+
+
 def record_screen_observation(observation: Any) -> dict[str, Any]:
     """Record the derived portion of a ScreenObservation."""
     description = str(getattr(observation, "description", "") or "").strip()

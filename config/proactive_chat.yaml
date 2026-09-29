@@ -24,17 +24,18 @@ proactive_chat:
     events: [wave, sit_down, stand_up, walk, scene_change, long_still]
     # 在场判断：弥娅据此知道佳在不在电脑前。
     # notify_on 支持 returned（刚回来）与 left（确认离开）；每次真实状态变化只触发一次。
+    # 限频不在这里：统一由下面的 coordination 管（这里以前有个 min_interval，
+    # 从来没有任何代码读过它，改它不会有效果）。
     presence:
       enabled: true
       notify_on: [returned]
       min_confidence: 0.5
-      min_interval: 240
     # 活动变化：弥娅注意到佳开始做什么时，由模型自己决定要不要开口。
-    # notify_on 留空表示所有被识别到的活动变化都交给模型判断。
+    # notify_on 是声明性的：它说明"哪些变化算新闻"，真正决定开口与否的是模型。
+    # 同样没有 min_interval——它归 coordination 管。
     activity:
       enabled: true
       notify_on: [typing, phone, drink, stretch, walk, sit_down, stand_up, lean_back]
-      min_interval: 300
     # 弥娅自主视觉：她自己决定何时看、看时留意什么、以及要不要开口。
     # 这里只决定"她攒下的话要不要投递"，不替她改措辞。
     agency:
@@ -479,7 +480,7 @@ proactive_chat:
     time: 300       # 时间触发后5分钟内不再触发（时段内只发一次）
     check_in: 1800  # 主动关怀后30分钟内不再触发
     ai: 180         # AI触发后3分钟内不再触发
-    camera_aware: 120  # 摄像头事件触发（原先缺这一项，代码里默认 60）
+    camera_aware: 120  # 摄像头事件触发（代码兜底是 180，这里显式覆盖为 120）
 
   # === 意图持续触发 — 弥娅主动推进未完成的意图 ===
   continuity_trigger:

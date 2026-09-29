@@ -188,19 +188,46 @@ export class CoreApiClient extends ApiClient {
     return this.instance.get('/api/camera/request')
   }
 
-  async publishCameraResult(requestId: string, result: Record<string, any>): Promise<any> {
-    return this.instance.post('/api/camera/result', { request_id: requestId, result })
+  async publishCameraResult(
+    requestId: string,
+    result: Record<string, any>,
+    extra: { query?: string, mode?: string, localOnly?: boolean } = {},
+  ): Promise<any> {
+    // `query` and the mode are what let the stored observation keep the question
+    // it answered; they used to be omitted, so every record lost them.
+    return this.instance.post('/api/camera/result', {
+      request_id: requestId,
+      result,
+      ...(extra.query !== undefined ? { query: extra.query } : {}),
+      ...(extra.mode !== undefined ? { mode: extra.mode } : {}),
+      ...(extra.localOnly !== undefined ? { local_only: extra.localOnly } : {}),
+    })
   }
 
   async getVisionPresence(): Promise<{ success: boolean, presence: Record<string, any> | null }> {
     return this.instance.get('/api/vision/presence')
   }
 
-  async getCameraDevices(): Promise<{ success: boolean, devices: Array<Record<string, any>>, message?: string }> {
-    return this.instance.get('/api/camera/devices')
+  async getCameraDevices(probe = true): Promise<{ success: boolean, devices: Array<Record<string, any>>, message?: string }> {
+    return this.instance.get('/api/camera/devices', { params: { probe } })
   }
 
-  async getCameraSources(): Promise<{ success: boolean, devices: Array<Record<string, any>>, message?: string, usable_indices?: number[], sleeping_indices?: number[] }> {
+  /**
+   * The backend's camera inventory.
+   *
+   * Field names arrive camelCased: `api/index.ts` runs every response through
+   * `camelcaseKeys`, so `usable_indices` is `usableIndices` by the time any
+   * caller sees it. Reading the snake_case name silently yields `undefined`.
+   */
+  async getCameraSources(): Promise<{
+    success: boolean
+    devices: Array<Record<string, any>>
+    names?: Record<string, string>
+    message?: string
+    usableIndices?: number[]
+    sleepingIndices?: number[]
+    unopenableIndices?: number[]
+  }> {
     return this.instance.get('/api/camera/sources')
   }
 
@@ -260,9 +287,10 @@ export class CoreApiClient extends ApiClient {
   async getVisionSources(): Promise<{
     success: boolean
     sources: Record<string, any>
-    browser_owned: number[]
-    backend_owned: number[]
-    readers_running: number[]
+    names?: Record<string, string>
+    browserOwned: number[]
+    backendOwned: number[]
+    readersRunning: number[]
   }> {
     return this.instance.get('/api/vision/sources')
   }

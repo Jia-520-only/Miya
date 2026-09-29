@@ -255,7 +255,17 @@ class MiyaAPI:
             try:
                 from mcpserver.screen_vision.camera_stream import get_camera_pool
 
-                return {"success": True, **get_camera_pool().describe()}
+                payload = get_camera_pool().describe()
+                # The pool keys everything by index; the manager is what knows
+                # the DirectShow names. Handing both out together means the
+                # panel can say "4K USB Camera" instead of "2".
+                try:
+                    from mcpserver.screen_vision.camera_manager import get_camera_manager
+
+                    payload["names"] = get_camera_manager().describe().get("names") or {}
+                except Exception:  # noqa: BLE001 - names are decoration
+                    payload["names"] = {}
+                return {"success": True, **payload}
             except Exception as exc:  # noqa: BLE001
                 logger.debug("[MiyaAPI] 读取取帧来源失败: %s", exc)
                 return {"success": False, "sources": {}, "message": str(exc)}
@@ -361,25 +371,36 @@ class MiyaAPI:
         @self.router.get("/api/camera/sources")
         async def camera_sources():
             """Every camera the backend can currently see, including sleeping ones."""
+            import asyncio as _asyncio
+
             try:
                 from mcpserver.screen_vision.camera_manager import get_camera_manager
 
                 manager = get_camera_manager()
-                manager.scan()
+                # The scan opens real devices, and the desktop panel polls this
+                # endpoint. Running it inline in the event loop froze the whole
+                # daemon - including Miya's own replies - for seconds at a time.
+                await _asyncio.to_thread(manager.scan)
                 return {"success": True, **manager.describe()}
             except Exception as exc:  # noqa: BLE001
                 logger.debug("[MiyaAPI] 摄像头状态读取失败: %s", exc)
                 return {"success": False, "devices": [], "message": str(exc)}
 
         @self.router.get("/api/camera/devices")
-        async def camera_devices():
-            """Enumerate physical camera indices, optionally with a health probe."""
+        async def camera_devices(probe: bool = True):
+            """Enumerate physical camera indices, optionally with a health probe.
+
+            ``probe=false`` enumerates device *names* only and touches no
+            hardware, so it is safe to poll. The full probe reads a frame from
+            every device, which takes seconds and competes with the desktop
+            preview for the same cameras, so it is asked for deliberately.
+            """
             import asyncio as _asyncio
 
             try:
                 from mcpserver.screen_vision.camera_devices import list_camera_devices
 
-                result = await _asyncio.to_thread(list_camera_devices)
+                result = await _asyncio.to_thread(lambda: list_camera_devices(probe=bool(probe)))
                 return {"success": True, **result}
             except Exception as exc:  # noqa: BLE001 - a missing device must not break the UI
                 logger.debug("[MiyaAPI] 摄像头设备枚举失败: %s", exc)

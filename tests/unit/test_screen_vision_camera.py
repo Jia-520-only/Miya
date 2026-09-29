@@ -775,3 +775,57 @@ def test_record_camera_observation_emits_action_event_with_confidence():
     events = get_vision_context().recent(source="camera", limit=50)
     assert len(events) >= before + 1
     assert any(event.get("kind") == "wave" and event.get("confidence") == 0.88 for event in events)
+
+
+def test_the_inventory_remembers_which_camera_saw_a_person(monkeypatch):
+    """Online and "worth watching" are different answers.
+
+    The laptop camera aimed at a wall and the one looking at Jia both stream
+    happily and report almost the same luminance; only the model knows which is
+    which. The inventory used to stop at "usable", so the panel could never say
+    which camera was actually pointed at him.
+    """
+    from mcpserver.screen_vision import camera_devices, camera_manager
+
+    _REAL_LIST = camera_devices.list_camera_devices
+    monkeypatch.setattr(
+        camera_devices, "list_camera_devices",
+        lambda **_kwargs: {
+            "status": "success", "count": 2, "usable_count": 2, "unopenable_count": 0,
+            "devices": [
+                {"index": 0, "available": True, "usable": True, "name": "Integrated Camera", "luminance": 130.0},
+                {"index": 2, "available": True, "usable": True, "name": "4K USB Camera", "luminance": 127.0},
+            ],
+        },
+    )
+
+    manager = camera_manager.CameraManager()
+    manager.scan(force=True)
+    manager.note_reading(2, faces=3, action="still", text="看到你在画面里")
+
+    described = manager.describe()
+    by_index = {item["index"]: item for item in described["devices"]}
+
+    assert by_index[2]["sees_people"] is True
+    assert by_index[2]["last_faces"] == 3
+    assert by_index[2]["last_reading_text"] == "看到你在画面里"
+    assert by_index[0]["sees_people"] is False, "没看到人的那台不该被说成看到了人"
+
+    # A rescan re-lists the devices; what they showed must survive it.
+    manager.scan(force=True)
+    assert {item["index"]: item for item in manager.describe()["devices"]}[2]["sees_people"] is True
+    monkeypatch.setattr(camera_devices, "list_camera_devices", _REAL_LIST)
+
+
+def test_a_negative_index_never_becomes_a_phantom_camera():
+    """The browser's camera has no OpenCV index; recording it must not invent one.
+
+    A source at index -1 would enter the inventory, and every later scan would
+    try to open it.
+    """
+    from mcpserver.screen_vision import camera_manager
+
+    manager = camera_manager.CameraManager()
+    manager.note_reading(-1, faces=1, text="浏览器那一路")
+
+    assert manager.all_indices() == []

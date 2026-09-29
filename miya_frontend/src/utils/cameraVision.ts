@@ -63,8 +63,14 @@ const thumbnailsEnabled = ref(false)
 // instead of showing an empty box when one is asleep.
 const cameraHealth = ref<Record<string, any>>({ devices: [], usableCount: 0, count: 0, message: '' })
 // Which side holds which camera. The monitor needs this to say "预览持有 #0" and
-// to know which frames the backend can produce on its own.
-const visionSources = ref<Record<string, any>>({ sources: {}, browser_owned: [], backend_owned: [], readers_running: [] })
+// to know which frames the backend can produce on its own. Keys are camelCase
+// because the API layer converts every response; they used to be written here as
+// snake_case, which made all three lists permanently empty.
+const visionSources = ref<Record<string, any>>({ sources: {}, browserOwned: [], backendOwned: [], readersRunning: [] })
+// DirectShow device names by OpenCV index, so the page can show "4K USB Camera"
+// instead of a bare number - and so the browser's deviceId can be matched to the
+// index the backend needs.
+const backendNames = ref<Record<string, string>>({})
 // Whether her seeing can reach her speaking. Without this the page looks healthy
 // while nothing is ever submitted to the proactive chain.
 const visionBridge = ref<Record<string, any> | null>(null)
@@ -83,6 +89,11 @@ let companionStartVersion = 0
 let lastRemoteCommandId = localStorage.getItem('miya-camera-command-seen') || ''
 let lastObservationRequestId = localStorage.getItem('miya-camera-observation-seen') || ''
 const lastPublishedEvents = new Map<string, number>()
+// The skeleton history handed to the backend so it can read *actions* rather
+// than a single posture. This was assigned without ever being declared, which
+// TypeScript flagged and which would throw a ReferenceError the first time the
+// camera was stopped - so the history was never actually kept.
+let poseHistory: Array<Record<string, any>> = []
 let signatureCanvas: HTMLCanvasElement | null = null
 let signatureContext: CanvasRenderingContext2D | null = null
 let lastFrameSharedAt = 0
@@ -665,7 +676,14 @@ async function syncObservationRequest() {
       result = typeof cameraResponse?.result === 'string' ? JSON.parse(cameraResponse.result) : cameraResponse?.result
     }
     if (result?.status === 'success') rememberPose(result)
-    await API.publishCameraResult(requestId, result || { status: 'error', message: '摄像头观察没有返回结果。', persisted: false })
+    // Carry the question and the mode back with the answer. The backend stores
+    // them alongside the observation, and without them every stored result
+    // claimed `query: ""` and `mode: autonomous` no matter what was asked.
+    await API.publishCameraResult(
+      requestId,
+      result || { status: 'error', message: '摄像头观察没有返回结果。', persisted: false },
+      { query: request.query || '', localOnly: requestLocalOnly, mode: 'autonomous' },
+    )
     lastObservationRequestId = requestId
     localStorage.setItem('miya-camera-observation-seen', requestId)
     localEvent.value = '弥娅自主观察完成 · 结果已返回'
@@ -750,16 +768,70 @@ async function refreshActivity() {
   return activity.value
 }
 
+/**
+ * Which backend camera index the browser's preview is actually showing.
+ *
+ * The browser addresses cameras by `deviceId` and the backend by an OpenCV
+ * index, and nothing makes the two orders agree. The index used to be whatever
+ * number happened to be in localStorage, so switching the preview to the second
+ * camera kept filing its frames under the first one's index - the backend then
+ * believed the wrong physical device was working.
+ *
+ * The backend now reports DirectShow names, which Chromium's device labels are
+ * derived from, so the two can be matched instead of assumed. When they cannot
+ * be matched this returns `null` and the caller keeps its previous value rather
+ * than inventing one.
+ */
+function matchBackendIndexForSelectedDevice(): number | null {
+  const selected = devices.value.find(device => device.deviceId === selectedDeviceId.value)
+  const label = String(selected?.label || '').trim()
+  if (!label) return null
+  const names = backendNames.value || {}
+  const normalize = (text: string) => text.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '')
+  const wanted = normalize(label)
+  if (!wanted) return null
+  for (const [index, name] of Object.entries(names)) {
+    const candidate = normalize(String(name || ''))
+    if (!candidate) continue
+    if (candidate === wanted || wanted.includes(candidate) || candidate.includes(wanted)) {
+      return Number(index)
+    }
+  }
+  return null
+}
+
 async function refreshCameraSources() {
   try {
     const response = await API.getCameraSources()
     backendDevices.value = Array.isArray(response?.devices) ? response.devices : []
     cameraSourcesMessage.value = response?.message || ''
-    const usable: number[] = Array.isArray(response?.usable_indices) ? response.usable_indices : []
-    const sleeping: number[] = Array.isArray(response?.sleeping_indices) ? response.sleeping_indices : []
+    backendNames.value = response?.names || {}
+    // camelCase: the API layer converts responses, so `usable_indices` is never
+    // the key that exists here. Reading the old name made this whole fallback
+    // dead code and froze the reported index.
+    const usable: number[] = Array.isArray(response?.usableIndices) ? response.usableIndices : []
+    const sleeping: number[] = Array.isArray(response?.sleepingIndices) ? response.sleepingIndices : []
+    const unopenable: number[] = Array.isArray(response?.unopenableIndices) ? response.unopenableIndices : []
+    // Health is derived from this one response instead of being fetched from a
+    // second endpoint that opened every camera on the machine every 2.5s and
+    // could disagree with this list.
+    cameraHealth.value = {
+      devices: backendDevices.value,
+      usableCount: usable.length,
+      sleepingCount: sleeping.length,
+      unopenableCount: unopenable.length,
+      count: backendDevices.value.length,
+      defaultIndex: (response as any)?.defaultIndex ?? null,
+      message: cameraSourcesMessage.value,
+      names: backendNames.value,
+    }
+    const matched = matchBackendIndexForSelectedDevice()
+    if (matched !== null) {
+      if (matched !== Number(backendDeviceIndex.value)) setBackendDeviceIndex(matched)
+      return backendDevices.value
+    }
+    // The labels did not line up; fall back to "a camera that is known to work".
     const current = Number(backendDeviceIndex.value)
-    // Keep tracking the browser's device; if it vanished, or the index we were
-    // reporting is now a sleeping one, fall back to a camera that works.
     if (!usable.includes(current) && usable.length) {
       setBackendDeviceIndex(usable[0]!)
     } else if (!usable.length && sleeping.length && !sleeping.includes(current)) {
@@ -861,20 +933,14 @@ async function setThumbnailStorage(enabled: boolean) {
   return thumbnailsEnabled.value
 }
 
-/** Camera device health: how many can actually produce a picture right now. */
-async function refreshCameraHealth() {
-  try {
-    const payload = await API.getCameraDevices()
-    cameraHealth.value = {
-      devices: payload?.devices || [],
-      usableCount: Number((payload as any)?.usable_count ?? 0),
-      count: Number((payload as any)?.count ?? 0),
-      defaultIndex: (payload as any)?.default_index ?? null,
-      message: payload?.message || '',
-    }
-  } catch {
-    // Health is informational; never break the page over it.
-  }
+/**
+ * Camera device health.
+ *
+ * A read of the value `refreshCameraSources` already computed, not a second
+ * network call: a dedicated health endpoint would have to open every camera on
+ * the machine to answer, and it ran on the 2.5-second poll.
+ */
+function refreshCameraHealth() {
   return cameraHealth.value
 }
 
@@ -883,11 +949,18 @@ async function refreshVisionSources() {
   try {
     const payload = await API.getVisionSources()
     if (payload?.success) {
+      // camelCase throughout: see the note on getCameraSources. Reading the
+      // snake_case keys here kept "Miya's own view" and the owner labels off
+      // the panel no matter how healthy the backend was.
       visionSources.value = {
         sources: payload.sources || {},
-        browser_owned: payload.browser_owned || [],
-        backend_owned: payload.backend_owned || [],
-        readers_running: payload.readers_running || [],
+        names: payload.names || {},
+        browserOwned: payload.browserOwned || [],
+        backendOwned: payload.backendOwned || [],
+        readersRunning: payload.readersRunning || [],
+      }
+      if (payload.names && Object.keys(payload.names).length) {
+        backendNames.value = { ...backendNames.value, ...payload.names }
       }
     }
   } catch {
@@ -943,7 +1016,7 @@ export function useCameraVision() {
     mode, status, error, devices, selectedDeviceId, stream, lastObservation, localEvent,
     faceRecognitionEnabled, emotionInferenceEnabled, actionRecognitionEnabled,
     alwaysOn,
-    localOnly, localCapabilities, backendDevices, cameraSourcesMessage, presence, activity, backendDeviceIndex,
+    localOnly, localCapabilities, backendDevices, cameraSourcesMessage, presence, activity, backendDeviceIndex, backendNames,
     agentState, agentAgency, agentVoice, agentVoiceQueue,
     visionEvents, visionStreamStatus, visionCadence, thumbnailsEnabled, cameraHealth, visionSources, visionBridge,
     listDevices, refreshCapabilities, attachPreview, open, stop, lookAtMe, lookBoth, startCompanion, selectDevice,

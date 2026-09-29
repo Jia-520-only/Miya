@@ -382,6 +382,34 @@ def cleanup_after_test():
 
 
 @pytest.fixture(autouse=True)
+def _miya_notes_are_not_test_data(tmp_path, monkeypatch):
+    """No test may write Miya's own observation notes.
+
+    This happened, and it was costly. ``test_screen_vision_agent.py`` and
+    ``test_screen_vision_stream.py`` both drove the real ``get_vision_agency``
+    singleton, whose store is ``data/camera_vision_agent.json``; ``record()``
+    saves, so running the suite replaced Jia's intents and his accumulated
+    impressions with the tests' fixtures. The file is gitignored, so there was
+    nothing to restore from - the only visible symptom was
+    "已为弥娅写入 3 条初始观察意图" printing on every single boot, because the
+    notes were always empty again.
+
+    Isolating it here rather than in each file means a future test cannot
+    rediscover this the same way.
+    """
+    try:
+        from mcpserver.screen_vision import vision_agent
+    except Exception:  # pragma: no cover - vision is optional
+        yield
+        return
+
+    monkeypatch.setattr(
+        vision_agent, "_agency", vision_agent.VisionAgency(tmp_path / "miya-notes.json"),
+    )
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _no_real_camera_hardware(monkeypatch):
     """Keep every unit test off the physical cameras.
 
@@ -398,6 +426,12 @@ def _no_real_camera_hardware(monkeypatch):
     monkeypatch.setattr(camera_devices, "list_camera_devices",
                         lambda **_kwargs: {"status": "success", "devices": [], "count": 0,
                                            "usable_count": 0, "message": "测试中不访问真实摄像头"})
+    # Device *names* are hardware too: they come from ffmpeg reading this
+    # machine's DirectShow list. Left real, the inventory would fill with the
+    # developer's actual cameras and any test that walks the device list would
+    # depend on what is plugged in.
+    monkeypatch.setattr("mcpserver.screen_vision.camera_names.dshow_device_names",
+                        lambda **_kwargs: [])
     manager = camera_manager.get_camera_manager()
     monkeypatch.setattr(manager, "_sources", {})
     monkeypatch.setattr(manager, "_browser_frame", None)

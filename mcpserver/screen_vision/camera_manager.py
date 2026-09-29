@@ -23,7 +23,16 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from .camera_devices import DARK_FRAME_MEAN, MAX_INDEX, list_camera_devices, preferred_camera_index
+from . import camera_devices
+from .camera_devices import DARK_FRAME_MEAN, MAX_INDEX, preferred_camera_index
+
+_INITIAL_DEVICE_DISCOVERY = camera_devices.list_camera_devices
+# Retained as a compatibility patch point for callers that replaced this name.
+list_camera_devices = _INITIAL_DEVICE_DISCOVERY
+
+# Compatibility seam for integrations that historically replaced
+# ``camera_manager.list_camera_devices`` directly. New code resolves the module
+# attribute so replacing ``camera_devices.list_camera_devices`` works too.
 
 logger = logging.getLogger("screen_vision.camera_manager")
 
@@ -42,21 +51,45 @@ class CameraSource:
 
     index: int
     usable: bool = False
+    # Whether the device could be opened at all. A camera that opens and returns
+    # nothing is a different problem from one DirectShow refuses to connect, and
+    # the two need opposite next steps - so they are never merged into one
+    # "not usable" bucket.
+    openable: bool = True
     luminance: float | None = None
     width: int = 0
     height: int = 0
     backend: str = ""
+    # The DirectShow friendly name ("4K USB Camera", "Xiaomi 15 Pro (Windows
+    # 虚拟摄像头)"). Empty when ffmpeg is unavailable; the index is still the key.
+    name: str = ""
     reason: str = ""
     # "backend" means we opened the device ourselves; "browser" means the desktop
     # preview is holding it and only the browser can read frames from it.
     owner: str = "backend"
     last_checked: float = 0.0
     last_usable: float = 0.0
+    # What this camera last actually showed. "Online" and "seeing something worth
+    # looking at" are different questions: the laptop camera aimed at a wall and
+    # the one looking at Jia are both perfectly usable, and the only thing that
+    # separates them is what came back from the model. Without this the inventory
+    # could say a camera works but never whether it was worth watching.
+    last_reading_at: float = 0.0
+    last_reading_text: str = ""
+    last_faces: int = 0
+    last_action: str = ""
+
+    def label(self) -> str:
+        """How this camera should be named in logs and in the panel."""
+        return self.name or f"索引 {self.index}"
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "index": self.index,
+            "name": self.name,
+            "label": self.label(),
             "usable": self.usable,
+            "openable": self.openable,
             "luminance": None if self.luminance is None else round(float(self.luminance), 2),
             "width": self.width,
             "height": self.height,
@@ -65,6 +98,14 @@ class CameraSource:
             "owner": self.owner,
             "last_checked": round(self.last_checked, 1),
             "last_usable": round(self.last_usable, 1),
+            "last_reading_at": round(self.last_reading_at, 1),
+            "last_reading_text": self.last_reading_text,
+            "last_faces": self.last_faces,
+            "last_action": self.last_action,
+            # True when this camera has ever actually recognised a person. It is
+            # the answer to "is this one pointed at Jia", which the device list
+            # alone cannot give.
+            "sees_people": self.last_faces > 0,
         }
 
 
@@ -90,24 +131,42 @@ class CameraManager:
                 return dict(self._sources)
             self._scanning = True
         try:
-            report = list_camera_devices(probe=True)
+            discover = list_camera_devices
+            if discover is _INITIAL_DEVICE_DISCOVERY:
+                discover = camera_devices.list_camera_devices
+            report = discover(probe=True)
+            with self._lock:
+                previous = dict(self._sources)
             found: dict[int, CameraSource] = {}
             for item in report.get("devices") or []:
                 try:
                     index = int(item.get("index"))
                 except (TypeError, ValueError):
                     continue
-                found[index] = CameraSource(
+                source = CameraSource(
                     index=index,
                     usable=bool(item.get("usable")),
+                    openable=bool(item.get("available", True)),
                     luminance=item.get("luminance"),
                     width=int(item.get("width") or 0),
                     height=int(item.get("height") or 0),
                     backend=str(item.get("backend") or ""),
+                    name=str(item.get("name") or ""),
                     reason=str(item.get("reason") or ""),
                     last_checked=time.time(),
                     last_usable=time.time() if item.get("usable") else 0.0,
                 )
+                # What a camera last showed outlives the scan that re-lists it.
+                # Rebuilding the inventory from scratch wiped this every 45
+                # seconds, which would have left "has this one ever seen Jia"
+                # permanently blank.
+                old = previous.get(index)
+                if old is not None:
+                    source.last_reading_at = old.last_reading_at
+                    source.last_reading_text = old.last_reading_text
+                    source.last_faces = old.last_faces
+                    source.last_action = old.last_action
+                found[index] = source
             with self._lock:
                 browser = dict(self._browser_frame) if self._browser_frame else None
                 self._sources = found
@@ -128,8 +187,12 @@ class CameraManager:
                         owner.reason = ""
                         owner.last_usable = time.time()
             logger.info(
-                "[CameraManager] 摄像头扫描完成: %s 个索引, %s 个可用",
-                len(found), sum(1 for item in found.values() if item.usable),
+                "[CameraManager] 摄像头扫描完成: %s",
+                "；".join(
+                    f"{found[index].label()}={found[index].reason or '出画面'}"
+                    if not found[index].usable else f"{found[index].label()}=出画面"
+                    for index in sorted(found)
+                ) or "没有发现摄像头",
             )
         except Exception:
             logger.warning("[CameraManager] 摄像头扫描失败", exc_info=True)
@@ -154,10 +217,47 @@ class CameraManager:
     def sleepers(self) -> list[int]:
         """Indices that opened but delivered nothing - likely a sleeping phone."""
         with self._lock:
-            return sorted(index for index, source in self._sources.items() if not source.usable)
+            return sorted(index for index, source in self._sources.items()
+                          if not source.usable and source.openable)
 
-    def note_result(self, index: int, *, luminance: float | None, usable: bool) -> None:
-        """Let a real capture update the inventory without a full probe."""
+    def unopenable(self) -> list[int]:
+        """Indices of devices DirectShow exists but refuses to open."""
+        with self._lock:
+            return sorted(index for index, source in self._sources.items()
+                          if not source.openable)
+
+    def label_for(self, index: Any) -> str:
+        """The friendly name of one camera, falling back to its index."""
+        with self._lock:
+            source = self._sources.get(int(index)) if isinstance(index, (int, float)) else None
+        return source.label() if source is not None else f"索引 {index}"
+
+    def name_for(self, index: Any) -> str:
+        """The friendly name, or an empty string when it is not known.
+
+        Callers that build an explanation use this rather than :meth:`label_for`,
+        because "索引 1" is not a name and must not be treated as one.
+        """
+        with self._lock:
+            source = self._sources.get(int(index)) if isinstance(index, (int, float)) else None
+        return source.name if source is not None else ""
+
+    def note_result(
+        self,
+        index: int,
+        *,
+        luminance: float | None,
+        usable: bool,
+        openable: bool | None = None,
+        reason: str | None = None,
+    ) -> None:
+        """Let a real capture update the inventory without a full probe.
+
+        ``openable`` and ``reason`` are optional so the callers that only know
+        "did it deliver pixels" stay as they are, while the observation sweep -
+        which is now the thing that refreshes the inventory - can report the same
+        detail a probe would have.
+        """
         with self._lock:
             source = self._sources.get(int(index))
             if source is None:
@@ -166,8 +266,70 @@ class CameraManager:
             source.luminance = luminance
             source.usable = bool(usable)
             source.last_checked = time.time()
+            if openable is not None:
+                source.openable = bool(openable)
+            if reason is not None:
+                source.reason = str(reason)[:400]
             if usable:
                 source.last_usable = time.time()
+
+    def refresh_names(self) -> list[int]:
+        """Re-read the device names and return every index worth trying.
+
+        This is the inventory refresh the observation sweep performs *instead of*
+        a full probe. The sweep opens each camera itself and reports what it found
+        through :meth:`note_result`, so probing first opened every device twice -
+        measured at 6.6 seconds of pure duplication per sweep on this machine.
+
+        ``_last_scan`` is moved forward as well, because the panel's polling calls
+        the throttled :meth:`scan` and would otherwise repeat the probe it just
+        replaced.
+        """
+        from .camera_names import dshow_device_names
+
+        names = dshow_device_names()
+        now = time.time()
+        with self._lock:
+            for index, name in enumerate(names):
+                source = self._sources.get(index)
+                if source is None:
+                    source = CameraSource(index=index, last_checked=now)
+                    self._sources[index] = source
+                source.name = name
+            self._last_scan = now
+            return sorted(self._sources)
+
+    def note_reading(
+        self,
+        index: int,
+        *,
+        faces: int = 0,
+        action: str = "",
+        text: str = "",
+        at: float | None = None,
+    ) -> None:
+        """Remember what one camera actually saw, not just that it answered.
+
+        A camera that streams a wall and a camera looking at Jia are both
+        "usable"; the difference is the only thing worth acting on, and it is not
+        visible in a luminance reading. This is what lets the panel - and Miya -
+        answer "which of these is pointed at him".
+        """
+        with self._lock:
+            if int(index) < 0:
+                # A negative index means "the browser's camera, which has no
+                # OpenCV index of its own". Recording it as a source would put a
+                # phantom entry in the inventory that every later scan tries to
+                # open.
+                return
+            source = self._sources.get(int(index))
+            if source is None:
+                source = CameraSource(index=int(index))
+                self._sources[int(index)] = source
+            source.last_reading_at = time.time() if at is None else float(at)
+            source.last_faces = int(faces or 0)
+            source.last_action = str(action or "")
+            source.last_reading_text = str(text or "")[:200]
 
     def known_indices(self) -> list[int]:
         """Candidate indices, including ones not seen in the last scan."""
@@ -231,29 +393,61 @@ class CameraManager:
         with self._lock:
             sources = dict(self._sources)
         usable = [item for item in sources.values() if item.usable]
-        sleepers = [item for item in sources.values() if not item.usable]
+        sleepers = [item for item in sources.values() if not item.usable and item.openable]
+        blocked = [item for item in sources.values() if not item.openable]
         return {
             "count": len(sources),
             "usable_count": len(usable),
+            "unopenable_count": len(blocked),
             "usable_indices": sorted(item.index for item in usable),
             "sleeping_indices": sorted(item.index for item in sleepers),
+            "unopenable_indices": sorted(item.index for item in blocked),
             "devices": [sources[index].to_dict() for index in sorted(sources)],
+            # Names are handed out separately as well, so a consumer that only
+            # has an index (the frame pool, the panel) can still label it.
+            "names": {str(index): sources[index].name for index in sorted(sources) if sources[index].name},
             "last_scan": round(self._last_scan, 1),
-            "message": self._message(usable, sleepers),
+            "message": self._message(usable, sleepers, blocked),
         }
 
     @staticmethod
-    def _message(usable: list[CameraSource], sleepers: list[CameraSource]) -> str:
-        if not usable and not sleepers:
+    def _message(
+        usable: list[CameraSource],
+        sleepers: list[CameraSource],
+        blocked: list[CameraSource] | None = None,
+    ) -> str:
+        """One honest sentence about the whole inventory.
+
+        "No picture" and "will not open" are kept apart on purpose: the first
+        asks the user to start streaming, the second asks them to check USB or
+        which program is holding the device. Folding them together is what made
+        every camera problem look identical.
+        """
+        blocked = blocked or []
+        if not usable and not sleepers and not blocked:
             return "还没有发现任何摄像头。"
-        if not usable:
-            return f"发现 {len(sleepers)} 个摄像头，但都没有画面：可能正在息屏或没有程序在推流。"
-        if not sleepers:
-            return f"正在使用 {len(usable)} 个摄像头。"
-        return (
-            f"正在使用 {len(usable)} 个摄像头；另有 {len(sleepers)} 个暂时没有画面"
-            "（手机息屏时会出现这种情况，亮屏后会自动接上）。"
-        )
+
+        parts: list[str] = []
+        if usable:
+            parts.append("正在使用 " + "、".join(item.label() for item in usable))
+        else:
+            parts.append("现在没有摄像头在出画面")
+        for item in sleepers:
+            hint = (
+                "，多半是手机端没有在推流"
+                if _looks_virtual(item.name)
+                else "（手机息屏、或者没有程序在向它推流时会出现这种情况，亮屏后会自动接上）"
+            )
+            parts.append(f"{item.label()} 打开了但没有画面{hint}")
+        for item in blocked:
+            parts.append(f"{item.label()} 系统里有，但打不开")
+        return "；".join(parts) + "。"
+
+
+def _looks_virtual(name: str) -> bool:
+    from .camera_names import is_virtual_name
+
+    return is_virtual_name(name)
 
 
 _manager = CameraManager()

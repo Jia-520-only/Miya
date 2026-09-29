@@ -715,3 +715,39 @@ def test_camera_watch_tick_is_available_on_demand(monkeypatch):
     payload = json.loads(asyncio.run(service._camera_watch({"action": "tick"})))
     assert payload["status"] == "success"
     assert payload["impression"]["summary"] == "看了一眼"
+
+
+def test_camera_agency_settings_are_not_boot_only(monkeypatch):
+    """Cadence, adaptive pacing and the thumbnail switch belong to the setting.
+
+    Regression: only ``autostart_after_delay`` read them, so starting her
+    watching by hand silently fell back to 30 seconds, adaptive on, and the
+    privacy switch ignored - the configuration looked like it worked and then
+    stopped applying depending on which route started her.
+    """
+    monkeypatch.setattr(vision_agent, "_agency_config", lambda: {
+        "autostart": True,
+        "interval_seconds": 90,
+        "mode": "silent",
+        "adaptive": False,
+        "slow_interval_seconds": 300,
+        "slow_after_unchanged": 5,
+        "thumbnails": True,
+    })
+
+    settings = vision_agent.configured_start_kwargs()
+
+    assert settings["interval_seconds"] == 90
+    assert settings["mode"] == "silent"
+    assert settings["adaptive"] is False
+    assert settings["slow_interval"] == 300
+    assert settings["slow_after"] == 5
+    assert settings["thumbnails"] is True
+
+
+def test_the_manual_start_path_also_reads_camera_agency():
+    """Source-level, because the setting was correct and simply not consulted."""
+    root = Path(__file__).resolve().parents[2]
+    source = (root / "mcpserver" / "screen_vision" / "service.py").read_text(encoding="utf-8")
+    assert "configured_start_kwargs" in source, \
+        "手动启动弥娅观察时也必须读取 camera_agency 的节奏与缩略图设置"

@@ -254,23 +254,36 @@ def _presence_event_text(snapshot) -> str:
     return str(getattr(snapshot, "describe", lambda: "")() or "")
 
 
-async def build_presence_event(snapshot) -> dict[str, Any]:
-    """A structured fact for the coordinator: Jia came back or went away."""
+async def build_presence_event(snapshot, *, changed_at: float = 0.0) -> dict[str, Any]:
+    """A structured fact for the coordinator: Jia came back or went away.
+
+    ``changed_at`` is the moment the tracker recorded the change. It goes into
+    the facts on purpose: the coordinator de-duplicates on a hash of exactly
+    these values for an hour, so without a per-instance stamp the *second*
+    arrival of an evening was discarded as a repeat of the first. The comment on
+    the caller claimed the facts carried this timestamp; they did not.
+    """
     text = _presence_event_text(snapshot)
     mood = current_mood()
     recalled = await recall_relevant(text or "佳 电脑前 离开 回来")
     context_tail = await _conversation_context()
     platform = active_platform()
+    facts: dict[str, Any] = {
+        "在场判断": str(getattr(snapshot, "describe", lambda: "")() or ""),
+        "依据": list(getattr(snapshot, "reasons", []) or []),
+        "置信度": round(float(getattr(snapshot, "confidence", 0.0) or 0.0), 2),
+    }
+    transition = str(getattr(snapshot, "transition", "") or "")
+    if transition:
+        facts["变化"] = transition
+    if changed_at:
+        facts["发生时刻"] = time.strftime("%m-%d %H:%M:%S", time.localtime(float(changed_at)))
     event: dict[str, Any] = {
         "source": "camera",
         "event": "presence_change",
         "urgency": "normal",
         "candidate_message": text,
-        "facts": {
-            "在场判断": str(getattr(snapshot, "describe", lambda: "")() or ""),
-            "依据": list(getattr(snapshot, "reasons", []) or []),
-            "置信度": round(float(getattr(snapshot, "confidence", 0.0) or 0.0), 2),
-        },
+        "facts": facts,
     }
     if platform:
         event["facts"]["他现在在哪"] = platform
@@ -474,7 +487,7 @@ class CameraProactiveBridge:
                 result["remembered"] = await self._remember_presence(presence, now)
                 submitted = False
                 if speak_enabled:
-                    event = await build_presence_event(presence)
+                    event = await build_presence_event(presence, changed_at=stamp)
                     # The key names the *kind* of event, kept stable per transition
                     # on purpose: it is what the coordinator uses to refuse the same
                     # arrival twice, and two consumers can see the same transition

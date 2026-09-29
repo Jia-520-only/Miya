@@ -55,6 +55,31 @@ QUEUE_MAX_MESSAGES = int(os.getenv("MIYA_VISION_QUEUE_MAX", "5"))
 SLOW_INTERVAL_SECONDS = float(os.getenv("MIYA_VISION_SLOW_INTERVAL", "120"))
 SLOW_AFTER_UNCHANGED = int(os.getenv("MIYA_VISION_SLOW_AFTER", "3"))
 
+# The action kinds that are *events* rather than states. A wave, a sit-down or a
+# walk happens at a moment and is worth one line; "still" and "sitting" describe
+# an ongoing situation and belong to the activity tracker, which already knows
+# how to require a duration before believing them.
+_GESTURE_EVENT_KINDS = frozenset({
+    "wave", "sit_down", "stand_up", "walk", "clap", "stretch", "nod", "raised_hand",
+})
+
+# How often the observation loop walks *every* camera instead of reading the one a
+# reader already holds. Opening a camera costs the device warm-up (about 2.4s on
+# this machine) and a full inventory probe about 6.6s more, so doing it every
+# round made a round take twenty-five seconds. A sweep every few minutes keeps the
+# inventory honest - including cameras nobody is holding - without paying that on
+# every look.
+SWEEP_INTERVAL_SECONDS = float(os.getenv("MIYA_CAMERA_SWEEP_SECONDS", "180"))
+# Hard ceiling on one observation round. Generous, because a sweep legitimately
+# opens every camera and pays the device warm-up for each - but finite, so a
+# blocked DirectShow call or a hung model request cannot end her watching for the
+# rest of the process.
+TICK_TIMEOUT_SECONDS = float(os.getenv("MIYA_VISION_TICK_TIMEOUT", "150"))
+# Ceiling on one interpretation request. Long enough for a slow model, short
+# enough that a request which never answers costs one interpretation instead of
+# the round - and a round is what feeds presence, activity and memory.
+MODEL_TIMEOUT_SECONDS = float(os.getenv("MIYA_VISION_MODEL_TIMEOUT", "45"))
+
 
 def _normalize_message(text: str) -> str:
     """Collapse a message to a comparison key so near-duplicates match."""
@@ -124,6 +149,9 @@ class VisionAgency:
         self._path = Path(path) if path else DEFAULT_STORE_PATH
         self._intents: list[VisionIntent] = []
         self._impressions: list[Impression] = []
+        # Whether the existing file was actually read. An instance that failed to
+        # read it starts empty, and must not turn that into a deletion.
+        self._loaded = False
         self._load()
 
     # -- persistence -------------------------------------------------------
@@ -135,6 +163,7 @@ class VisionAgency:
             return
         if not isinstance(raw, dict):
             return
+        self._loaded = True
         with self._lock:
             self._intents = []
             for item in raw.get("intents") or []:
@@ -174,6 +203,15 @@ class VisionAgency:
                 "intents": [item.to_dict() for item in self._intents],
                 "impressions": [item.to_dict() for item in self._impressions[-MAX_IMPRESSIONS:]],
             }
+            # A file we could not read leaves this instance empty, and writing
+            # that would turn a transient read failure into a permanent deletion
+            # of her notes. Refusing is the only safe answer: the file is the only
+            # copy.
+            if not self._loaded and self._path.is_file():
+                logger.warning(
+                    "[VisionAgency] 观察笔记读取失败，为避免覆盖已有记录这次不写入: %s", self._path,
+                )
+                return
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             temp = self._path.with_suffix(".tmp")
@@ -181,6 +219,12 @@ class VisionAgency:
             temp.replace(self._path)
         except OSError:
             logger.warning("[VisionAgency] 弥娅的观察笔记写入失败: %s", self._path, exc_info=True)
+            return
+        # A successful write makes this instance's view the file's view, so a
+        # store that legitimately started empty may keep saving. Without this the
+        # guard above would refuse the *second* write of the same session.
+        with self._lock:
+            self._loaded = True
 
     # -- intents -----------------------------------------------------------
 
@@ -448,6 +492,10 @@ class VisionAgent:
         self._last_signature = ""
         # Which mind last answered, for the panel to display.
         self._last_interpreter = ""
+        # When the last full walk through every camera happened, and which camera
+        # a reader is holding between rounds.
+        self._last_sweep = 0.0
+        self._preferred_index: int | None = None
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -587,7 +635,16 @@ class VisionAgent:
                     return
                 interval = self._next_interval_locked()
             try:
-                await self.tick()
+                # A round must not be able to stop her senses. Camera calls block
+                # inside DirectShow when the bus is contended and model calls can
+                # hang outright, and an await with no deadline means the loop
+                # simply never comes back - which is what a five-minute silence in
+                # the log turned out to be. Cancelling loses that round; the next
+                # one still happens.
+                await asyncio.wait_for(self.tick(), timeout=TICK_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                logger.warning("[VisionAgent] 这一轮观察超过 %.0f 秒没有结束，跳过它继续下一轮",
+                               TICK_TIMEOUT_SECONDS)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -619,33 +676,36 @@ class VisionAgent:
                 "last_signature": self._last_signature,
             }
 
-    async def _await_frame(self, pool, index: int, reader, timeout: float = 12.0):
-        """Wait for a held-open reader to deliver a usable frame.
+    def _held_camera(self, manager, pool) -> int | None:
+        """The camera a reader is already holding, or ``None``.
 
-        Patience is the point: the alternative is opening the same device, which
-        makes the two readers fight and produces black frames for both. A brand
-        new reader needs a second or two to warm up, and an established one
-        publishes every 50ms, so this usually returns almost immediately.
+        Prefer the one that last saw Jia, so the fast path keeps looking at the
+        camera that can answer "is he here" instead of the one aimed at a wall.
         """
-        deadline = time.monotonic() + max(1.0, float(timeout))
-        while True:
-            cached = pool.latest_for_inference(index)
-            if cached is not None and cached.image_data:
-                return cached
-            if not reader.alive:
-                return None
-            if time.monotonic() >= deadline:
-                return None
-            await asyncio.sleep(0.2)
+        if self._preferred_index is not None:
+            buffer = pool.latest_for_inference(int(self._preferred_index))
+            if buffer is not None and buffer.image_data:
+                return int(self._preferred_index)
+        for index in manager.all_indices():
+            buffer = pool.latest_for_inference(index)
+            if buffer is not None and buffer.image_data and buffer.owner != "browser":
+                return int(index)
+        return None
 
     async def _look(self) -> dict[str, Any]:
-        """Read every usable camera and fuse it into one local reading.
+        """Read every camera the machine has, one at a time, and fuse the result.
 
-        Frames come from the shared pool, so several consumers can use one device
-        without fighting: the browser pushes its frames in, and cameras the
-        backend owns are kept open by a persistent reader. Either way this method
-        just asks for the newest frame, which is why an observation no longer
-        pays the multi-second device-warmup cost.
+        Sequential on purpose. Several of these cameras share one USB controller,
+        so opening the second while the first is streaming makes it fail to start
+        its DirectShow pins - the camera is healthy and simply cannot be reached
+        while another one holds the bus. Each round therefore releases every held
+        device, re-reads the inventory honestly, and then opens the cameras in
+        turn, releasing each before the next.
+
+        The price is the device-warmup cost per camera per round (roughly a
+        second each) instead of reusing one held-open reader. That is the right
+        trade: an observation that can only ever see one camera is not an
+        observation of the room.
         """
         from .camera_capture import capture_camera_frame
         from .camera_manager import fuse_observations, get_camera_manager, narrative_for_fused
@@ -658,7 +718,34 @@ class VisionAgent:
         # This used to be reported as the whole round trip, so the panel showed
         # "capture" and "local analysis" as identical numbers.
         started = time.monotonic()
-        manager.scan()
+        # One camera at a time, on purpose.
+        #
+        # Several of Jia's cameras share one USB controller, and a device that is
+        # already streaming makes the others fail to start their DirectShow pins.
+        # That is the whole reason the 4K camera pointed at his face reported
+        # "cannot open" for as long as the laptop camera's persistent reader held
+        # the bus - the camera was fine, the bus was taken.
+        #
+        # Walking every camera on every round is what that costs if done naively:
+        # each open pays the device warm-up (about 2.4s here) and a full inventory
+        # probe is another 6.6s, so a round went from under a second to twenty-five
+        # - she spent most of her life grabbing pixels. So the walk is periodic:
+        # ordinary rounds read the one camera a reader already holds, and a sweep
+        # every few minutes frees the bus and visits all of them.
+        sweep_due = (started - self._last_sweep) >= SWEEP_INTERVAL_SECONDS
+        if sweep_due:
+            try:
+                await asyncio.to_thread(pool.stop_all)
+            except Exception:  # noqa: BLE001 - a stuck reader must not stop an observation
+                logger.debug("[VisionAgent] 释放常驻读帧失败", exc_info=True)
+            # No inventory probe here. The walk below opens every camera and
+            # reports what it found through `note_result`, so probing first opened
+            # each device twice - 6.6 seconds of duplication per sweep. Reading the
+            # device names is enough to know what to try, and it also ages the
+            # manager's scan clock so the panel's polling does not repeat the probe
+            # this replaced.
+            manager.refresh_names()
+            self._last_sweep = started
         observations: list[dict[str, Any]] = []
         captures: list[dict[str, Any]] = []
         failures: list[dict[str, Any]] = []
@@ -690,11 +777,73 @@ class VisionAgent:
                 failures.append({"index": index, "message": str(exc)})
                 return False
             if result.get("status") != "success":
+                # It opened, so it is not broken - it just had nothing to show.
+                # The distinction is what the panel reports.
+                if isinstance(index, int) and index >= 0:
+                    manager.note_result(
+                        index,
+                        luminance=result.get("luminance"),
+                        usable=False,
+                        openable=True,
+                        reason=str(result.get("message") or "没有得到有效画面"),
+                    )
                 failures.append({"index": index, "message": str(result.get("message") or "没有得到有效画面"),
                                  "blank_frame": bool(result.get("blank_frame"))})
                 return False
             remember(index, result, owner, thumbnail)
+            # Say what this camera actually saw, not only that it answered. A
+            # camera aimed at a wall and one aimed at Jia both stream happily, and
+            # the inventory could not previously tell them apart.
+            if isinstance(index, int) and index >= 0:
+                inner = (result.get("observations") or [{}])[0]
+                action = inner.get("action") if isinstance(inner, dict) else None
+                try:
+                    manager.note_result(
+                        index,
+                        luminance=result.get("luminance"),
+                        usable=True,
+                        openable=True,
+                        reason="",
+                    )
+                    manager.note_reading(
+                        index,
+                        faces=int(result.get("faces") or 0),
+                        action=str((action or {}).get("kind") or ""),
+                        text=str(result.get("message") or ""),
+                    )
+                except Exception:  # noqa: BLE001 - bookkeeping must not lose a reading
+                    logger.debug("[VisionAgent] 记录摄像头读数失败", exc_info=True)
             return True
+
+        async def observe_once(index: int) -> None:
+            """Open one camera, read one frame, release it before the next.
+
+            This is the only way to reach a camera the bus is shared with: while
+            another device is streaming, its DirectShow pins refuse to start.
+            """
+            try:
+                captured = await asyncio.to_thread(
+                    capture_camera_frame, index, width=1280, height=720,
+                )
+            except Exception as exc:  # noqa: BLE001 - one bad camera must not stop the round
+                logger.debug("[VisionAgent] 摄像头 %s 观察失败: %s", index, exc)
+                text = str(exc)
+                # "opened but showed nothing" and "would not open" need opposite
+                # advice, and the sweep is the path that reports both now.
+                opened = ("没有画面" in text) or ("打开了" in text) or ("全黑" in text)
+                try:
+                    from .camera_devices import blank_reason
+
+                    detail = blank_reason(manager.name_for(index), text)
+                except Exception:  # noqa: BLE001 - the raw text is still a reason
+                    detail = text
+                manager.note_result(
+                    index, luminance=None, usable=False, openable=opened, reason=detail,
+                )
+                failures.append({"index": index, "message": text})
+                return
+            if await analyze(index, captured["image_data"], str(captured.get("thumbnail") or ""), "backend"):
+                looked.append(index)
 
         handled: set[int] = set()
         # The browser owns whatever it is previewing; its frame is authoritative,
@@ -718,48 +867,56 @@ class VisionAgent:
                     pool.latest(index).thumbnail if pool.latest(index) else ""
                 )
 
-        for index in manager.usable_indices():
-            if index in handled:
-                continue
-            # Prefer a cached frame: either pushed by the browser or held by a
-            # persistent backend reader.
-            cached = pool.latest_for_inference(index)
-            if cached is not None and cached.owner == "browser":
-                continue  # the preview owns it; its frames arrive through the path above
-            if cached is not None and cached.image_data:
-                if await analyze(index, cached.image_data, cached.thumbnail, cached.owner):
-                    manager.note_result(index, luminance=cached.luminance, usable=True)
-                continue
-
-            # Nothing usable cached. If a reader already holds this device, wait
-            # for it rather than opening the camera behind its back: a second
-            # opener competes with the reader, one of them reads black, and the
-            # pair then take turns releasing and reopening the device forever.
-            started_reader = pool.start_reader(index)
-            reader = pool.reader(index) if started_reader else None
-            if reader is not None:
-                cached = await self._await_frame(pool, index, reader)
-                if cached is not None and cached.image_data:
-                    if await analyze(index, cached.image_data, cached.thumbnail, cached.owner):
-                        manager.note_result(index, luminance=cached.luminance, usable=True)
+        looked: list[int] = []
+        if sweep_due:
+            # The periodic walk: every camera, one after another, each released
+            # before the next. Whatever earlier rounds concluded about a device is
+            # discarded - this is the round that finds out for itself.
+            for index in manager.all_indices():
+                if index in handled:
                     continue
-                # The reader holds the device and is not delivering. Reading it
-                # directly would only fight it, so report and let the reader's own
-                # blank-frame handling release it for a clean retry.
-                failures.append({"index": index, "message": "常驻读帧这一轮没有拿到有效画面"})
-                continue
+                await observe_once(index)
+        else:
+            # The ordinary round: read the camera a reader is already holding, so
+            # the device stays warm and the round costs almost nothing. Cameras
+            # nobody holds are left to the next sweep, which visits all of them.
+            target = self._held_camera(manager, pool)
+            if target is None:
+                # No reader is delivering. That happens routinely and for a good
+                # reason: a reader releases a device whose picture has stopped
+                # changing, so that a frozen frame is never re-read as the present
+                # - and a camera pointed at a wall looks frozen. Giving up here
+                # would mean she sees nothing at all until the next sweep, so the
+                # round falls back to opening one camera itself.
+                target = self._preferred_index
+            if target is None:
+                candidates = manager.all_indices()
+                target = candidates[0] if candidates else None
+            if target is not None and target not in handled:
+                cached = pool.latest_for_inference(target)
+                if cached is not None and cached.image_data:
+                    if await analyze(target, cached.image_data, cached.thumbnail, cached.owner):
+                        looked.append(target)
+                else:
+                    await observe_once(int(target))
 
-            # No reader for this device (the preview owns it, or it cannot be
-            # held): a one-shot read is the only option left.
+        # Hold exactly one camera open between rounds, so the pose sampler keeps
+        # receiving the dense frames the temporal action reader needs. One: two
+        # would put the bus back in contention and undo the whole point above.
+        # The camera that actually saw Jia wins, so the held device is the one
+        # that can answer "is he here" rather than the one aimed at a wall.
+        if looked:
+            preferred = next(
+                (item["index"] for item in observations
+                 if int((item["result"] or {}).get("faces") or 0) > 0),
+                looked[0],
+            )
+            self._preferred_index = int(preferred)
+        if self._preferred_index is not None:
             try:
-                captured = await asyncio.to_thread(capture_camera_frame, index, width=1280, height=720)
-            except Exception as exc:  # noqa: BLE001 - one bad camera must not stop the loop
-                logger.debug("[VisionAgent] 摄像头 %s 观察失败: %s", index, exc)
-                manager.note_result(index, luminance=None, usable=False)
-                failures.append({"index": index, "message": str(exc)})
-                continue
-            manager.note_result(index, luminance=None, usable=True)
-            await analyze(index, captured["image_data"], str(captured.get("thumbnail") or ""), "backend")
+                pool.start_reader(int(self._preferred_index))
+            except Exception:  # noqa: BLE001 - dense sampling is an enhancement
+                logger.debug("[VisionAgent] 启动常驻读帧失败", exc_info=True)
 
         if not observations:
             return {
@@ -859,6 +1016,29 @@ class VisionAgent:
                 observe_action(fused.get("action"), at=reading_at)
             except Exception:
                 logger.debug("[VisionAgent] 活动累积更新失败", exc_info=True)
+            # Momentary gestures also go into the shared camera context, which is
+            # what the camera-aware proactive trigger reads. Only the browser used
+            # to write there, so with the desktop app closed that trigger saw an
+            # empty store no matter how much she actually noticed. States
+            # ("still", "sitting") are deliberately left out: they belong to the
+            # activity tracker, and publishing them as events would have her
+            # comment every time he simply sat quietly.
+            gesture_kind = str((fused.get("action") or {}).get("kind") or "")
+            if gesture_kind in _GESTURE_EVENT_KINDS:
+                try:
+                    from core.vision_context import record_camera_event
+
+                    record_camera_event(
+                        kind=gesture_kind,
+                        summary=str(fused.get("message") or (fused.get("action") or {}).get("label") or ""),
+                        confidence=float((fused.get("action") or {}).get("confidence") or 0.0),
+                        mode="autonomous",
+                        status="success",
+                        camera_indices=[int(item) for item in (fused.get("sources_used") or [])],
+                        faces=int(fused.get("faces") or 0),
+                    )
+                except Exception:
+                    logger.debug("[VisionAgent] 写入摄像头事件上下文失败", exc_info=True)
 
         impression = Impression(
             at=time.time(),
@@ -1023,13 +1203,21 @@ class VisionAgent:
             try:
                 from core.ai_client import AIMessage
 
-                response = await client.chat(
-                    messages=[
-                        AIMessage(role="system", content=INTERPRETER_SYSTEM_PROMPT),
-                        AIMessage(role="user", content=prompt),
-                    ],
-                    tools=[],
-                    tool_choice="none",
+                # A deadline, because this call has no other one. A request that
+                # never answers used to hold the whole round open - a 602-second
+                # interpret is in the logs - and the round is what feeds her
+                # presence, her activity and her memory. Losing one interpretation
+                # is survivable; losing the loop is not.
+                response = await asyncio.wait_for(
+                    client.chat(
+                        messages=[
+                            AIMessage(role="system", content=INTERPRETER_SYSTEM_PROMPT),
+                            AIMessage(role="user", content=prompt),
+                        ],
+                        tools=[],
+                        tool_choice="none",
+                    ),
+                    timeout=MODEL_TIMEOUT_SECONDS,
                 )
                 text = getattr(response, "content", None) or str(response or "")
                 if str(text).strip():
@@ -1039,6 +1227,9 @@ class VisionAgent:
                 # An empty reply is a failure, not a success. Returning None
                 # here without a reason is what made this fail silently before.
                 logger.info("[VisionAgent] 对话模型返回了空内容，尝试视觉模型")
+            except asyncio.TimeoutError:
+                logger.info("[VisionAgent] 对话模型 %.0f 秒没有回答，这一轮不解读",
+                            MODEL_TIMEOUT_SECONDS)
             except Exception as exc:  # noqa: BLE001 - try the vision route next
                 logger.info("[VisionAgent] 对话模型解读失败，尝试视觉模型: %s", exc)
         return await VisionAgent._call_vision_model(service, prompt)
@@ -1236,6 +1427,29 @@ def should_autostart() -> tuple[bool, str]:
     return True, ""
 
 
+def configured_start_kwargs() -> dict[str, Any]:
+    """The pacing and privacy settings from ``camera_agency``, as ``start()`` kwargs.
+
+    Only the boot-time path used to read these, so starting her watching by hand
+    dropped every one of them and fell back to the code defaults: a 30-second
+    cadence, adaptive pacing on, and the thumbnail switch ignored. A setting
+    belongs to the setting, not to whichever route happens to start her.
+    """
+    config = _agency_config()
+    try:
+        interval = float(config.get("interval_seconds", DEFAULT_INTERVAL_SECONDS))
+    except (TypeError, ValueError):
+        interval = DEFAULT_INTERVAL_SECONDS
+    return {
+        "interval_seconds": interval,
+        "mode": str(config.get("mode") or "auto"),
+        "adaptive": config.get("adaptive"),
+        "slow_interval": config.get("slow_interval_seconds"),
+        "slow_after": config.get("slow_after_unchanged"),
+        "thumbnails": config.get("thumbnails"),
+    }
+
+
 async def autostart_after_delay(*, delay_seconds: float | None = None) -> dict[str, Any]:
     """Start her watching loop after boot settles, if she is allowed to."""
     config = _agency_config()
@@ -1260,20 +1474,9 @@ async def autostart_after_delay(*, delay_seconds: float | None = None) -> dict[s
     if agent.running:
         return {"started": True, "reason": "已在运行", "state": agent.state()}
     seed_intents_from_config()
-    try:
-        interval = float(config.get("interval_seconds", DEFAULT_INTERVAL_SECONDS))
-    except (TypeError, ValueError):
-        interval = DEFAULT_INTERVAL_SECONDS
-    state = agent.start(
-        interval_seconds=interval,
-        mode=str(config.get("mode") or "auto"),
-        autostart=True,
-        adaptive=config.get("adaptive"),
-        slow_interval=config.get("slow_interval_seconds"),
-        slow_after=config.get("slow_after_unchanged"),
-        thumbnails=config.get("thumbnails"),
-    )
-    logger.info("[VisionAgent] 弥娅已按开机设置开始观察（每 %.0f 秒）", state.get("interval_seconds", interval))
+    state = agent.start(autostart=True, **configured_start_kwargs())
+    logger.info("[VisionAgent] 弥娅已按开机设置开始观察（每 %.0f 秒）",
+                state.get("interval_seconds", configured_start_kwargs()["interval_seconds"]))
     return {"started": bool(state.get("running")), "reason": "", "state": state}
 
 

@@ -274,10 +274,12 @@ tools:
 
   qq_image_analyzer:
     enabled: true
-    ocr_engine: "none"                    # 不使用 OCR 引擎
-    vision_engine: "zhipu_glm_46v_flash"  # 使用智谱视觉模型
-    vision_mode: "local"                  # 本地观察视觉调度（屏幕/摄像头）：local / cloud / hybrid；聊天图片始终走云端
-    screen_analysis_mode: "local"         # 看屏幕覆盖；留空时跟随 vision_mode
+    # 视觉路线：屏幕与摄像头共用的唯一开关（local / cloud / hybrid）；
+    # 聊天图片始终走云端，不受这里影响。
+    vision_mode: "local"
+    # 下面两项是按来源覆盖 vision_mode 的兼容配置。
+    # **留空即"不覆盖"**，不要写 "local"——那会让统一开关看起来生效、实际被这里压住。
+    screen_analysis_mode: ""              # 看屏幕覆盖；留空跟随 vision_mode
     camera_analysis_mode: "hybrid"        # 看我路线：local 用本机 ONNX，hybrid = 本地常驻 + 语义提问时才调用云端，cloud 全程云端
     camera_cloud_cooldown_seconds: 600    # 云端视觉额度耗尽（401/402/403/429）后的静默冷却秒数，冷却期内不上传画面
 
@@ -297,12 +299,6 @@ tools:
         - "想留意佳在不在电脑前，离开和回来都记一下"
         - "想知道佳大多在做什么，是工作、看视频还是玩游戏"
         - "留意佳有没有太久没休息"
-    detail_level: "detailed"              # detailed, basic
-    nsfw_check: false
-    ai_description:
-      enabled: false
-      provider: ""
-      api_key: ""
 
   qq_active_chat:
     enabled: true

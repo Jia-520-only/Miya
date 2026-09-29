@@ -15,6 +15,8 @@ from typing import Any
 
 logger = logging.getLogger("screen_vision.camera_capture")
 
+from .camera_hardware import HARDWARE_LOCK  # noqa: E402 - after logger, before cv2 use
+
 try:
     import cv2
 
@@ -117,8 +119,21 @@ def open_camera(index: int, *, width: int, height: int, warmup: int = 8):
     Tries each backend until one delivers a non-black frame. Returns
     ``(None, last_reason)`` when none of them can, so the caller can report the
     actual reason instead of a generic failure.
+
+    Serialized against every other camera operation: opening a device that
+    another thread is already opening blocks rather than failing, and a pile of
+    those starves the thread pool Miya's observation loop waits on.
     """
-    if not OPENCV_AVAILABLE:
+    with HARDWARE_LOCK:
+        return _open_camera_unlocked(index, width=width, height=height, warmup=warmup)
+
+
+def _open_camera_unlocked(index: int, *, width: int, height: int, warmup: int = 8):
+    # `cv2` is intentionally replaceable in callers that provide a compatible
+    # capture backend (and in hardware probes). Checking the module reference
+    # keeps that seam usable even when the optional import was unavailable at
+    # module load time.
+    if not OPENCV_AVAILABLE and cv2 is None:
         raise RuntimeError(
             "终端摄像头需要 OpenCV。请执行 .venv\\Scripts\\python.exe -m pip install -r setup\\dependencies\\camera.txt。"
         )
@@ -173,13 +188,29 @@ def capture_camera_frame(
     height: int = 480,
     warmup_frames: int = 3,
 ) -> dict[str, Any]:
-    """Capture one JPEG data URL from a local physical camera."""
-    try:
-        import cv2
-    except ImportError as exc:
+    """Capture one JPEG data URL from a local physical camera.
+
+    The whole open-read-release cycle holds the hardware lock, so two callers can
+    never be inside the same device at once.
+    """
+    with HARDWARE_LOCK:
+        return _capture_camera_frame_unlocked(
+            camera_index, width=width, height=height, warmup_frames=warmup_frames,
+        )
+
+
+def _capture_camera_frame_unlocked(
+    camera_index: int = 0,
+    *,
+    width: int = 640,
+    height: int = 480,
+    warmup_frames: int = 3,
+) -> dict[str, Any]:
+    cv_module = cv2
+    if cv_module is None:
         raise RuntimeError(
             "终端摄像头需要 OpenCV。请执行 .venv\\Scripts\\python.exe -m pip install -r setup\\dependencies\\camera.txt。"
-        ) from exc
+        )
 
     try:
         index = int(camera_index)
@@ -210,7 +241,7 @@ def capture_camera_frame(
         if frame is None:
             raise RuntimeError("摄像头已打开但没有返回有效画面。")
 
-        ok, encoded = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 78])
+        ok, encoded = cv_module.imencode(".jpg", frame, [int(cv_module.IMWRITE_JPEG_QUALITY), 78])
         if not ok:
             raise RuntimeError("摄像头画面 JPEG 编码失败。")
         raw = encoded.tobytes()

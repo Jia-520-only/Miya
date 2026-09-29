@@ -184,14 +184,33 @@ def _normalize_config(raw: dict) -> dict:
 
 
 def _normalize_coordination_config(raw: dict) -> dict:
-    """统一主动来源的总限频配置。"""
-    return {
-        "enabled": raw.get("enabled", True),
-        "max_messages_per_hour": raw.get("max_messages_per_hour", 3),
-        "min_interval_seconds": raw.get("min_interval_seconds", 300),
-        "quiet_hours_enabled": raw.get("quiet_hours_enabled", True),
-        "quiet_hours": raw.get("quiet_hours", [23, 0, 1, 2, 3, 4, 5, 6, 7]),
+    """统一主动来源的总限频配置。
+
+    这里必须把 yaml 里的键**原样带下去**。之前只重建了 5 个键，于是
+    ``max_messages_per_source_per_hour``、``max_events_per_source_per_hour`` 和
+    ``same_source_interval_seconds`` 被静默丢弃——配置里写了、注释里解释了为什么
+    要这么设，协调器却一直用代码默认值（3/4/90）跑。三个默认值和 yaml 恰好接近，
+    所以改 yaml 完全看不出没生效。
+    """
+    defaults = {
+        "enabled": True,
+        "max_messages_per_hour": 3,
+        "max_messages_per_source_per_hour": 3,
+        "max_events_per_source_per_hour": 4,
+        "min_interval_seconds": 300,
+        "same_source_interval_seconds": 90,
+        "quiet_hours_enabled": True,
+        "quiet_hours": [23, 0, 1, 2, 3, 4, 5, 6, 7],
     }
+    merged = dict(defaults)
+    for key in defaults:
+        if key in raw and raw[key] is not None:
+            merged[key] = raw[key]
+    # Anything the coordinator learns to read should reach it without this
+    # function needing to know about it first.
+    for key, value in (raw or {}).items():
+        merged.setdefault(key, value)
+    return merged
 
 
 def get_default_camera_aware_config() -> dict:
@@ -207,17 +226,19 @@ def get_default_camera_aware_config() -> dict:
         "min_confidence": 0.62,
         "events": ["wave", "sit_down", "stand_up", "walk", "scene_change", "long_still"],
         # 在场判断：notify_on 支持 returned（刚回来）与 left（确认离开）
+        # 这里**没有** min_interval：限频统一归协调器管（见 _check_presence_trigger
+        # 的注释）。以前这里和 yaml 各留了一份 min_interval，两个值从头到尾没有
+        # 任何代码读过——配置看起来在生效，其实只是装饰。
         "presence": {
             "enabled": True,
             "notify_on": ["returned"],
             "min_confidence": 0.5,
-            "min_interval": 240,
         },
-        # 活动变化：notify_on 留空表示所有识别到的活动变化都交给模型判断
+        # 活动变化：notify_on 是声明性的，只说明"哪些变化算新闻"；真正决定要不要
+        # 开口的是模型（_check_activity_trigger）。同样没有 min_interval。
         "activity": {
             "enabled": True,
             "notify_on": ["typing", "phone", "drink", "stretch", "walk", "sit_down", "stand_up", "lean_back"],
-            "min_interval": 300,
         },
         # 弥娅自主视觉：只决定"她攒下的话要不要投递"
         "agency": {
@@ -1618,6 +1639,43 @@ class ProactiveChatSystem:
             self._last_camera_event_time = 0.0
         self._forget_camera_proposal(target_id, message)
 
+    def _camera_persona_prompt(self, module_prompt: str) -> str:
+        """Attach Miya's live form and mood to a camera-generated instruction.
+
+        These camera triggers send a single *user* turn, and ``AIClient.chat``
+        only ever injects the persona when the first message is a system one - so
+        she used to speak about what she saw with no form and no mood at all,
+        which is exactly the "she has no shape here" that Jia noticed. The bridge
+        path gets this from the coordinator; this path has to ask for it.
+        """
+        prompt = module_prompt
+        try:
+            from core.persona_prompt import compose_persona_system_prompt
+
+            personality = None
+            try:
+                from core.proactive_coordinator import get_proactive_coordinator
+
+                personality = getattr(get_proactive_coordinator(), "_personality", None)
+            except Exception:  # noqa: BLE001 - the persona alone is still worth having
+                personality = None
+            prompt = compose_persona_system_prompt(
+                module_prompt, personality=personality, ai_client=self.ai_client,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("[主动聊天] 组合人格提示词失败，使用原始提示词", exc_info=True)
+        try:
+            # Her current form is not the same thing as her mood right now, and
+            # this is the only place on this path that can supply the latter.
+            from mcpserver.screen_vision.proactive import _mood_text, current_mood
+
+            mood_text = _mood_text(current_mood())
+            if mood_text:
+                prompt = f"{prompt}\n\n【她此刻的状态】\n{mood_text}"
+        except Exception:  # noqa: BLE001
+            logger.debug("[主动聊天] 读取当前形态/情绪失败", exc_info=True)
+        return prompt
+
     async def _check_presence_trigger(self, target_id: int, context: ChatContext) -> Optional[ProactiveResult]:
         """Greet a return or note a departure, driven by derived signals only.
 
@@ -1633,14 +1691,21 @@ class ProactiveChatSystem:
             from mcpserver.screen_vision.presence import get_presence_tracker
 
             camera_state = read_state()
-            snapshot = get_presence_tracker().snapshot()
+            tracker = get_presence_tracker()
+            snapshot = tracker.snapshot()
+            # `snapshot.transition` is overwritten by the very next evaluation, so
+            # a 45-second poll saw an arrival only if it happened to land inside
+            # the same window - the log shows a handful of hits that were luck,
+            # not mechanism. `last_transition()` keeps the change (and the moment
+            # it happened) until the next real one.
+            transition, transition_at = tracker.last_transition()
         except Exception:
             return None
         # Presence messages stay behind the same consent gate as camera events.
         if not camera_state.get("autonomous") or camera_state.get("mode") == "off":
             return None
-        transition = str(snapshot.transition or "")
-        if transition not in notify_on:
+        transition = str(transition or "")
+        if transition not in notify_on or not transition_at:
             return None
         confidence = float(snapshot.confidence or 0)
         if confidence < float(config.get("min_confidence", 0.5)):
@@ -1650,22 +1715,38 @@ class ProactiveChatSystem:
         # produced (a return means a face was just detected), so the key was always
         # "returned:0" - and because it was written before delivery, one rejected
         # greeting closed this path for the rest of the process.
-        transition_key = f"{transition}:{round(float(snapshot.updated_at or 0.0), 3)}"
+        transition_key = f"{transition}:{round(float(transition_at), 3)}"
         if transition_key == getattr(self, "_last_presence_key", ""):
             return None
         # Throttling, quiet hours and de-duplication belong to the unified
         # coordinator, which every background source now passes through. Keeping a
         # second copy of those rules here is how the camera ended up governed by
         # limits nothing else obeyed.
-        mood = "温柔" if transition == "returned" else "关心"
         topic = "佳刚回到电脑前" if transition == "returned" else "佳暂时离开了电脑"
         prompt = (
             f"你是弥娅。摄像头判断：{snapshot.describe()}（依据：{'、'.join(snapshot.reasons) or '视觉线索'}）\n"
-            f"请用{mood}的语气，对佳说一句自然的话，围绕{topic}，不超过25字。"
+            f"请对佳说一句自然的话，围绕{topic}，不超过25字。"
             "如果不确定或此刻不适合说话，回复 SKIP。"
         )
+        # What she remembers about him, so a greeting can land on something real
+        # ("又熬夜了？") instead of being generated from the sensor line alone.
+        # The bridge recalls memory for its presence events; this path, which is
+        # the one that actually got a line out, did not.
         try:
-            response = await self.ai_client.chat(messages=[AIMessage(role="user", content=prompt)], tools=[], tool_choice="none")
+            from mcpserver.screen_vision.proactive import recall_relevant
+
+            memory_note = await recall_relevant(
+                f"佳 {'回到' if transition == 'returned' else '离开'}电脑前 休息 作息"
+            )
+            if memory_note:
+                prompt = f"{prompt}\n\n{memory_note}"
+        except Exception:  # noqa: BLE001 - memory is an enrichment, not a requirement
+            logger.debug("[主动聊天] 在场事件召回记忆失败", exc_info=True)
+        try:
+            response = await self.ai_client.chat(
+                messages=[AIMessage(role="user", content=self._camera_persona_prompt(prompt))],
+                tools=[], tool_choice="none",
+            )
             message = str(response or "").strip()
         except Exception:
             return None
@@ -1720,9 +1801,22 @@ class ProactiveChatSystem:
             return None
         # Throttling belongs to the unified coordinator now; the local interval and
         # trigger-type cooldown were a second, divergent set of rules.
+        deep_context = self._build_deep_context(context)
+        # Memory, for the same reason the reply path has it: deciding whether to
+        # speak about a change is a judgement about a person, and it goes wrong
+        # without anything to judge against. `_build_deep_context` carries the
+        # senses; this carries what she remembers.
+        try:
+            from mcpserver.screen_vision.proactive import recall_relevant
+
+            memory_note = await recall_relevant(str(card)[:120] or "佳 电脑前 活动")
+            if memory_note:
+                deep_context = f"{deep_context}\n{memory_note}"
+        except Exception:  # noqa: BLE001
+            logger.debug("[主动聊天] 活动事件召回记忆失败", exc_info=True)
         prompt = (
             "你是弥娅，正陪在佳身边。下面这些是你此刻真正感知到的：\n"
-            f"{self._build_deep_context(context)}\n\n"
+            f"{deep_context}\n\n"
             f"{card}\n"
             "他刚刚的这个变化，你要不要开口？像一个人那样判断，而不是像告警器："
             "他在专心、他刚被打断、他已经很久没歇、或者这句话现在说出来只是打扰——"
@@ -1731,7 +1825,10 @@ class ProactiveChatSystem:
             "不要说摄像头、识别、置信度这类字眼，也不要报流水账。"
         )
         try:
-            response = await self.ai_client.chat(messages=[AIMessage(role="user", content=prompt)], tools=[], tool_choice="none")
+            response = await self.ai_client.chat(
+                messages=[AIMessage(role="user", content=self._camera_persona_prompt(prompt))],
+                tools=[], tool_choice="none",
+            )
             message = str(response or "").strip()
         except Exception:
             return None

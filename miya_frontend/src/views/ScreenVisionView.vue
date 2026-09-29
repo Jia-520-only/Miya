@@ -83,8 +83,14 @@ const presenceText = computed(() => {
 
 const activityText = computed(() => String(activityState.value?.phrase || ''))
 
-const usableCount = computed(() => devices.value.filter(device => device.usable !== false).length)
-const sleepingCount = computed(() => devices.value.filter(device => device.usable === false).length)
+// Three states, not two. A camera that opens and shows nothing and a camera the
+// system will not open at all need different things done about them, so they are
+// never added together into one "not usable" number.
+const usableCount = computed(() => devices.value.filter(device => device.usable === true).length)
+const sleepingCount = computed(() => devices.value.filter(
+  device => device.openable !== false && device.usable !== true,
+).length)
+const unopenableCount = computed(() => devices.value.filter(device => device.openable === false).length)
 
 async function refreshDevices() {
   if (devicesBusy.value) return
@@ -474,7 +480,7 @@ onBeforeUnmount(() => {
         <div v-if="activityText || presenceText" class="vision-activity">
           <span class="activity-label">弥娅注意到</span>
           <span class="activity-text">{{ activityText || presenceText }}</span>
-          <small v-if="activityState?.duration >= 60" class="activity-duration">已持续约 {{ Math.floor(activityState.duration / 60) }} 分钟</small>
+          <small v-if="activityState && activityState.duration >= 60" class="activity-duration">已持续约 {{ Math.floor(activityState.duration / 60) }} 分钟</small>
           <small v-if="activityState?.recent?.length" class="activity-recent">最近的迹象：{{ activityState.recent.slice(0, 4).join(' → ') }}</small>
         </div>
         <div v-if="camera.lastObservation.value || camera.error.value" class="vision-result" :class="camera.error.value ? 'error' : 'success'">
@@ -513,18 +519,28 @@ onBeforeUnmount(() => {
         <div class="device-panel">
           <div class="identity-heading">
             <span>本机摄像头</span>
-            <small>{{ usableCount }} 个在用 · {{ sleepingCount }} 个暂无画面</small>
+            <small>
+              {{ usableCount }} 台在用<template v-if="sleepingCount"> · {{ sleepingCount }} 台暂无画面</template><template v-if="unopenableCount"> · {{ unopenableCount }} 台打不开</template>
+            </small>
             <button class="capability-refresh" title="重新探测本机摄像头" :disabled="devicesBusy" @click="refreshDevices">↻</button>
           </div>
           <div v-if="sourcesMessage" class="sources-message">{{ sourcesMessage }}</div>
           <div v-if="devices.length" class="device-list">
-            <div v-for="device in devices" :key="device.index" class="device-row" :class="{ unusable: device.usable === false }">
-              <span class="device-index">#{{ device.index }}</span>
+            <div v-for="device in devices" :key="device.index" class="device-row" :class="{ unusable: device.usable !== true }">
+              <span class="device-index">{{ device.name || `#${device.index}` }}</span>
               <span class="device-detail">
-                <template v-if="device.usable === false">{{ device.reason || '暂时没有画面' }}</template>
-                <template v-else>{{ device.width }}×{{ device.height }} · 亮度 {{ device.luminance }} · {{ device.backend }}</template>
+                <template v-if="device.openable === false">{{ device.reason || '系统里有这台设备，但打不开' }}</template>
+                <template v-else-if="device.usable !== true">{{ device.reason || '暂时没有画面' }}</template>
+                <template v-else>
+                  {{ device.width }}×{{ device.height }} · 亮度 {{ device.luminance }} · {{ device.backend }}
+                  <template v-if="device.last_reading_text"> · {{ device.last_reading_text }}</template>
+                </template>
               </span>
-              <span class="device-tag">{{ device.usable === false ? '息屏/无画面' : '在用' }}</span>
+              <span class="device-tag">
+                {{ device.openable === false ? '打不开'
+                  : (device.usable !== true ? '息屏/无画面'
+                    : (device.sees_people ? '在用 · 看到人' : '在用')) }}
+              </span>
             </div>
           </div>
           <small v-else class="identity-empty">{{ devicesBusy ? '正在探测…' : '没有探测到摄像头。' }}</small>

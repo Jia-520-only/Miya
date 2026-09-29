@@ -68,6 +68,11 @@ def _presence(monkeypatch, snapshot):
         def snapshot(self):
             return snapshot
 
+        def last_transition(self):
+            new = _PresenceSnapshot()
+            new.updated_at = float(getattr(snapshot, "updated_at", 0.0) or 0.0)
+            return "returned", new.updated_at
+
     monkeypatch.setattr("mcpserver.screen_vision.presence.get_presence_tracker", lambda: _Tracker())
 
 
@@ -115,10 +120,16 @@ def _presence_at(monkeypatch, stamp: float):
         def snapshot(self):
             snapshot = _PresenceSnapshot()
             snapshot.updated_at = stamp
-            # A transition is only present on the evaluation that produced it,
-            # which is exactly why the key must not depend on the snapshot's
-            # transient fields.
+            # This is what the real tracker does: the transition lives inside the
+            # newest snapshot for exactly one evaluation and is then overwritten,
+            # so a poll that arrives later sees "". Reading it from the snapshot
+            # is the bug these tests now guard against; the change survives in
+            # `last_transition()` instead.
+            snapshot.transition = ""
             return snapshot
+
+        def last_transition(self):
+            return "returned", stamp
 
     monkeypatch.setattr("mcpserver.screen_vision.presence.get_presence_tracker", lambda: _Tracker())
 

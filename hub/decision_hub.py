@@ -631,6 +631,8 @@ class DecisionHub:
                 if not message or not target_id:
                     return False
                 if self.proactive_coordinator:
+                    from core.proactive_coordinator import EVENT, VOICE
+
                     return await self.proactive_coordinator.submit_message(
                         message,
                         key=f"chat:{target_id}:{trigger_type or 'proactive_chat'}",
@@ -645,6 +647,16 @@ class DecisionHub:
                         # camera's own events had another - and neither could see
                         # the other.
                         source="camera" if trigger_type == "camera_aware" else "proactive_chat",
+                        # What reaches this callback from the camera is a state
+                        # change the trackers produced (an arrival, a wave, a long
+                        # silence), not something she chose to say. Booking those as
+                        # "voice" made them share the small-talk allowance with her
+                        # own observations, and the log showed the result: "来源
+                        # camera 的发言配额已满" while the event allowance sat unused.
+                        # Her own words take a different route that already passes
+                        # kind="voice", and marks itself delivered so it never lands
+                        # here.
+                        kind=EVENT if trigger_type == "camera_aware" else VOICE,
                     )
                 await self._dispatch_proactive_message(
                     message=message,

@@ -817,17 +817,25 @@ class ScreenVisionService:
 
     async def _camera_watch(self, call: dict[str, Any]) -> str:
         """Start or stop Miya's own watching loop, and let her set the cadence."""
-        from .vision_agent import get_vision_agent
+        from .vision_agent import configured_start_kwargs, get_vision_agent
 
         agent = get_vision_agent()
         action = str(call.get("action") or "status").strip().lower()
         if action in {"start", "on", "resume"}:
+            # Start from what `camera_agency` says, then let an explicit argument
+            # win. Reading only the argument meant a manual start silently used
+            # the code defaults for cadence, adaptive pacing and thumbnails.
+            settings = configured_start_kwargs()
             interval = call.get("interval_seconds")
-            try:
-                interval_value = float(interval) if interval is not None else None
-            except (TypeError, ValueError):
-                interval_value = None
-            state = agent.start(interval_seconds=interval_value, mode=str(call.get("mode") or "").strip() or None)
+            if interval is not None:
+                try:
+                    settings["interval_seconds"] = float(interval)
+                except (TypeError, ValueError):
+                    pass
+            requested_mode = str(call.get("mode") or "").strip()
+            if requested_mode:
+                settings["mode"] = requested_mode
+            state = agent.start(**settings)
         elif action in {"stop", "off", "pause"}:
             state = await agent.stop()
         elif action in {"tick", "look", "now"}:
