@@ -269,3 +269,12 @@ data/self_care_last.json
 data/self_care_state.json
 data/chat_sessions_meta.json
 
+# Camera runtime state — the current mode/consent and what she has observed.
+# Both are per-installation state, not code: committing camera_control.json would
+# ship "autonomous observation is on" as a default, and camera_vision_agent.json
+# is her accumulated impressions (already text-only, but still hers). read_state()
+# fails closed to "off" when the file is absent, which is the right default.
+data/camera_control.json
+data/camera_observation_result.json
+data/camera_vision_agent.json
+
