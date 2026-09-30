@@ -733,19 +733,18 @@ class VisionAgent:
         # ordinary rounds read the one camera a reader already holds, and a sweep
         # every few minutes frees the bus and visits all of them.
         sweep_due = (started - self._last_sweep) >= SWEEP_INTERVAL_SECONDS
-        if sweep_due:
+        retry_due = manager.retry_due_indices()
+        if sweep_due or retry_due:
             try:
                 await asyncio.to_thread(pool.stop_all)
             except Exception:  # noqa: BLE001 - a stuck reader must not stop an observation
                 logger.debug("[VisionAgent] 释放常驻读帧失败", exc_info=True)
-            # No inventory probe here. The walk below opens every camera and
-            # reports what it found through `note_result`, so probing first opened
-            # each device twice - 6.6 seconds of duplication per sweep. Reading the
-            # device names is enough to know what to try, and it also ages the
-            # manager's scan clock so the panel's polling does not repeat the probe
-            # this replaced.
-            manager.refresh_names()
-            self._last_sweep = started
+            if sweep_due:
+                # No inventory probe here. The walk below opens every camera and
+                # reports what it found through `note_result`, so probing first
+                # opened every device twice. Refresh names only on the full sweep.
+                manager.refresh_names()
+                self._last_sweep = started
         observations: list[dict[str, Any]] = []
         captures: list[dict[str, Any]] = []
         failures: list[dict[str, Any]] = []
@@ -868,11 +867,11 @@ class VisionAgent:
                 )
 
         looked: list[int] = []
-        if sweep_due:
-            # The periodic walk: every camera, one after another, each released
-            # before the next. Whatever earlier rounds concluded about a device is
-            # discarded - this is the round that finds out for itself.
-            for index in manager.all_indices():
+        if sweep_due or retry_due:
+            # Full sweeps visit every camera; between them, retry only devices
+            # whose bounded backoff elapsed. Captures stay serialized.
+            indices = manager.all_indices() if sweep_due else retry_due
+            for index in indices:
                 if index in handled:
                     continue
                 await observe_once(index)
@@ -888,9 +887,14 @@ class VisionAgent:
                 # - and a camera pointed at a wall looks frozen. Giving up here
                 # would mean she sees nothing at all until the next sweep, so the
                 # round falls back to opening one camera itself.
-                target = self._preferred_index
+                preferred = manager.sources().get(int(self._preferred_index)) if self._preferred_index is not None else None
+                target = self._preferred_index if preferred is None or preferred.usable else None
             if target is None:
-                candidates = manager.all_indices()
+                sources = manager.sources()
+                candidates = [
+                    index for index in manager.all_indices()
+                    if index in sources and (sources[index].usable or not sources[index].checked)
+                ]
                 target = candidates[0] if candidates else None
             if target is not None and target not in handled:
                 cached = pool.latest_for_inference(target)
@@ -912,6 +916,11 @@ class VisionAgent:
                 looked[0],
             )
             self._preferred_index = int(preferred)
+        elif self._preferred_index is not None:
+            current = manager.sources().get(int(self._preferred_index))
+            if current is not None and not current.usable:
+                alternatives = manager.usable_indices()
+                self._preferred_index = alternatives[0] if alternatives else None
         if self._preferred_index is not None:
             try:
                 pool.start_reader(int(self._preferred_index))

@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import logging
 import os
+import hashlib
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -41,6 +43,8 @@ logger = logging.getLogger("screen_vision.camera_manager")
 RESCAN_INTERVAL_SECONDS = float(os.getenv("MIYA_CAMERA_RESCAN_SECONDS", "45"))
 # Do not let a hard failure hammer the device: back off per index.
 DARK_RETRY_SECONDS = float(os.getenv("MIYA_CAMERA_DARK_RETRY_SECONDS", "20"))
+FAILURE_BACKOFF_SECONDS = float(os.getenv("MIYA_CAMERA_FAILURE_BACKOFF_SECONDS", "8"))
+MAX_FAILURE_BACKOFF_SECONDS = float(os.getenv("MIYA_CAMERA_MAX_FAILURE_BACKOFF_SECONDS", "120"))
 # A frame the desktop sent us counts as "that camera is alive" for this long.
 BROWSER_FRAME_FRESH_SECONDS = float(os.getenv("MIYA_CAMERA_BROWSER_FRESH", "30"))
 
@@ -78,14 +82,36 @@ class CameraSource:
     last_reading_text: str = ""
     last_faces: int = 0
     last_action: str = ""
+    failure_count: int = 0
+    last_failure_at: float = 0.0
+    next_retry_at: float = 0.0
+    checked: bool = False
 
     def label(self) -> str:
         """How this camera should be named in logs and in the panel."""
         return self.name or f"索引 {self.index}"
 
     def to_dict(self) -> dict[str, Any]:
+        now = time.time()
+        if self.usable:
+            health = "online"
+        elif not self.checked:
+            health = "unknown"
+        elif self.openable:
+            health = "no_frame"
+        else:
+            health = "unopenable"
+        normalized = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", self.name.lower())
+        stable_name = normalized or f"index-{self.index}"
+        # Friendly names are stable across index shifts. Duplicate friendly names
+        # are intentionally not disambiguated here: the frontend must refuse an
+        # ambiguous match instead of guessing which physical camera it means.
+        source_key = hashlib.sha256(stable_name.encode("utf-8")).hexdigest()[:16]
         return {
             "index": self.index,
+            "source_id": f"dshow:{source_key}",
+            "health": health,
+            "checked": self.checked,
             "name": self.name,
             "label": self.label(),
             "usable": self.usable,
@@ -102,6 +128,12 @@ class CameraSource:
             "last_reading_text": self.last_reading_text,
             "last_faces": self.last_faces,
             "last_action": self.last_action,
+            "failure_count": self.failure_count,
+            "last_failure_at": round(self.last_failure_at, 1),
+            "next_retry_at": round(self.next_retry_at, 1),
+            "checked_age_seconds": round(max(0.0, now - self.last_checked), 1) if self.last_checked else None,
+            "reading_age_seconds": round(max(0.0, now - self.last_reading_at), 1) if self.last_reading_at else None,
+            "retry_in_seconds": round(max(0.0, self.next_retry_at - now), 1) if self.next_retry_at else 0.0,
             # True when this camera has ever actually recognised a person. It is
             # the answer to "is this one pointed at Jia", which the device list
             # alone cannot give.
@@ -155,6 +187,7 @@ class CameraManager:
                     reason=str(item.get("reason") or ""),
                     last_checked=time.time(),
                     last_usable=time.time() if item.get("usable") else 0.0,
+                    checked=item.get("available") is not None,
                 )
                 # What a camera last showed outlives the scan that re-lists it.
                 # Rebuilding the inventory from scratch wiped this every 45
@@ -166,6 +199,9 @@ class CameraManager:
                     source.last_reading_text = old.last_reading_text
                     source.last_faces = old.last_faces
                     source.last_action = old.last_action
+                    source.failure_count = old.failure_count
+                    source.last_failure_at = old.last_failure_at
+                    source.next_retry_at = old.next_retry_at
                 found[index] = source
             with self._lock:
                 browser = dict(self._browser_frame) if self._browser_frame else None
@@ -214,17 +250,28 @@ class CameraManager:
         with self._lock:
             return sorted(self._sources)
 
+    def retry_due_indices(self, *, now: float | None = None) -> list[int]:
+        """Failed devices whose backoff has elapsed and are ready to retry."""
+        current = time.time() if now is None else float(now)
+        with self._lock:
+            return sorted(
+                index for index, source in self._sources.items()
+                if not source.usable
+                and source.failure_count > 0
+                and source.next_retry_at <= current
+            )
+
     def sleepers(self) -> list[int]:
         """Indices that opened but delivered nothing - likely a sleeping phone."""
         with self._lock:
             return sorted(index for index, source in self._sources.items()
-                          if not source.usable and source.openable)
+                          if source.checked and not source.usable and source.openable)
 
     def unopenable(self) -> list[int]:
         """Indices of devices DirectShow exists but refuses to open."""
         with self._lock:
             return sorted(index for index, source in self._sources.items()
-                          if not source.openable)
+                          if source.checked and not source.openable)
 
     def label_for(self, index: Any) -> str:
         """The friendly name of one camera, falling back to its index."""
@@ -264,6 +311,7 @@ class CameraManager:
                 source = CameraSource(index=int(index), last_checked=time.time())
                 self._sources[int(index)] = source
             source.luminance = luminance
+            source.checked = True
             source.usable = bool(usable)
             source.last_checked = time.time()
             if openable is not None:
@@ -272,6 +320,17 @@ class CameraManager:
                 source.reason = str(reason)[:400]
             if usable:
                 source.last_usable = time.time()
+                source.failure_count = 0
+                source.last_failure_at = 0.0
+                source.next_retry_at = 0.0
+            else:
+                source.failure_count += 1
+                source.last_failure_at = source.last_checked
+                delay = min(
+                    MAX_FAILURE_BACKOFF_SECONDS,
+                    FAILURE_BACKOFF_SECONDS * (2 ** max(0, source.failure_count - 1)),
+                )
+                source.next_retry_at = source.last_checked + delay
 
     def refresh_names(self) -> list[int]:
         """Re-read the device names and return every index worth trying.
@@ -285,17 +344,34 @@ class CameraManager:
         the throttled :meth:`scan` and would otherwise repeat the probe it just
         replaced.
         """
-        from .camera_names import dshow_device_names
+        from .camera_names import describe as describe_names, dshow_device_names
 
         names = dshow_device_names()
+        names_available = bool(describe_names().get("enumerated"))
         now = time.time()
         with self._lock:
+            # A successful DirectShow enumeration is authoritative. Remove
+            # unplugged indices now so the autonomous loop cannot keep trying
+            # stale devices. If enumeration is unavailable, retain the last
+            # known inventory and let capture failures update its health.
+            if names_available:
+                present = set(range(len(names)))
+                browser = self._browser_frame
+                if browser and isinstance(browser.get("index"), int):
+                    if now - float(browser.get("at") or 0) <= BROWSER_FRAME_FRESH_SECONDS:
+                        present.add(int(browser["index"]))
+                self._sources = {
+                    index: source for index, source in self._sources.items()
+                    if index in present
+                }
             for index, name in enumerate(names):
                 source = self._sources.get(index)
                 if source is None:
                     source = CameraSource(index=index, last_checked=now)
                     self._sources[index] = source
                 source.name = name
+            # When names cannot be read, do not invent a disappearance. The
+            # inventory stays available but its labels remain index based.
             self._last_scan = now
             return sorted(self._sources)
 
@@ -377,7 +453,7 @@ class CameraManager:
             if index is not None and int(index) not in self._sources:
                 self._sources[int(index)] = CameraSource(
                     index=int(index), usable=True, owner="browser",
-                    last_checked=time.time(), last_usable=time.time(),
+                    last_checked=time.time(), last_usable=time.time(), checked=True,
                 )
 
     def browser_frame(self, *, max_age_seconds: float = 30.0) -> dict[str, Any] | None:
@@ -393,21 +469,24 @@ class CameraManager:
         with self._lock:
             sources = dict(self._sources)
         usable = [item for item in sources.values() if item.usable]
-        sleepers = [item for item in sources.values() if not item.usable and item.openable]
-        blocked = [item for item in sources.values() if not item.openable]
+        sleepers = [item for item in sources.values() if item.checked and not item.usable and item.openable]
+        blocked = [item for item in sources.values() if item.checked and not item.openable]
+        unknown = [item for item in sources.values() if not item.checked]
         return {
             "count": len(sources),
             "usable_count": len(usable),
+            "unknown_count": len(unknown),
             "unopenable_count": len(blocked),
             "usable_indices": sorted(item.index for item in usable),
             "sleeping_indices": sorted(item.index for item in sleepers),
             "unopenable_indices": sorted(item.index for item in blocked),
+            "unknown_indices": sorted(item.index for item in unknown),
             "devices": [sources[index].to_dict() for index in sorted(sources)],
             # Names are handed out separately as well, so a consumer that only
             # has an index (the frame pool, the panel) can still label it.
             "names": {str(index): sources[index].name for index in sorted(sources) if sources[index].name},
             "last_scan": round(self._last_scan, 1),
-            "message": self._message(usable, sleepers, blocked),
+            "message": self._message(usable, sleepers, blocked, unknown),
         }
 
     @staticmethod
@@ -415,6 +494,7 @@ class CameraManager:
         usable: list[CameraSource],
         sleepers: list[CameraSource],
         blocked: list[CameraSource] | None = None,
+        unknown: list[CameraSource] | None = None,
     ) -> str:
         """One honest sentence about the whole inventory.
 
@@ -424,6 +504,7 @@ class CameraManager:
         every camera problem look identical.
         """
         blocked = blocked or []
+        unknown = unknown or []
         if not usable and not sleepers and not blocked:
             return "还没有发现任何摄像头。"
 
@@ -441,6 +522,8 @@ class CameraManager:
             parts.append(f"{item.label()} 打开了但没有画面{hint}")
         for item in blocked:
             parts.append(f"{item.label()} 系统里有，但打不开")
+        if unknown:
+            parts.append(f"{len(unknown)} 台已发现、等待首次探测")
         return "；".join(parts) + "。"
 
 

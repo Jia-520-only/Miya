@@ -53,6 +53,7 @@ _names_cache: list[str] = []
 _names_at: float = 0.0
 _last_error: str = ""
 _last_attempt: float = 0.0
+_enumerated: bool = False
 # A failed lookup backs off, so a machine without ffmpeg does not respawn a
 # failing process on every scan.
 FAILED_BACKOFF_SECONDS = float(os.getenv("MIYA_CAMERA_NAME_BACKOFF", "300"))
@@ -164,7 +165,7 @@ def dshow_device_names(*, force: bool = False) -> list[str]:
     Returns an empty list when ffmpeg is unavailable or the lookup fails; the
     caller keeps working with indices, just without names.
     """
-    global _names_cache, _names_at, _last_error, _last_attempt
+    global _names_cache, _names_at, _last_error, _last_attempt, _enumerated
 
     now = time.time()
     with _names_lock:
@@ -179,6 +180,7 @@ def dshow_device_names(*, force: bool = False) -> list[str]:
     if not executable:
         with _names_lock:
             _last_error = "没有找到 ffmpeg，无法读取摄像头名字（索引仍然可用）"
+            _enumerated = False
         logger.debug("[CameraNames] %s", _last_error)
         return []
 
@@ -188,11 +190,13 @@ def dshow_device_names(*, force: bool = False) -> list[str]:
         names = []
         with _names_lock:
             _last_error = f"ffmpeg 列举设备超时（{LIST_TIMEOUT_SECONDS:.0f} 秒）"
+            _enumerated = False
         logger.warning("[CameraNames] %s", _last_error)
         return []
     except Exception as exc:  # noqa: BLE001 - names are decoration, never fatal
         with _names_lock:
             _last_error = f"读取摄像头名字失败: {type(exc).__name__}: {exc}"
+            _enumerated = False
         logger.warning("[CameraNames] %s", _last_error)
         return []
 
@@ -200,6 +204,7 @@ def dshow_device_names(*, force: bool = False) -> list[str]:
         _names_cache = names
         _names_at = time.time()
         _last_error = "" if names else "ffmpeg 没有枚举到任何视频设备"
+        _enumerated = True
     logger.info("[CameraNames] DirectShow 摄像头: %s", names or "（没有）")
     return list(names)
 
@@ -238,20 +243,23 @@ def describe() -> dict[str, Any]:
         names = list(_names_cache)
         fetched_at = _names_at
         error = _last_error
+        enumerated = _enumerated
     return {
         "available": bool(ffmpeg_path()),
         "ffmpeg": ffmpeg_path(),
         "names": names,
         "fetched_at": round(fetched_at, 1),
         "error": error,
+        "enumerated": enumerated,
     }
 
 
 def reset_cache() -> None:
     """Forget the cached names; the next lookup re-reads them."""
-    global _names_cache, _names_at, _last_error, _last_attempt
+    global _names_cache, _names_at, _last_error, _last_attempt, _enumerated
     with _names_lock:
         _names_cache = []
         _names_at = 0.0
         _last_error = ""
         _last_attempt = 0.0
+        _enumerated = False

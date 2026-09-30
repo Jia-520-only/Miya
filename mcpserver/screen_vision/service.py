@@ -1038,10 +1038,16 @@ class ScreenVisionService:
 
             try:
                 index = call.get("camera_index") if call.get("camera_index") is not None else event.get("camera_index")
+                # No index means the browser device could not be proven to be
+                # the same physical source as an OpenCV camera. Keep the frame
+                # usable for inference without inventing a source attribution.
+                index = int(index) if index is not None else None
+                if index is not None and index < 0:
+                    index = None
                 get_camera_manager().remember_browser_frame(index=index, data_url=frame)
                 # Also publish into the shared pool: the preview owns that device,
                 # so this frame is the only way anything else can see through it.
-                if index is not None:
+                if index is not None and index >= 0:
                     from .camera_capture import thumbnail_from_data_url
                     from .camera_stream import get_camera_pool
 

@@ -45,6 +45,7 @@ const activity = ref<Record<string, any> | null>(null)
 // open a device the browser is holding, so it needs to be told which index the
 // frames it receives belong to.
 const backendDeviceIndex = ref<number>(Number(localStorage.getItem('miya-camera-backend-index') ?? '') || 0)
+const backendDeviceMapping = ref<'matched' | 'ambiguous' | 'unmatched'>('unmatched')
 // Miya's own watching loop: she starts it at boot, but the desktop must be able
 // to see that she is looking and to stop her.
 const agentState = ref<Record<string, any> | null>(null)
@@ -307,9 +308,12 @@ async function publishLocalEvent(
     // it. The frame is captured by the caller so a failed capture cannot send an
     // event that claims one.
     const imageData = options.imageData || ''
+    const index = selectedDeviceId.value && backendDeviceMapping.value !== 'matched'
+      ? null
+      : backendDeviceIndex.value
     await API.mcpCall('screen_vision', 'camera_event', {
       event: { kind, summary, confidence, mode: 'companion', status: 'success' },
-      camera_index: backendDeviceIndex.value,
+      ...(index === null ? {} : { camera_index: index }),
       ...(imageData ? { image_data: imageData } : {}),
     })
   } catch {
@@ -790,13 +794,16 @@ function matchBackendIndexForSelectedDevice(): number | null {
   const normalize = (text: string) => text.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '')
   const wanted = normalize(label)
   if (!wanted) return null
+  const matches: number[] = []
   for (const [index, name] of Object.entries(names)) {
     const candidate = normalize(String(name || ''))
     if (!candidate) continue
-    if (candidate === wanted || wanted.includes(candidate) || candidate.includes(wanted)) {
-      return Number(index)
-    }
+    // Fuzzy substring matches silently bind a selected camera to another
+    // device (especially when Windows exposes generic or duplicate labels).
+    if (candidate === wanted) matches.push(Number(index))
   }
+  if (matches.length === 1) return matches[0]!
+  if (matches.length > 1) backendDeviceMapping.value = 'ambiguous'
   return null
 }
 
@@ -806,6 +813,7 @@ async function refreshCameraSources() {
     backendDevices.value = Array.isArray(response?.devices) ? response.devices : []
     cameraSourcesMessage.value = response?.message || ''
     backendNames.value = response?.names || {}
+    backendDeviceMapping.value = 'unmatched'
     // camelCase: the API layer converts responses, so `usable_indices` is never
     // the key that exists here. Reading the old name made this whole fallback
     // dead code and froze the reported index.
@@ -820,6 +828,7 @@ async function refreshCameraSources() {
       usableCount: usable.length,
       sleepingCount: sleeping.length,
       unopenableCount: unopenable.length,
+      unknownCount: Array.isArray(response?.unknownIndices) ? response.unknownIndices.length : 0,
       count: backendDevices.value.length,
       defaultIndex: (response as any)?.defaultIndex ?? null,
       message: cameraSourcesMessage.value,
@@ -827,15 +836,16 @@ async function refreshCameraSources() {
     }
     const matched = matchBackendIndexForSelectedDevice()
     if (matched !== null) {
+      backendDeviceMapping.value = 'matched'
       if (matched !== Number(backendDeviceIndex.value)) setBackendDeviceIndex(matched)
       return backendDevices.value
     }
-    // The labels did not line up; fall back to "a camera that is known to work".
-    const current = Number(backendDeviceIndex.value)
-    if (!usable.includes(current) && usable.length) {
-      setBackendDeviceIndex(usable[0]!)
-    } else if (!usable.length && sleeping.length && !sleeping.includes(current)) {
-      setBackendDeviceIndex(sleeping[0]!)
+    // Do not silently attribute browser frames to a different physical device.
+    // Keep a sensible fallback only when no browser camera has been selected.
+    if (!selectedDeviceId.value) {
+      const current = Number(backendDeviceIndex.value)
+      if (!usable.includes(current) && usable.length) setBackendDeviceIndex(usable[0]!)
+      else if (!usable.length && sleeping.length && !sleeping.includes(current)) setBackendDeviceIndex(sleeping[0]!)
     }
   } catch (err: any) {
     cameraSourcesMessage.value = err?.message || '无法读取本机摄像头状态'
@@ -1016,7 +1026,7 @@ export function useCameraVision() {
     mode, status, error, devices, selectedDeviceId, stream, lastObservation, localEvent,
     faceRecognitionEnabled, emotionInferenceEnabled, actionRecognitionEnabled,
     alwaysOn,
-    localOnly, localCapabilities, backendDevices, cameraSourcesMessage, presence, activity, backendDeviceIndex, backendNames,
+    localOnly, localCapabilities, backendDevices, cameraSourcesMessage, presence, activity, backendDeviceIndex, backendDeviceMapping, backendNames,
     agentState, agentAgency, agentVoice, agentVoiceQueue,
     visionEvents, visionStreamStatus, visionCadence, thumbnailsEnabled, cameraHealth, visionSources, visionBridge,
     listDevices, refreshCapabilities, attachPreview, open, stop, lookAtMe, lookBoth, startCompanion, selectDevice,

@@ -227,6 +227,8 @@ export class CoreApiClient extends ApiClient {
     usableIndices?: number[]
     sleepingIndices?: number[]
     unopenableIndices?: number[]
+    unknownIndices?: number[]
+    unknownCount?: number
   }> {
     return this.instance.get('/api/camera/sources')
   }

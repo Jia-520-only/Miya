@@ -44,19 +44,24 @@ const healthView = computed(() => {
   const running = Boolean(agent.value.running)
   const usable = Number(health.value.usableCount || 0)
   const total = Number(health.value.count || 0)
+  const sleeping = Number(health.value.sleepingCount || 0)
+  const blocked = Number(health.value.unopenableCount || 0)
+  const unknown = Math.max(0, total - usable - sleeping - blocked)
   if (!running) {
     return { tone: 'off', label: '观察已停止', detail: '她现在没有在看。' }
   }
   if (usable === 0) {
-    return { tone: 'bad', label: '看不到你', detail: `${total} 台摄像头现在都没画面。` }
+    if (unknown === total && total > 0) {
+      return { tone: 'warn', label: '等待摄像头探测', detail: `已发现 ${total} 台，正在等待第一帧。` }
+    }
+    return { tone: 'bad', label: '看不到你', detail: `${total - unknown} 台已探测设备现在都没画面。${unknown ? `另有 ${unknown} 台等待探测。` : ''}` }
   }
-  const sleeping = total - usable
   const interval = Number(cadence.value.current_interval || agent.value.interval_seconds || 0)
   const watching = Number(cadence.value.unchanged_streak || 0) < Number(cadence.value.slow_after || 3)
   return {
-    tone: sleeping > 0 ? 'warn' : 'good',
+    tone: sleeping + blocked > 0 ? 'warn' : 'good',
     label: watching ? '正在看着你' : '画面没什么变化，放慢了',
-    detail: `${usable}/${total} 台有画面${sleeping > 0 ? `（${sleeping} 台息屏或没推流）` : ''} · 每 ${Math.round(interval)} 秒看一次`,
+    detail: `${usable}/${total} 台有画面${sleeping ? ` · ${sleeping} 台无画面` : ''}${blocked ? ` · ${blocked} 台打不开` : ''}${unknown ? ` · ${unknown} 台待探测` : ''} · 每 ${Math.round(interval)} 秒看一次`,
   }
 })
 
@@ -194,11 +199,20 @@ onBeforeUnmount(() => {
         <li v-for="device in health.devices" :key="device.index" class="cap-device" :class="{ bad: !device.usable }">
           <span class="cap-device-name">{{ deviceLabel(device.index) }}</span>
           <span class="cap-device-state">
-            <template v-if="device.usable">
+            <template v-if="!device.checked">
+              已发现 · 等待首次画面探测
+            </template>
+            <template v-else-if="device.usable">
               可用 · 亮度 {{ Math.round(device.luminance || 0) }}
               <template v-if="device.sees_people"> · 看到人</template>
             </template>
-            <template v-else>{{ device.reason || '暂时没有画面' }}</template>
+            <template v-else>
+              {{ device.reason || '暂时没有画面' }}
+              <small v-if="device.retryInSeconds > 0"> · {{ Math.ceil(device.retryInSeconds) }} 秒后重试</small>
+            </template>
+            <small v-if="device.lastReadingText" class="cap-device-reading">
+              · 最近识别：{{ device.lastReadingText }}
+            </small>
           </span>
           <span v-if="sources.sources?.[device.index]" class="cap-device-owner">
             {{ sources.sources[device.index].owner === 'browser' ? '预览持有' : '弥娅持有' }}
@@ -392,6 +406,7 @@ onBeforeUnmount(() => {
 .cap-device.bad { background: rgba(255,190,120,.05); }
 .cap-device-name { flex: none; width: 4.5rem; color: rgba(0,255,245,.7); font: .54rem 'JetBrains Mono', monospace; }
 .cap-device-state { flex: 1; min-width: 0; color: rgba(222,232,235,.78); }
+.cap-device-reading { display: block; margin-top: .12rem; color: rgba(200,215,220,.48); }
 .cap-device.bad .cap-device-state { color: rgba(255,205,150,.8); }
 .cap-device-owner { flex: none; color: rgba(200,215,220,.4); font: .48rem 'JetBrains Mono', monospace; }
 

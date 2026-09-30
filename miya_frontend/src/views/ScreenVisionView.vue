@@ -91,6 +91,12 @@ const sleepingCount = computed(() => devices.value.filter(
   device => device.openable !== false && device.usable !== true,
 ).length)
 const unopenableCount = computed(() => devices.value.filter(device => device.openable === false).length)
+const mappingText = computed(() => {
+  if (!camera.selectedDeviceId.value) return '未选择固定设备'
+  if (camera.backendDeviceMapping.value === 'matched') return '前后端设备已确认对应'
+  if (camera.backendDeviceMapping.value === 'ambiguous') return '设备名称重复，暂未确认后端对应关系'
+  return '尚未确认后端对应设备'
+})
 
 async function refreshDevices() {
   if (devicesBusy.value) return
@@ -385,6 +391,9 @@ onBeforeUnmount(() => {
             <option v-for="(device, index) in camera.devices.value" :key="device.deviceId" :value="device.deviceId">{{ device.label || `摄像头 ${index + 1}` }}</option>
           </select>
         </div>
+        <div class="camera-mapping-state" :class="{ warn: camera.backendDeviceMapping.value !== 'matched' && !!camera.selectedDeviceId.value }">
+          {{ mappingText }}
+        </div>
         <textarea v-model="cameraQuery" class="vision-textarea" placeholder="想让弥娅结合你的状态和屏幕内容留意什么？" rows="2" :disabled="loading" />
         <div class="vision-actions camera-actions">
           <button class="vision-btn primary" :disabled="loading" @click="doLookBoth">{{ loading ? '观察中...' : '一起观察' }}</button>
@@ -640,6 +649,8 @@ h1 { margin: .25rem 0 0; color: #f3f7f8; font: 700 1.05rem 'Noto Serif SC', seri
 .field-label { color: rgba(220,230,235,.42); font-size: .62rem; white-space: nowrap; }
 .camera-select { flex: 1; min-width: 0; padding: .45rem .55rem; border: 1px solid rgba(0,173,181,.1); border-radius: 4px; background: rgba(0,0,0,.35); color: rgba(220,230,235,.74); font: .65rem inherit; }
 .camera-select:disabled { opacity: .45; }
+.camera-mapping-state { margin-top: .25rem; color: rgba(110,231,168,.72); font-size: .54rem; }
+.camera-mapping-state.warn { color: rgba(255,205,150,.88); }
 .camera-event { display: flex; align-items: center; gap: .4rem; margin-top: .7rem; color: rgba(220,230,235,.34); font: .54rem 'JetBrains Mono', monospace; }
 .camera-event.active { color: rgba(255,200,195,.7); }
 .camera-event.motion { color: rgba(255, 210, 140, .78); }
