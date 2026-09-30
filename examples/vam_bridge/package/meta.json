@@ -1,0 +1,18 @@
+{
+  "licenseType": "PC",
+  "creatorName": "Miya",
+  "packageName": "MiyaVAMBridge",
+  "standardReferenceVersionOption": "Latest",
+  "scriptReferenceVersionOption": "Exact",
+  "description": "Local WebSocket bridge for Miya and Virt-A-Mate",
+  "credits": "Miya",
+  "instructions": "Add MiyaVAMBridgeTcp.cslist to a Person Atom plugin slot.",
+  "promotionalLink": "",
+  "programVersion": "1.22",
+  "contentList": [
+    "Custom/Scripts/Miya/MiyaVAMBridgeTcp.cs",
+    "Custom/Scripts/Miya/MiyaVAMBridgeTcp.cslist"
+  ],
+  "dependencies": {},
+  "customOptions": {}
+}

@@ -1,0 +1,26 @@
+{
+  "name": "vam_bridge",
+  "displayName": "VAM Bridge",
+  "description": "通过本地 WebSocket 受控操作 Virt-A-Mate 人物与场景",
+  "agentType": "mcp",
+  "entryPoint": {
+    "module": "mcpserver.vam_bridge.service",
+    "class": "VAMBridgeService"
+  },
+  "capabilities": {
+    "tools": [
+      {"name": "vam_connect", "description": "连接本机 VAM 控制插件", "parameters": {"url": "string - 可选 WebSocket 地址"}},
+      {"name": "vam_disconnect", "description": "断开 VAM 控制连接", "parameters": {}},
+      {"name": "vam_status", "description": "获取 VAM 连接、场景和人物状态", "parameters": {}},
+      {"name": "vam_list_atoms", "description": "列出当前场景中的可控人物", "parameters": {}},
+      {"name": "vam_set_expression", "description": "设置人物表情或 Morph", "parameters": {"atom": "string", "expression": "string", "morphs": "object", "duration": "number"}},
+      {"name": "vam_set_pose", "description": "设置人物姿态预设或参数", "parameters": {"atom": "string", "pose": "string", "parameters": "object", "duration": "number"}},
+      {"name": "vam_play_animation", "description": "播放安全动画预设", "parameters": {"atom": "string", "animation": "string", "loop": "boolean"}},
+      {"name": "vam_look_at", "description": "让人物看向目标", "parameters": {"atom": "string", "target": "string", "duration": "number"}},
+      {"name": "vam_speak", "description": "发送文本用于口型/说话动画同步", "parameters": {"text": "string", "atom": "string", "emotion": "string"}},
+      {"name": "vam_stop_all", "description": "立即停止弥娅触发的动作和说话", "parameters": {}}
+    ]
+  },
+  "version": "0.1.0",
+  "enabled": true
+}
