@@ -53,7 +53,7 @@ Electron + Vue 3 桌面应用，内嵌 Live2D 独立透明窗口。她会根据�
 
 ### 双手
 
-DeepSeek Harness（DSH，DeepSeek 官方开源 agent harness，以 git submodule 嵌入于 `deepseek-harness/`）作为执行层，内置文件读写/搜索、bash/pwsh 命令、代码分析、子代理、技能、工作流等工具，通过 MCP 协议与守护进程双向通信——大脑想做什么，双手就去执行。当前 `.mcp.json` 启用 2 项原生 MCP 服务：`miya-soul`（灵魂状态查询，17 工具）、`miya-mineradio`（音乐遥控，27 工具）。另有 13 个通过 MCPManager 自动发现的服务模块（AI 绘画、DSH 任务执行、代码运行器、数据库操作、文件系统、游戏伴侣、记忆存储、社区论坛、计算机控制、屏幕视觉、网页搜索等），详见 `docs/MCP.md`。
+DeepSeek Harness（DSH，DeepSeek 官方开源 agent harness，以 git submodule 嵌入于 `deepseek-harness/`）作为执行层，内置文件读写/搜索、bash/pwsh 命令、代码分析、子代理、技能、工作流等工具，通过 MCP 协议与守护进程双向通信——大脑想做什么，双手就去执行。当前 `.mcp.json` 启用 2 项原生 MCP 服务：`miya-soul`（灵魂状态查询，17 工具）、`miya-mineradio`（音乐遥控，27 工具）。另有 14 个通过 MCPManager 自动发现的服务模块（AI 绘画、DSH 任务执行、代码运行器、数据库操作、文件系统、游戏伴侣、记忆存储、社区论坛、计算机控制、屏幕视觉、VAM 桥接、网页搜索等），详见 `docs/MCP.md`。
 
 ### 进化
 
@@ -79,7 +79,7 @@ DeepSeek Harness（DSH，DeepSeek 官方开源 agent harness，以 git submodule
             ├── 灵魂锚点 —— 人格 · 身份 · 伦理 · 模型池调度 · 模型协作引擎
             ├── 统一记忆 V3.1 —— 六层记忆 · JSON + SQLite · LifeBook 生命书
             ├── M-Link 消息总线 —— 跨平台统一路由
-            ├── MCPManager —— 统一服务注册发现 (13 自动发现 + 2 原生服务)
+            ├── MCPManager —— 统一服务注册发现 (14 自动发现 + 2 原生服务)
             ├── 蛛网子网 —— QQ · ToolNet · LifeNet · HealthNet
             │              MusicNet · ArtNet · EntertainmentNet · AuthNet · IoT
 
@@ -483,7 +483,7 @@ Miya/
 | 范式 | 配置方式 | 服务数 | 启用 | 说明 |
 |------|----------|--------|------|------|
 | **原生 MCP SDK** | `.mcp.json` → stdio | 4 | 3 | DSH 终端直接调用 |
-| **MCPManager 自动发现** | `mcpserver/*/agent-manifest.json` | 13 | — | daemon 统一管理、ToolNet 注册 |
+| **MCPManager 自动发现** | `mcpserver/*/agent-manifest.json` | 14 | — | daemon 统一管理、ToolNet 注册 |
 
 ### 原生服务（`.mcp.json`）
 
@@ -506,6 +506,7 @@ Miya/
 | `memory` | 4 | 键值记忆存储与检索 |
 | `naga_community` | 23+ | 社区论坛完整 API（认证/帖子/评论/私信/好友） |
 | `screen_vision` | 2 | 截图 + 视觉 LLM 分析 |
+| `vam_bridge` | 15 | 本机 VAM 人物控制、连续动作序列与场景反馈 |
 | `web_search` | 2 | DuckDuckGo/Google/Bing 搜索与网页抓取 |
 | `agent_mcp` | — | 按代理 MCP 注册中心（库模块） |
 

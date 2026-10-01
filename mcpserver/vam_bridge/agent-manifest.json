@@ -13,14 +13,20 @@
       {"name": "vam_disconnect", "description": "断开 VAM 控制连接", "parameters": {}},
       {"name": "vam_status", "description": "获取 VAM 连接、场景和人物状态", "parameters": {}},
       {"name": "vam_list_atoms", "description": "列出当前场景中的可控人物", "parameters": {}},
+      {"name": "vam_inspect_person", "description": "暂时禁用，避免复杂插件枚举耗尽 VaM/Mono 堆", "parameters": {"atom": "string", "storable": "string?"}},
+      {"name": "vam_get_person_state", "description": "只读获取指定人物插件当前公开状态", "parameters": {"atom": "string", "storable": "string"}},
+      {"name": "vam_set_person_params", "description": "设置人物或已加载插件公开的参数", "parameters": {"atom": "string", "storable": "string", "values": "object"}},
+      {"name": "vam_call_person_action", "description": "调用人物或已加载插件公开的动作", "parameters": {"atom": "string", "storable": "string", "action": "string"}},
+      {"name": "vam_run_sequence", "description": "连续执行人物动作序列，可过渡、等待或循环", "parameters": {"atom": "string", "steps": "array", "loop": "boolean", "gap": "number"}},
+      {"name": "vam_autonomy_start", "description": "启动弥娅的 VAM 主动行为循环", "parameters": {"atom": "string?", "interval": "number", "mode": "string"}},
+      {"name": "vam_autonomy_stop", "description": "停止弥娅的 VAM 主动行为循环", "parameters": {}},
+      {"name": "vam_autonomy_status", "description": "查看 VAM 主动行为循环状态", "parameters": {}},
       {"name": "vam_set_expression", "description": "设置人物表情或 Morph", "parameters": {"atom": "string", "expression": "string", "morphs": "object", "duration": "number"}},
-      {"name": "vam_set_pose", "description": "设置人物姿态预设或参数", "parameters": {"atom": "string", "pose": "string", "parameters": "object", "duration": "number"}},
-      {"name": "vam_play_animation", "description": "播放安全动画预设", "parameters": {"atom": "string", "animation": "string", "loop": "boolean"}},
       {"name": "vam_look_at", "description": "让人物看向目标", "parameters": {"atom": "string", "target": "string", "duration": "number"}},
-      {"name": "vam_speak", "description": "发送文本用于口型/说话动画同步", "parameters": {"text": "string", "atom": "string", "emotion": "string"}},
-      {"name": "vam_stop_all", "description": "立即停止弥娅触发的动作和说话", "parameters": {}}
+      {"name": "vam_move_person", "description": "沿人物根控制点做限幅平滑位移", "parameters": {"atom": "string", "offset": "object", "duration": "number"}},
+      {"name": "vam_stop_all", "description": "恢复桥接控制的表情与视线并停止人物内建动画", "parameters": {}}
     ]
   },
-  "version": "0.1.0",
+  "version": "0.4.0",
   "enabled": true
 }

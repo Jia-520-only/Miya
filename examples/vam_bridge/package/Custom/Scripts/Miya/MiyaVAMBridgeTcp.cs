@@ -21,6 +21,8 @@ namespace MVRPlugin
         private const string WebSocketPath = "/miya-vam";
         private const string WebSocketGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
         private const int MaxFrameBytes = 1024 * 1024;
+        private const float MaxMoveOffset = 0.25f;
+        private const float MaxMoveDuration = 5f;
 
         public string sharedToken = "";
         private TcpListener listener;
@@ -32,6 +34,16 @@ namespace MVRPlugin
         private readonly object clientsLock = new object();
         private readonly Dictionary<DAZMorph, float> originalMorphValues = new Dictionary<DAZMorph, float>();
         private readonly Dictionary<EyesControl, EyesControl.LookMode> originalLookModes = new Dictionary<EyesControl, EyesControl.LookMode>();
+        private readonly Dictionary<DAZMorph, MorphTransition> morphTransitions = new Dictionary<DAZMorph, MorphTransition>();
+        private readonly Dictionary<Transform, Vector3> originalPositions = new Dictionary<Transform, Vector3>();
+        private readonly Dictionary<Transform, PositionTransition> positionTransitions = new Dictionary<Transform, PositionTransition>();
+        private JSONArray activeSequenceSteps;
+        private string activeSequenceId = "";
+        private string activeSequenceAtom = "";
+        private int activeSequenceIndex;
+        private bool activeSequenceLoop;
+        private float activeSequenceGap;
+        private float nextSequenceAt;
 
         public override void Init()
         {
@@ -65,6 +77,9 @@ namespace MVRPlugin
                 try { HandleRequest(request); }
                 catch (Exception ex) { request.Client.SendError(request.Id, "command_failed:" + ex.Message); }
             }
+            AdvanceMorphTransitions();
+            AdvancePositionTransitions();
+            AdvanceSequence();
         }
 
         public void OnDestroy()
@@ -121,21 +136,41 @@ namespace MVRPlugin
                 case "get_status":
                     var status = new JSONClass();
                     status["plugin"] = "miya-vam-bridge";
-                    status["version"] = "0.5.0";
+                    status["version"] = "0.6.0";
                     status["ready"].AsBool = true;
                     status["scene"] = "";
                     status["allowlistMode"] = "all_scene_persons";
                     status["personCount"].AsInt = CountAllowedPersons();
+                    status["activity"] = BuildActivityStatus();
+                    status["sceneState"] = BuildSceneState();
                     request.Client.SendOk(request.Id, status);
                     break;
                 case "list_atoms":
                     request.Client.SendOk(request.Id, ListAllowedPersons());
+                    break;
+                case "inspect_person":
+                    request.Client.SendError(request.Id, "inspect_person_disabled_to_prevent_heap_exhaustion");
+                    break;
+                case "get_person_state":
+                    request.Client.SendOk(request.Id, GetPersonState(request.Params));
+                    break;
+                case "set_person_params":
+                    request.Client.SendOk(request.Id, SetPersonParams(request.Params));
+                    break;
+                case "call_person_action":
+                    request.Client.SendOk(request.Id, CallPersonAction(request.Params));
+                    break;
+                case "run_sequence":
+                    request.Client.SendOk(request.Id, StartSequence(request.Params));
                     break;
                 case "set_expression":
                     request.Client.SendOk(request.Id, SetExpression(request.Params));
                     break;
                 case "look_at":
                     request.Client.SendOk(request.Id, SetLookAt(request.Params));
+                    break;
+                case "move_person":
+                    request.Client.SendOk(request.Id, MovePerson(request.Params));
                     break;
                 case "stop_all":
                     request.Client.SendOk(request.Id, StopAllMiyaActions());
@@ -164,6 +199,59 @@ namespace MVRPlugin
                 if (IsAllowedPerson(atom)) count++;
             }
             return count;
+        }
+
+        private JSONClass BuildSceneState()
+        {
+            var result = new JSONClass();
+            var user = new JSONClass();
+            var cameraTarget = SuperController.singleton.centerCameraTarget;
+            var userTransform = cameraTarget != null ? cameraTarget.transform : null;
+            var userAvailable = userTransform != null;
+            user["available"].AsBool = userAvailable;
+            result["user"] = user;
+
+            var persons = new JSONArray();
+            var atoms = SuperController.singleton.GetAtoms();
+            if (atoms != null)
+            {
+                foreach (var atom in atoms)
+                {
+                    if (!IsAllowedPerson(atom)) continue;
+                    var item = new JSONClass();
+                    item["uid"] = atom.uid ?? "";
+                    item["enabled"].AsBool = atom.on;
+                    var eyes = FindEyesControl(atom);
+                    if (eyes != null) item["lookMode"] = eyes.currentLookMode.ToString();
+
+                    var anchor = GetPersonAnchor(atom);
+                    if (userAvailable && anchor != null)
+                    {
+                        var offset = anchor.position - userTransform.position;
+                        var distance = offset.magnitude;
+                        item["userDistance"].AsFloat = distance;
+                        item["userDistanceKnown"].AsBool = true;
+                        var gazeAngle = distance > 0.001f
+                            ? Vector3.Angle(userTransform.forward, offset)
+                            : 0f;
+                        item["userGazeAngle"].AsFloat = gazeAngle;
+                        item["userInView"].AsBool = gazeAngle <= 70f;
+                    }
+                    else
+                    {
+                        item["userDistanceKnown"].AsBool = false;
+                    }
+                    persons.Add(item);
+                }
+            }
+            result["persons"] = persons;
+            return result;
+        }
+
+        private Transform GetPersonAnchor(Atom atom)
+        {
+            if (atom == null || atom.mainController == null) return null;
+            return atom.mainController.control;
         }
 
         private JSONArray ListAllowedPersons()
@@ -195,6 +283,494 @@ namespace MVRPlugin
             return atom;
         }
 
+        private JSONNode MovePerson(JSONClass parameters)
+        {
+            if (parameters == null) throw new Exception("missing_params");
+            var atom = ResolveAllowedPerson(parameters["atom"].Value);
+            var control = atom.mainController != null ? atom.mainController.control : null;
+            if (control == null) throw new Exception("person_control_not_ready:" + atom.uid);
+
+            var offset = JsonToVector(parameters["offset"], "offset");
+            if (Mathf.Abs(offset.x) > MaxMoveOffset || Mathf.Abs(offset.y) > MaxMoveOffset ||
+                Mathf.Abs(offset.z) > MaxMoveOffset)
+                throw new Exception("move_offset_out_of_range");
+            var duration = parameters["duration"].AsFloat;
+            if (float.IsNaN(duration) || float.IsInfinity(duration) || duration < 0f || duration > MaxMoveDuration)
+                throw new Exception("move_duration_out_of_range");
+
+            if (!originalPositions.ContainsKey(control)) originalPositions[control] = control.position;
+            var target = control.position + offset;
+            if (duration <= 0f)
+            {
+                positionTransitions.Remove(control);
+                control.position = target;
+            }
+            else
+            {
+                positionTransitions[control] = new PositionTransition
+                {
+                    Control = control,
+                    From = control.position,
+                    To = target,
+                    StartedAt = Time.unscaledTime,
+                    Duration = duration
+                };
+            }
+
+            var result = new JSONClass();
+            result["atom"] = atom.uid;
+            result["offset"] = VectorToJson(offset);
+            result["target"] = VectorToJson(target);
+            result["duration"].AsFloat = duration;
+            return result;
+        }
+
+        private JSONNode InspectPerson(JSONClass parameters)
+        {
+            if (parameters == null) throw new Exception("missing_params");
+            var atom = ResolveAllowedPerson(parameters["atom"].Value);
+            var selectedId = parameters["storable"].Value;
+            var result = new JSONClass();
+            result["atom"] = atom.uid;
+            var storables = new JSONArray();
+            var ids = atom.GetStorableIDs();
+            if (ids == null) ids = new List<string>();
+
+            foreach (var id in ids)
+            {
+                if (!string.IsNullOrEmpty(selectedId) && id != selectedId) continue;
+                var storable = atom.GetStorableByID(id) as JSONStorable;
+                if (storable == null) continue;
+                var item = new JSONClass();
+                item["id"] = id;
+                item["type"] = "JSONStorable";
+                AddFloatParams(storable, item);
+                AddBoolParams(storable, item);
+                AddVector3Params(storable, item);
+                AddStringParams(storable, item);
+                AddStringChooserParams(storable, item);
+                AddActions(storable, item);
+                storables.Add(item);
+            }
+            if (!string.IsNullOrEmpty(selectedId) && storables.Count == 0)
+                throw new Exception("storable_not_found:" + selectedId);
+            result["storables"] = storables;
+            return result;
+        }
+
+        private JSONNode GetPersonState(JSONClass parameters)
+        {
+            if (parameters == null) throw new Exception("missing_params");
+            var atom = ResolveAllowedPerson(parameters["atom"].Value);
+            var selectedId = parameters["storable"].Value;
+            if (string.IsNullOrEmpty(selectedId)) throw new Exception("missing_storable_for_state");
+            var result = new JSONClass();
+            result["atom"] = atom.uid;
+            result["readOnly"].AsBool = true;
+            var storables = new JSONArray();
+            var storable = atom.GetStorableByID(selectedId) as JSONStorable;
+            if (storable == null) throw new Exception("storable_not_found:" + selectedId);
+            var item = new JSONClass();
+            item["id"] = selectedId;
+            item["type"] = "JSONStorable";
+            AddCurrentFloatParams(storable, item);
+            AddCurrentBoolParams(storable, item);
+            AddCurrentVector3Params(storable, item);
+            AddCurrentStringParams(storable, item);
+            AddCurrentStringChooserParams(storable, item);
+            AddActions(storable, item);
+            storables.Add(item);
+            result["storables"] = storables;
+            return result;
+        }
+
+        private void AddCurrentFloatParams(JSONStorable storable, JSONClass item)
+        {
+            var values = new JSONClass();
+            foreach (var name in storable.GetFloatParamNames())
+                values[name].AsFloat = storable.GetFloatParamValue(name);
+            item["floats"] = values;
+        }
+
+        private void AddCurrentBoolParams(JSONStorable storable, JSONClass item)
+        {
+            var values = new JSONClass();
+            foreach (var name in storable.GetBoolParamNames())
+                values[name].AsBool = storable.GetBoolParamValue(name);
+            item["bools"] = values;
+        }
+
+        private void AddCurrentVector3Params(JSONStorable storable, JSONClass item)
+        {
+            var values = new JSONClass();
+            foreach (var name in storable.GetVector3ParamNames())
+                values[name] = VectorToJson(storable.GetVector3ParamValue(name));
+            item["vectors"] = values;
+        }
+
+        private void AddCurrentStringParams(JSONStorable storable, JSONClass item)
+        {
+            var values = new JSONClass();
+            foreach (var name in storable.GetStringParamNames())
+                values[name] = storable.GetStringParamValue(name) ?? "";
+            item["strings"] = values;
+        }
+
+        private void AddCurrentStringChooserParams(JSONStorable storable, JSONClass item)
+        {
+            var values = new JSONClass();
+            foreach (var name in storable.GetStringChooserParamNames())
+                values[name] = storable.GetStringChooserParamValue(name) ?? "";
+            item["choices"] = values;
+        }
+
+        private void AddFloatParams(JSONStorable storable, JSONClass item)
+        {
+            var values = new JSONArray();
+            foreach (var name in storable.GetFloatParamNames())
+            {
+                var param = new JSONClass();
+                param["name"] = name;
+                param["value"].AsFloat = storable.GetFloatParamValue(name);
+                param["min"].AsFloat = storable.GetFloatJSONParamMinValue(name);
+                param["max"].AsFloat = storable.GetFloatJSONParamMaxValue(name);
+                values.Add(param);
+            }
+            item["floats"] = values;
+        }
+
+        private void AddBoolParams(JSONStorable storable, JSONClass item)
+        {
+            var values = new JSONArray();
+            foreach (var name in storable.GetBoolParamNames())
+            {
+                var param = new JSONClass();
+                param["name"] = name;
+                param["value"].AsBool = storable.GetBoolParamValue(name);
+                values.Add(param);
+            }
+            item["bools"] = values;
+        }
+
+        private void AddVector3Params(JSONStorable storable, JSONClass item)
+        {
+            var values = new JSONArray();
+            foreach (var name in storable.GetVector3ParamNames())
+            {
+                var param = new JSONClass();
+                param["name"] = name;
+                param["value"] = VectorToJson(storable.GetVector3ParamValue(name));
+                param["min"] = VectorToJson(storable.GetVector3JSONParamMinValue(name));
+                param["max"] = VectorToJson(storable.GetVector3JSONParamMaxValue(name));
+                values.Add(param);
+            }
+            item["vectors"] = values;
+        }
+
+        private void AddStringParams(JSONStorable storable, JSONClass item)
+        {
+            var values = new JSONArray();
+            foreach (var name in storable.GetStringParamNames())
+            {
+                var param = new JSONClass();
+                param["name"] = name;
+                param["value"] = storable.GetStringParamValue(name) ?? "";
+                values.Add(param);
+            }
+            item["strings"] = values;
+        }
+
+        private void AddStringChooserParams(JSONStorable storable, JSONClass item)
+        {
+            var values = new JSONArray();
+            foreach (var name in storable.GetStringChooserParamNames())
+            {
+                var param = new JSONClass();
+                param["name"] = name;
+                param["value"] = storable.GetStringChooserParamValue(name) ?? "";
+                var choices = new JSONArray();
+                foreach (var choice in storable.GetStringChooserJSONParamChoices(name))
+                    choices.Add(choice);
+                param["choices"] = choices;
+                values.Add(param);
+            }
+            item["choices"] = values;
+        }
+
+        private void AddActions(JSONStorable storable, JSONClass item)
+        {
+            var values = new JSONArray();
+            foreach (var name in storable.GetActionNames()) values.Add(name);
+            item["actions"] = values;
+        }
+
+        private JSONNode SetPersonParams(JSONClass parameters)
+        {
+            if (parameters == null) throw new Exception("missing_params");
+            var atom = ResolveAllowedPerson(parameters["atom"].Value);
+            var storableId = parameters["storable"].Value;
+            if (string.IsNullOrEmpty(storableId)) throw new Exception("missing_storable");
+            var storable = atom.GetStorableByID(storableId) as JSONStorable;
+            if (storable == null) throw new Exception("storable_not_found:" + storableId);
+            var values = parameters["values"] as JSONClass;
+            if (values == null || values.Count == 0) throw new Exception("missing_values");
+            if (values.Count > 32) throw new Exception("too_many_params");
+
+            var updated = new JSONArray();
+            foreach (KeyValuePair<string, JSONNode> pair in values)
+            {
+                var name = pair.Key;
+                var value = pair.Value;
+                if (storable.IsFloatJSONParam(name))
+                {
+                    var number = value.AsFloat;
+                    if (float.IsNaN(number) || float.IsInfinity(number)) throw new Exception("invalid_float:" + name);
+                    var minimum = storable.GetFloatJSONParamMinValue(name);
+                    var maximum = storable.GetFloatJSONParamMaxValue(name);
+                    if (number < minimum || number > maximum) throw new Exception("param_out_of_range:" + name);
+                    storable.SetFloatParamValue(name, number);
+                }
+                else if (storable.IsBoolJSONParam(name))
+                {
+                    storable.SetBoolParamValue(name, value.AsBool);
+                }
+                else if (storable.IsVector3JSONParam(name))
+                {
+                    var vector = JsonToVector(value, name);
+                    var minimum = storable.GetVector3JSONParamMinValue(name);
+                    var maximum = storable.GetVector3JSONParamMaxValue(name);
+                    if (vector.x < minimum.x || vector.x > maximum.x ||
+                        vector.y < minimum.y || vector.y > maximum.y ||
+                        vector.z < minimum.z || vector.z > maximum.z)
+                        throw new Exception("param_out_of_range:" + name);
+                    storable.SetVector3ParamValue(name, vector);
+                }
+                else if (storable.IsStringChooserJSONParam(name))
+                {
+                    var choice = value.Value ?? "";
+                    var choices = storable.GetStringChooserJSONParamChoices(name);
+                    if (choices == null || !choices.Contains(choice)) throw new Exception("unsupported_choice:" + name);
+                    storable.SetStringChooserParamValue(name, choice);
+                }
+                else if (storable.IsStringJSONParam(name))
+                {
+                    if (value.Value != null && value.Value.Length > 1024) throw new Exception("string_too_long:" + name);
+                    storable.SetStringParamValue(name, value.Value ?? "");
+                }
+                else
+                {
+                    throw new Exception("param_not_exposed:" + name);
+                }
+                updated.Add(name);
+            }
+
+            var result = new JSONClass();
+            result["atom"] = atom.uid;
+            result["storable"] = storableId;
+            result["updated"] = updated;
+            return result;
+        }
+
+        private JSONNode CallPersonAction(JSONClass parameters)
+        {
+            if (parameters == null) throw new Exception("missing_params");
+            var atom = ResolveAllowedPerson(parameters["atom"].Value);
+            var storableId = parameters["storable"].Value;
+            var action = parameters["action"].Value;
+            if (string.IsNullOrEmpty(storableId) || string.IsNullOrEmpty(action))
+                throw new Exception("missing_storable_or_action");
+            var storable = atom.GetStorableByID(storableId) as JSONStorable;
+            if (storable == null) throw new Exception("storable_not_found:" + storableId);
+            if (!storable.IsAction(action)) throw new Exception("action_not_exposed:" + action);
+            storable.CallAction(action);
+            var result = new JSONClass();
+            result["atom"] = atom.uid;
+            result["storable"] = storableId;
+            result["action"] = action;
+            result["called"].AsBool = true;
+            return result;
+        }
+
+        private JSONNode StartSequence(JSONClass parameters)
+        {
+            if (parameters == null) throw new Exception("missing_params");
+            var atom = ResolveAllowedPerson(parameters["atom"].Value);
+            var steps = parameters["steps"] as JSONArray;
+            if (steps == null || steps.Count == 0) throw new Exception("missing_steps");
+            if (steps.Count > 32) throw new Exception("too_many_steps");
+
+            StopSequence("replaced");
+            activeSequenceSteps = steps;
+            activeSequenceId = Guid.NewGuid().ToString("N");
+            activeSequenceAtom = atom.uid;
+            activeSequenceIndex = 0;
+            activeSequenceLoop = parameters["loop"].AsBool;
+            activeSequenceGap = Mathf.Clamp(parameters["gap"].AsFloat, 0f, 60f);
+            if (activeSequenceLoop) activeSequenceGap = Mathf.Max(0.5f, activeSequenceGap);
+            nextSequenceAt = Time.unscaledTime;
+            BroadcastActivity("started", "");
+
+            var result = new JSONClass();
+            result["sequenceId"] = activeSequenceId;
+            result["atom"] = activeSequenceAtom;
+            result["steps"].AsInt = steps.Count;
+            result["loop"].AsBool = activeSequenceLoop;
+            return result;
+        }
+
+        private void AdvanceSequence()
+        {
+            if (activeSequenceSteps == null || Time.unscaledTime < nextSequenceAt) return;
+            if (activeSequenceIndex >= activeSequenceSteps.Count)
+            {
+                if (!activeSequenceLoop)
+                {
+                    var completedId = activeSequenceId;
+                    ClearSequence();
+                    BroadcastActivity("completed", completedId);
+                    return;
+                }
+                activeSequenceIndex = 0;
+                nextSequenceAt = Time.unscaledTime + activeSequenceGap;
+                BroadcastActivity("loop", "");
+                return;
+            }
+
+            var step = activeSequenceSteps[activeSequenceIndex] as JSONClass;
+            if (step == null)
+            {
+                StopSequence("invalid_step");
+                return;
+            }
+            try
+            {
+                ExecuteSequenceStep(step);
+                var wait = Mathf.Clamp(step["wait"].AsFloat, 0f, 60f);
+                var sequenceAction = step["action"].Value;
+                if (sequenceAction == "move_person" || sequenceAction == "set_expression")
+                    wait = Mathf.Max(wait, Mathf.Clamp(step["duration"].AsFloat, 0f, 60f));
+                activeSequenceIndex++;
+                nextSequenceAt = Time.unscaledTime + wait;
+                BroadcastActivity("step", "");
+            }
+            catch (Exception ex)
+            {
+                var error = ex.Message;
+                ClearSequence();
+                BroadcastActivity("failed", error);
+            }
+        }
+
+        private void ExecuteSequenceStep(JSONClass step)
+        {
+            var action = step["action"].Value;
+            var parameters = new JSONClass();
+            parameters["atom"] = activeSequenceAtom;
+            if (action == "set_expression")
+            {
+                if (!string.IsNullOrEmpty(step["expression"].Value))
+                    parameters["expression"] = step["expression"].Value;
+                if (step["morphs"] != null) parameters["morphs"] = step["morphs"];
+                if (step["duration"] != null) parameters["duration"] = step["duration"];
+                SetExpression(parameters);
+            }
+            else if (action == "look_at")
+            {
+                parameters["target"] = step["target"].Value;
+                SetLookAt(parameters);
+            }
+            else if (action == "move_person")
+            {
+                parameters["offset"] = step["offset"];
+                parameters["duration"] = step["duration"];
+                MovePerson(parameters);
+            }
+            else if (action == "set_person_params")
+            {
+                parameters["storable"] = step["storable"].Value;
+                parameters["values"] = step["values"];
+                SetPersonParams(parameters);
+            }
+            else if (action == "call_person_action")
+            {
+                parameters["storable"] = step["storable"].Value;
+                parameters["action"] = step["actionName"].Value;
+                CallPersonAction(parameters);
+            }
+            else
+            {
+                throw new Exception("unsupported_sequence_action:" + action);
+            }
+        }
+
+        private JSONNode BuildActivityStatus()
+        {
+            var result = new JSONClass();
+            result["active"].AsBool = activeSequenceSteps != null;
+            if (activeSequenceSteps == null) return result;
+            result["type"] = "sequence";
+            result["sequenceId"] = activeSequenceId;
+            result["atom"] = activeSequenceAtom;
+            result["step"].AsInt = activeSequenceIndex;
+            result["steps"].AsInt = activeSequenceSteps.Count;
+            result["loop"].AsBool = activeSequenceLoop;
+            return result;
+        }
+
+        private void BroadcastActivity(string eventName, string detail)
+        {
+            var data = new JSONClass();
+            data["activity"] = BuildActivityStatus();
+            data["event"] = eventName ?? "";
+            if (!string.IsNullOrEmpty(detail)) data["detail"] = detail;
+            var message = new JSONClass();
+            message["type"] = "state_update";
+            message["data"] = data;
+            lock (clientsLock)
+            {
+                foreach (var client in clients) client.SendState(message);
+            }
+        }
+
+        private void StopSequence(string reason)
+        {
+            if (activeSequenceSteps == null) return;
+            ClearSequence();
+            BroadcastActivity("stopped", reason);
+        }
+
+        private void ClearSequence()
+        {
+            activeSequenceSteps = null;
+            activeSequenceId = "";
+            activeSequenceAtom = "";
+            activeSequenceIndex = 0;
+            activeSequenceLoop = false;
+            activeSequenceGap = 0f;
+            nextSequenceAt = 0f;
+        }
+
+        private JSONClass VectorToJson(Vector3 value)
+        {
+            var result = new JSONClass();
+            result["x"].AsFloat = value.x;
+            result["y"].AsFloat = value.y;
+            result["z"].AsFloat = value.z;
+            return result;
+        }
+
+        private Vector3 JsonToVector(JSONNode value, string name)
+        {
+            var x = value["x"].AsFloat;
+            var y = value["y"].AsFloat;
+            var z = value["z"].AsFloat;
+            if (float.IsNaN(x) || float.IsInfinity(x) ||
+                float.IsNaN(y) || float.IsInfinity(y) ||
+                float.IsNaN(z) || float.IsInfinity(z))
+                throw new Exception("invalid_vector:" + name);
+            return new Vector3(x, y, z);
+        }
+
         private JSONNode SetExpression(JSONClass parameters)
         {
             if (parameters == null) throw new Exception("missing_params");
@@ -204,6 +780,7 @@ namespace MVRPlugin
                 throw new Exception("person_morphs_not_ready:" + atom.uid);
 
             var updated = new JSONArray();
+            var duration = Mathf.Clamp(parameters["duration"].AsFloat, 0f, 30f);
             var morphs = parameters["morphs"] as JSONClass;
             if (morphs != null && morphs.Count > 0)
             {
@@ -213,14 +790,14 @@ namespace MVRPlugin
                     if (++count > 16) throw new Exception("too_many_morphs");
                     var morph = FindMorph(selector.morphsControlUI, pair.Key, false);
                     if (morph == null) throw new Exception("morph_not_found:" + pair.Key);
-                    ApplyMorph(morph, Mathf.Clamp(pair.Value.AsFloat, -1f, 1f), updated);
+                    ApplyMorph(morph, Mathf.Clamp(pair.Value.AsFloat, -1f, 1f), updated, duration);
                 }
             }
             else
             {
                 var expression = parameters["expression"].Value;
                 if (string.IsNullOrEmpty(expression)) throw new Exception("missing_expression");
-                ApplyExpressionAlias(selector.morphsControlUI, expression, updated);
+                ApplyExpressionAlias(selector.morphsControlUI, expression, updated, duration);
             }
 
             var result = new JSONClass();
@@ -268,7 +845,7 @@ namespace MVRPlugin
             return null;
         }
 
-        private void ApplyExpressionAlias(GenerateDAZMorphsControlUI morphUi, string expression, JSONArray updated)
+        private void ApplyExpressionAlias(GenerateDAZMorphsControlUI morphUi, string expression, JSONArray updated, float duration)
         {
             var key = expression.Trim().ToLowerInvariant();
             if (key == "neutral" || key == "reset" || key == "放松" || key == "恢复")
@@ -303,7 +880,7 @@ namespace MVRPlugin
             }
             if (morph == null) morph = FindMorph(morphUi, fallbackKeyword, true);
             if (morph == null) throw new Exception("expression_morph_not_found:" + expression);
-            ApplyMorph(morph, 0.65f, updated);
+            ApplyMorph(morph, 0.65f, updated, duration);
         }
 
         private DAZMorph FindMorph(GenerateDAZMorphsControlUI morphUi, string name, bool contains)
@@ -324,10 +901,25 @@ namespace MVRPlugin
             return null;
         }
 
-        private void ApplyMorph(DAZMorph morph, float value, JSONArray updated)
+        private void ApplyMorph(DAZMorph morph, float value, JSONArray updated, float duration)
         {
             if (!originalMorphValues.ContainsKey(morph)) originalMorphValues[morph] = morph.morphValue;
-            morph.morphValue = value;
+            if (duration <= 0f)
+            {
+                morph.morphValue = value;
+                morphTransitions.Remove(morph);
+            }
+            else
+            {
+                morphTransitions[morph] = new MorphTransition
+                {
+                    Morph = morph,
+                    From = morph.morphValue,
+                    To = value,
+                    StartedAt = Time.unscaledTime,
+                    Duration = duration
+                };
+            }
             var item = new JSONClass();
             item["uid"] = morph.uid ?? "";
             item["name"] = morph.resolvedDisplayName ?? morph.uid ?? "";
@@ -335,15 +927,79 @@ namespace MVRPlugin
             updated.Add(item);
         }
 
+        private void AdvanceMorphTransitions()
+        {
+            if (morphTransitions.Count == 0) return;
+            var finished = new List<DAZMorph>();
+            foreach (var pair in morphTransitions)
+            {
+                var transition = pair.Value;
+                if (transition.Morph == null)
+                {
+                    finished.Add(pair.Key);
+                    continue;
+                }
+                var progress = Mathf.Clamp01((Time.unscaledTime - transition.StartedAt) / transition.Duration);
+                transition.Morph.morphValue = Mathf.Lerp(transition.From, transition.To, progress);
+                if (progress >= 1f) finished.Add(pair.Key);
+            }
+            foreach (var morph in finished) morphTransitions.Remove(morph);
+        }
+
+        private void AdvancePositionTransitions()
+        {
+            if (positionTransitions.Count == 0) return;
+            var finished = new List<Transform>();
+            foreach (var pair in positionTransitions)
+            {
+                var transition = pair.Value;
+                if (transition.Control == null)
+                {
+                    finished.Add(pair.Key);
+                    continue;
+                }
+                var progress = Mathf.Clamp01((Time.unscaledTime - transition.StartedAt) / transition.Duration);
+                transition.Control.position = Vector3.Lerp(transition.From, transition.To, progress);
+                if (progress >= 1f) finished.Add(pair.Key);
+            }
+            foreach (var control in finished) positionTransitions.Remove(control);
+        }
+
         private JSONNode StopAllMiyaActions()
         {
+            StopSequence("stop_all");
+            morphTransitions.Clear();
+            positionTransitions.Clear();
             var restored = new JSONArray();
             RestoreOriginalMorphs(restored);
             var restoredLooks = RestoreOriginalLookModes();
+            var restoredPositions = RestoreOriginalPositions();
+            var stoppedAnimations = StopPersonAnimations();
             var result = new JSONClass();
             result["restoredMorphs"] = restored;
             result["restoredLooks"] = restoredLooks;
+            result["restoredPositions"] = restoredPositions;
+            result["stoppedAnimations"].AsInt = stoppedAnimations;
             return result;
+        }
+
+        private int StopPersonAnimations()
+        {
+            var masters = new HashSet<MotionAnimationMaster>();
+            var atoms = SuperController.singleton.GetAtoms();
+            if (atoms == null) return 0;
+            foreach (var atom in atoms)
+            {
+                if (!IsAllowedPerson(atom) || atom.motionAnimationControls == null) continue;
+                foreach (var control in atom.motionAnimationControls)
+                {
+                    if (control == null) continue;
+                    control.playbackEnabled = false;
+                    if (control.animationMaster != null) masters.Add(control.animationMaster);
+                }
+            }
+            foreach (var master in masters) master.StopPlayback();
+            return masters.Count;
         }
 
         private JSONArray RestoreOriginalLookModes()
@@ -363,6 +1019,7 @@ namespace MVRPlugin
 
         private void RestoreOriginalMorphs(JSONArray restored)
         {
+            morphTransitions.Clear();
             foreach (var pair in originalMorphValues)
             {
                 if (pair.Key == null) continue;
@@ -375,6 +1032,39 @@ namespace MVRPlugin
             }
             originalMorphValues.Clear();
         }
+
+        private JSONArray RestoreOriginalPositions()
+        {
+            var restored = new JSONArray();
+            foreach (var pair in originalPositions)
+            {
+                if (pair.Key == null) continue;
+                pair.Key.position = pair.Value;
+                var item = new JSONClass();
+                item["position"] = VectorToJson(pair.Value);
+                restored.Add(item);
+            }
+            originalPositions.Clear();
+            return restored;
+        }
+    }
+
+    internal sealed class MorphTransition
+    {
+        public DAZMorph Morph;
+        public float From;
+        public float To;
+        public float StartedAt;
+        public float Duration;
+    }
+
+    internal sealed class PositionTransition
+    {
+        public Transform Control;
+        public Vector3 From;
+        public Vector3 To;
+        public float StartedAt;
+        public float Duration;
     }
 
     internal sealed class MiyaRequest
@@ -539,6 +1229,11 @@ namespace MVRPlugin
             response["ok"].AsBool = false;
             response["error"] = error ?? "unknown_error";
             SendFrame(1, response.ToString());
+        }
+
+        public void SendState(JSONNode data)
+        {
+            SendFrame(1, data != null ? data.ToString() : "{}");
         }
 
         private void SendFrame(byte opcode, string text)

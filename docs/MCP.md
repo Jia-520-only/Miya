@@ -35,7 +35,7 @@
 | 范式 | 配置方式 | 服务数 | 使用场景 |
 |------|----------|--------|----------|
 | **原生 MCP SDK** | `.mcp.json` → `stdio` | 2 | DSH 终端直接调用的核心服务 |
-| **MCPManager 自动发现** | `mcpserver/*/agent-manifest.json` | 13 | 通过 daemon 进程统一管理、ToolNet 注册 |
+| **MCPManager 自动发现** | `mcpserver/*/agent-manifest.json` | 14 | 通过 daemon 进程统一管理、ToolNet 注册 |
 
 
 ---
@@ -225,6 +225,24 @@
 ### 3.2 MCPManager 自动发现模块（`agent-manifest.json` 注册）
 
 所有模块遵循统一接口：通过 `handle_handoff(tool_call: dict) -> str` 处理工具调用，返回 JSON 字符串。
+
+#### vam_bridge — VAM 人物控制桥
+
+通过本机 WebSocket 连接 VAM 内的控制插件。默认监听地址为
+`ws://127.0.0.1:8765/miya-vam`，协议和 VAM 插件侧要求见
+[VAM Bridge 接入协议](VAM_BRIDGE.md)。
+
+| 工具 | 说明 |
+|------|------|
+| `vam_connect` / `vam_disconnect` | 建立或断开本机 VAM 连接 |
+| `vam_status` / `vam_list_atoms` | 获取场景状态和可控人物 |
+| `vam_inspect_person` | 暂时禁用，避免复杂插件枚举耗尽 VaM/Mono 堆 |
+| `vam_get_person_state` | 指定插件的只读当前公开参数值 |
+| `vam_set_person_params` / `vam_call_person_action` | 设置人物参数、调用人物或其插件动作 |
+| `vam_run_sequence` | 连续编排动作、过渡、等待和可中断循环 |
+| `vam_autonomy_start` / `vam_autonomy_stop` / `vam_autonomy_status` | 启停和查看 VAM 主动行为循环 |
+| `vam_set_expression` / `vam_look_at` / `vam_move_person` | 设置表情、视线和限幅平滑位移 |
+| `vam_stop_all` | 紧急停止弥娅触发的动作 |
 
 #### art_service — AI 绘画服务
 
