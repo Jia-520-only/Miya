@@ -664,6 +664,20 @@ def test_local_identity_store_keeps_embeddings_only(monkeypatch, tmp_path: Path)
     assert local_camera.list_identities()["identities"] == []
 
 
+def test_identity_enroll_returns_unexpected_storage_error(monkeypatch):
+    service = ScreenVisionService()
+    monkeypatch.setattr(
+        "mcpserver.screen_vision.service.enroll_identity",
+        lambda *_args: (_ for _ in ()).throw(OSError("身份目录不可写")),
+    )
+
+    result = json.loads(asyncio.run(service._camera_enroll_identity({"name": "佳"})))
+
+    assert result["status"] == "error"
+    assert result["message"] == "身份目录不可写"
+    assert result["persisted"] is False
+
+
 def test_local_analysis_route_does_not_call_remote(monkeypatch):
     service = ScreenVisionService()
     monkeypatch.setattr("mcpserver.screen_vision.service.discover_local_camera_capabilities", lambda: {
@@ -694,10 +708,15 @@ def test_camera_control_state_and_observation_request_are_image_free(monkeypatch
     monkeypatch.setattr(camera_control, "_REQUEST_PATH", tmp_path / "request.json")
     monkeypatch.setattr(camera_control, "_RESULT_PATH", tmp_path / "result.json")
 
-    state = camera_control.write_state("companion", autonomous=True, local_only=True)
+    state = camera_control.write_state(
+        "companion", autonomous=True, local_only=True, identity_recognition=True,
+    )
     assert state["autonomous"] is True
+    assert state["identity_recognition"] is True
     assert "image" not in json.dumps(state)
 
+    camera_control.write_state("companion", identity_recognition=False)
+    assert camera_control.read_state()["identity_recognition"] is False
     request = camera_control.request_observation("看看我是不是在挥手", local_only=True)
     loaded = camera_control.read_observation_request()
     assert loaded["request_id"] == request["request_id"]

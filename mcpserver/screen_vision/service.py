@@ -1124,7 +1124,8 @@ class ScreenVisionService:
                 enroll_identity(str(call.get("image_data") or call.get("image_url") or ""), str(call.get("name", ""))),
                 ensure_ascii=False,
             )
-        except (ValueError, FileNotFoundError, RuntimeError) as exc:
+        except Exception as exc:
+            logger.warning("[ScreenVision] 本地身份登记失败: %s", exc, exc_info=True)
             return json.dumps({"status": "error", "message": str(exc), "persisted": False}, ensure_ascii=False)
 
     async def _request_camera_observation(self, call: dict[str, Any]) -> str:

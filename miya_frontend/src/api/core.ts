@@ -179,6 +179,7 @@ export class CoreApiClient extends ApiClient {
     mode: 'off' | 'companion' | 'snapshot'
     local_only?: boolean
     action_recognition?: boolean
+    identity_recognition?: boolean
     autonomous?: boolean
     camera_policy?: 'auto' | 'single' | 'multi'
     camera_indices?: number[]

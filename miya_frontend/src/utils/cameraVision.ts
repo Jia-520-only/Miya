@@ -548,15 +548,32 @@ async function lookBoth(query = '') {
 
 async function enrollIdentity(name: string) {
   await waitForMediaFrame()
-  const response = await API.mcpCall('screen_vision', 'camera_enroll_identity', {
-    image_data: captureFrame(),
-    name,
-  })
-  const raw = response?.result
-  const data = typeof raw === 'string' ? JSON.parse(raw) : raw
-  if (data?.status !== 'success') throw new Error(data?.message || '身份登记失败')
-  await refreshCapabilities()
-  return data
+  let lastMessage = '身份登记失败'
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const response = await API.mcpCall('screen_vision', 'camera_enroll_identity', {
+      image_data: captureFrame(),
+      name,
+    })
+    if (response?.success === false) {
+      throw new Error(response?.error || response?.message || '身份登记请求失败')
+    }
+    const raw = response?.result
+    let data: any
+    try {
+      data = typeof raw === 'string' ? JSON.parse(raw) : raw
+    } catch {
+      throw new Error('身份登记服务返回了无法解析的结果，请检查后端日志')
+    }
+    if (data?.status === 'success') {
+      await refreshCapabilities()
+      return data
+    }
+    lastMessage = data?.message || lastMessage
+    if (!String(lastMessage).includes('没有可靠检测到人脸') || attempt >= 2) break
+    await new Promise(resolve => setTimeout(resolve, 180))
+    await waitForMediaFrame()
+  }
+  throw new Error(lastMessage)
 }
 
 async function listIdentities() {
@@ -667,6 +684,7 @@ async function startAlwaysOnCompanion() {
       mode: 'companion',
       local_only: localOnly.value,
       action_recognition: actionRecognitionEnabled.value,
+      identity_recognition: faceRecognitionEnabled.value,
       autonomous: true,
       camera_policy: cameraPolicy.value,
       camera_indices: cameraPolicy.value === 'single' ? [backendDeviceIndex.value] : [],
@@ -700,6 +718,7 @@ async function setCameraPolicy(value: CameraPolicy) {
       mode: mode.value === 'off' ? 'off' : mode.value,
       local_only: localOnly.value,
       action_recognition: actionRecognitionEnabled.value,
+      identity_recognition: faceRecognitionEnabled.value,
       autonomous: alwaysOn.value,
       camera_policy: value,
       camera_indices: value === 'single' ? [backendDeviceIndex.value] : [],
@@ -1188,9 +1207,13 @@ async function setWatching(action: 'start' | 'stop') {
   return agentState.value
 }
 
-function setFaceRecognition(value: boolean) {
+async function setFaceRecognition(value: boolean) {
   faceRecognitionEnabled.value = value
   localStorage.setItem('miya-face-recognition', String(value))
+  await API.setCameraControl({
+    mode: mode.value,
+    identity_recognition: value,
+  }).catch(() => {})
 }
 
 function setEmotionInference(value: boolean) {

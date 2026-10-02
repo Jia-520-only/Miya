@@ -277,4 +277,5 @@ data/chat_sessions_meta.json
 data/camera_control.json
 data/camera_observation_result.json
 data/camera_vision_agent.json
+data/camera_identities/
 

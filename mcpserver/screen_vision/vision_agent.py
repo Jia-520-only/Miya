@@ -824,9 +824,13 @@ class VisionAgent:
         from .camera_manager import fuse_observations, get_camera_manager, narrative_for_fused
         from .camera_stream import get_camera_pool
         from .local_camera import analyze_local_frame
+        from core.camera_control import read_state
+
 
         manager = get_camera_manager()
         pool = get_camera_pool()
+        state = read_state()
+        identity_recognition = bool(state.get("identity_recognition", False))
         policy, selected_indices, configured_preferred, selected_browser, configured_browser, source_selection_locked = self._camera_selection(manager)
         # Time actually spent obtaining pixels, measured rather than guessed.
         # This used to be reported as the whole round trip, so the panel showed
@@ -897,7 +901,7 @@ class VisionAgent:
                     # pose_key ties this reading to the shared pose sequence for
                     # this camera, so the temporal action reader sees the frames
                     # the persistent reader sampled between observations.
-                    analyze_local_frame, data_url, identity=True, emotion=True, pose=True, faces=True,
+                    analyze_local_frame, data_url, identity=identity_recognition, emotion=True, pose=True, faces=True,
                     pose_key=index,
                 )
             except Exception as exc:  # noqa: BLE001

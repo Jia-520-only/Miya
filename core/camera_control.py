@@ -31,6 +31,7 @@ def _default_state() -> dict[str, Any]:
         "mode": "off",
         "local_only": True,
         "action_recognition": True,
+        "identity_recognition": False,
         "autonomous": False,
         # Which physical sources the autonomous observer may use. ``auto`` lets
         # Miya adapt between the preferred source and periodic multi-camera
@@ -64,6 +65,7 @@ def read_state() -> dict[str, Any]:
         state["mode"] = "off"
     state["local_only"] = bool(state["local_only"])
     state["action_recognition"] = bool(state["action_recognition"])
+    state["identity_recognition"] = bool(state["identity_recognition"])
     state["autonomous"] = bool(state["autonomous"])
     control = str(state.get("vision_control") or "hybrid").strip().lower()
     state["vision_control"] = control if control in _VALID_VISION_CONTROLS else "hybrid"
@@ -105,6 +107,7 @@ def write_state(
     *,
     local_only: bool | None = None,
     action_recognition: bool | None = None,
+    identity_recognition: bool | None = None,
     autonomous: bool | None = None,
     camera_policy: str | None = None,
     camera_indices: list[int] | None = None,
@@ -126,6 +129,8 @@ def write_state(
         state["local_only"] = bool(local_only)
     if action_recognition is not None:
         state["action_recognition"] = bool(action_recognition)
+    if identity_recognition is not None:
+        state["identity_recognition"] = bool(identity_recognition)
     if autonomous is not None:
         state["autonomous"] = bool(autonomous)
     if camera_policy is not None:
