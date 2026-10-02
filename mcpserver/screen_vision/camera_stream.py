@@ -362,6 +362,25 @@ class CameraFramePool:
             touched = self._browser_touched.get(int(index))
         return bool(touched) and (now - touched) <= BROWSER_OWNERSHIP_GRACE_SECONDS
 
+    def release_browser(self, index: int | None = None) -> None:
+        """Drop browser ownership immediately after the preview stops."""
+        with self._lock:
+            indices = [int(index)] if index is not None else list(self._browser_touched)
+            if index is None:
+                indices.extend(
+                    camera_index for camera_index, buffer in self._buffers.items()
+                    if buffer.owner == OWNER_BROWSER and camera_index not in indices
+                )
+            for camera_index in indices:
+                self._browser_touched.pop(camera_index, None)
+                buffer = self._buffers.get(camera_index)
+                if buffer is not None and buffer.owner == OWNER_BROWSER:
+                    buffer.owner = OWNER_IDLE
+                    buffer.image_data = ""
+                    buffer.thumbnail = ""
+                    buffer.at = 0.0
+                    buffer.error = ""
+
     # -- publishing (backend side) -----------------------------------------
 
     def publish_backend_frame(self, index: int, frame: Any, *, width: int = 0, height: int = 0,

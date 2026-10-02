@@ -28,7 +28,18 @@ from typing import Any
 from . import camera_devices
 from .camera_devices import DARK_FRAME_MEAN, MAX_INDEX, preferred_camera_index
 
-_INITIAL_DEVICE_DISCOVERY = camera_devices.list_camera_devices
+def _discover_from_module(**kwargs: Any) -> dict[str, Any]:
+    """Resolve discovery lazily so test/integration patches stay effective.
+
+    The discovery function is also exposed as a module-level compatibility
+    seam. Keeping the default as a wrapper lets callers patch either
+    ``camera_manager.list_camera_devices`` or ``camera_devices.list_camera_devices``
+    without the two patch styles masking each other by function identity.
+    """
+    return camera_devices.list_camera_devices(**kwargs)
+
+
+_INITIAL_DEVICE_DISCOVERY = _discover_from_module
 # Retained as a compatibility patch point for callers that replaced this name.
 list_camera_devices = _INITIAL_DEVICE_DISCOVERY
 
@@ -163,10 +174,7 @@ class CameraManager:
                 return dict(self._sources)
             self._scanning = True
         try:
-            discover = list_camera_devices
-            if discover is _INITIAL_DEVICE_DISCOVERY:
-                discover = camera_devices.list_camera_devices
-            report = discover(probe=True)
+            report = list_camera_devices(probe=True)
             with self._lock:
                 previous = dict(self._sources)
             found: dict[int, CameraSource] = {}
@@ -464,6 +472,23 @@ class CameraManager:
         if (time.time() - float(frame.get("at") or 0)) > max_age_seconds:
             return None
         return frame
+
+    def forget_browser_frame(self, index: int | None = None) -> None:
+        """Forget a browser-owned frame as soon as the preview releases it."""
+        with self._lock:
+            current = self._browser_frame
+            if current is None:
+                return
+            current_index = current.get("index")
+            if index is not None and current_index != int(index):
+                return
+            self._browser_frame = None
+            if current_index is not None:
+                source = self._sources.get(int(current_index))
+                if source is not None and source.owner == "browser":
+                    source.owner = "idle"
+                    source.usable = False
+                    source.reason = "浏览器预览已释放，等待下一次采集"
 
     def describe(self) -> dict[str, Any]:
         with self._lock:

@@ -947,8 +947,16 @@ class ScreenVisionService:
         for index in indices:
             try:
                 captured = await asyncio.to_thread(capture_camera_frame, index, width=width, height=height)
-            except (ValueError, RuntimeError) as exc:
-                manager.note_result(index, luminance=None, usable=False)
+            except Exception as exc:  # noqa: BLE001 - one bad device must not abort fusion
+                # OpenCV backends can raise their own exception types during
+                # teardown/open. Keep the other camera angles usable and leave
+                # a bounded health record for the next scan.
+                manager.note_result(
+                    index,
+                    luminance=None,
+                    usable=False,
+                    reason=str(exc),
+                )
                 failures.append({"index": index, "message": str(exc)})
                 continue
             try:
@@ -1015,9 +1023,24 @@ class ScreenVisionService:
 
     @staticmethod
     def _camera_event(call: dict[str, Any]) -> str:
+        event = call.get("event") if isinstance(call.get("event"), dict) else call
+        if str(event.get("kind") or "").strip().lower() == "preview_released":
+            from .camera_manager import get_camera_manager
+            from .camera_stream import get_camera_pool
+
+            raw_index = call.get("camera_index")
+            if raw_index is None:
+                raw_index = event.get("camera_index")
+            try:
+                index = int(raw_index) if raw_index is not None else None
+            except (TypeError, ValueError):
+                index = None
+            get_camera_manager().forget_browser_frame(index)
+            get_camera_pool().release_browser(index)
+            return json.dumps({"status": "success", "released": index}, ensure_ascii=False)
+
         from core.vision_context import get_vision_context
 
-        event = call.get("event") if isinstance(call.get("event"), dict) else call
         recorded = get_vision_context().add({
             "source": "camera",
             "kind": str(event.get("kind") or "observation"),

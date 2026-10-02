@@ -233,6 +233,10 @@ async function open(modeToUse: Exclude<CameraMode, 'off'>) {
 
 function stop(reason = '') {
   companionStartVersion += 1
+  lastFrameSharedAt = 0
+  const releaseIndex = selectedDeviceId.value && backendDeviceMapping.value === 'matched'
+    ? backendDeviceIndex.value
+    : null
   if (timer) {
     clearTimeout(timer)
     timer = null
@@ -245,6 +249,12 @@ function stop(reason = '') {
   }
   if (mediaVideo) mediaVideo.srcObject = null
   if (previewVideo) previewVideo.srcObject = null
+  // Tell the backend immediately. Without this handshake its ownership grace
+  // period keeps the physical device reserved after this tab has stopped it.
+  void API.mcpCall('screen_vision', 'camera_event', {
+    event: { kind: 'preview_released', ...(releaseIndex === null ? {} : { camera_index: releaseIndex }) },
+    ...(releaseIndex === null ? {} : { camera_index: releaseIndex }),
+  }).catch(() => {})
   mode.value = 'off'
   status.value = reason || '摄像头关闭'
   error.value = reason
@@ -378,7 +388,9 @@ function applyFacialTracking(data: any) {
  */
 async function measureFaceFromPreview() {
   if (!stream.value || !localPoseAvailable()) return
+  const measureVersion = companionStartVersion
   await waitForMediaFrame()
+  if (measureVersion !== companionStartVersion || mode.value !== 'companion' || !stream.value) return
   const response = await API.mcpCall('screen_vision', 'camera_analyze_local', {
     image_data: captureFrame(),
     identity: false,
@@ -391,7 +403,7 @@ async function measureFaceFromPreview() {
   })
   const raw = response?.result
   const data = typeof raw === 'string' ? JSON.parse(raw) : raw
-  if (data?.status !== 'success') return
+  if (measureVersion !== companionStartVersion || mode.value !== 'companion' || !stream.value || data?.status !== 'success') return
   applyFacialTracking(data)
   rememberPose(data)
 }
@@ -503,6 +515,7 @@ async function deleteIdentity(identityId: string) {
  */
 async function companionTick() {
   if (mode.value !== 'companion' || !stream.value) return
+  const tickVersion = companionStartVersion
   if (analysisInFlight) {
     scheduleCompanionTick(SNAPSHOT_INTERVAL_MS)
     return
@@ -518,8 +531,10 @@ async function companionTick() {
       if (frame) {
         analysisInFlight = true
         try {
+          if (tickVersion !== companionStartVersion || mode.value !== 'companion' || !stream.value) return
           await publishLocalEvent('companion_frame', '预览正在把画面交给弥娅', 0.5,
             { repeatable: true, imageData: frame })
+          if (tickVersion !== companionStartVersion || mode.value !== 'companion' || !stream.value) return
           status.value = '预览运行中 · 正在把画面交给弥娅'
         } finally {
           analysisInFlight = false
@@ -528,11 +543,12 @@ async function companionTick() {
     }
     // Face geometry is the one measurement the backend cannot take on its own
     // while this preview owns the camera, so measure it from here.
+    if (tickVersion !== companionStartVersion || mode.value !== 'companion' || !stream.value) return
     await measureFaceFromPreview()
   } catch (err: any) {
     localEvent.value = err?.message || '摄像头采样失败'
   } finally {
-    if (mode.value === 'companion' && stream.value && !timer) {
+    if (tickVersion === companionStartVersion && mode.value === 'companion' && stream.value && !timer) {
       scheduleCompanionTick()
     }
   }

@@ -526,6 +526,34 @@ def test_camera_event_accepts_a_browser_frame_without_persisting_it():
     manager._browser_frame = None
 
 
+def test_preview_release_clears_backend_browser_ownership():
+    service = ScreenVisionService()
+    from mcpserver.screen_vision.camera_manager import get_camera_manager
+    from mcpserver.screen_vision.camera_stream import get_camera_pool
+
+    manager = get_camera_manager()
+    pool = get_camera_pool()
+    manager._browser_frame = None
+    manager._sources = {}
+    pool.stop_all()
+    pool._buffers = {}
+    pool._browser_touched = {}
+
+    frame = "data:image/jpeg;base64,ZmFrZQ=="
+    manager.remember_browser_frame(index=0, data_url=frame)
+    pool.publish_browser_frame(0, frame)
+    assert pool.browser_owns(0)
+
+    payload = json.loads(service._camera_event({
+        "event": {"kind": "preview_released"},
+        "camera_index": 0,
+    }))
+
+    assert payload == {"status": "success", "released": 0}
+    assert manager.browser_frame() is None
+    assert not pool.browser_owns(0)
+
+
 # --- her queue of things to say --------------------------------------------
 
 
