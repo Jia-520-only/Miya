@@ -671,6 +671,8 @@ async function startAlwaysOnCompanion() {
       camera_policy: cameraPolicy.value,
       camera_indices: cameraPolicy.value === 'single' ? [backendDeviceIndex.value] : [],
       preferred_index: backendDeviceIndex.value,
+      camera_source_ids: cameraPolicy.value === 'single' && selectedBackendSourceId() ? [selectedBackendSourceId()!] : [],
+      preferred_source_id: selectedBackendSourceId() || '',
       vision_control: visionControl.value,
       startup_policy: startupPolicy.value,
       consent_granted: true,
@@ -702,6 +704,8 @@ async function setCameraPolicy(value: CameraPolicy) {
       camera_policy: value,
       camera_indices: value === 'single' ? [backendDeviceIndex.value] : [],
       preferred_index: backendDeviceIndex.value,
+      camera_source_ids: value === 'single' && selectedBackendSourceId() ? [selectedBackendSourceId()!] : [],
+      preferred_source_id: selectedBackendSourceId() || '',
       vision_control: visionControl.value,
       startup_policy: startupPolicy.value,
       consent_granted: Boolean(mode.value !== 'off'),
@@ -740,6 +744,8 @@ async function setVisionControl(value: VisionControl) {
     consent_granted: Boolean(mode.value !== 'off'),
     camera_policy: cameraPolicy.value,
     preferred_index: backendDeviceIndex.value,
+    camera_source_ids: cameraPolicy.value === 'single' && selectedBackendSourceId() ? [selectedBackendSourceId()!] : [],
+    preferred_source_id: selectedBackendSourceId() || '',
   }).catch(() => {})
   return value
 }
@@ -1031,6 +1037,11 @@ async function refreshCameraSources() {
 function setBackendDeviceIndex(index: number) {
   backendDeviceIndex.value = Number(index)
   localStorage.setItem('miya-camera-backend-index', String(backendDeviceIndex.value))
+}
+
+function selectedBackendSourceId(): string | undefined {
+  const selected = backendDevices.value.find(item => Number(item?.index) === Number(backendDeviceIndex.value))
+  return selected?.sourceId ? String(selected.sourceId) : undefined
 }
 
 async function refreshAgentState() {

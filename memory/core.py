@@ -36,6 +36,10 @@ import contextlib
 import json
 import logging
 import os
+import shutil
+import tempfile
+import threading
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -606,6 +610,8 @@ class MiyaMemoryCore:
         # 备份批量写入优化
         self._backup_buffer: List[Dict] = []
         self._backup_batch_threshold = 50  # 每50条批量flush备份
+        self._backup_lock = threading.RLock()
+        self._backup_flush_lock = threading.Lock()
 
         # MemoryEnhancer（延迟加载）
         self._enhancer = None
@@ -2198,17 +2204,25 @@ class MiyaMemoryCore:
 
     async def _backup_memory(self, memory: MemoryItem):
         """备份记忆 - 批量延迟写入，按周归档"""
-        self._backup_buffer.append(memory.to_dict())
-
-        if len(self._backup_buffer) >= self._backup_batch_threshold:
+        with self._backup_lock:
+            self._backup_buffer.append(memory.to_dict())
+            should_flush = len(self._backup_buffer) >= self._backup_batch_threshold
+        if should_flush:
             self._flush_backup()
 
     def _flush_backup(self):
         """批量刷新备份到磁盘"""
+        with self._backup_flush_lock:
+            self._flush_backup_locked()
+
+    def _flush_backup_locked(self):
+        """刷新一批备份；调用方必须先持有刷新锁。"""
         import json
 
-        if not self._backup_buffer:
-            return
+        with self._backup_lock:
+            if not self._backup_buffer:
+                return
+            pending = list(self._backup_buffer)
 
         backup_dir = self.data_dir / "backups"
         backup_dir.mkdir(parents=True, exist_ok=True)
@@ -2220,11 +2234,19 @@ class MiyaMemoryCore:
         try:
             existing = []
             if backup_file.exists():
-                with open(backup_file, "r", encoding="utf-8") as f:
-                    existing = json.load(f)
+                try:
+                    with open(backup_file, "r", encoding="utf-8") as f:
+                        existing = json.load(f)
+                    if not isinstance(existing, list):
+                        raise ValueError("备份根节点不是列表")
+                except (OSError, ValueError, json.JSONDecodeError) as exc:
+                    corrupt_file = backup_dir / f"{week_key}.corrupt-{int(time.time())}.json"
+                    shutil.copy2(backup_file, corrupt_file)
+                    backup_file.unlink()
+                    logger.warning("[MiyaMemoryCore] 发现损坏备份，已隔离到 %s: %s", corrupt_file, exc)
+                    existing = []
 
-            existing.extend(self._backup_buffer)
-            self._backup_buffer.clear()
+            existing.extend(pending)
 
             if len(existing) > 10000:
                 archive_dir = backup_dir / "archive"
@@ -2236,8 +2258,19 @@ class MiyaMemoryCore:
                     json.dump(overflow, f, ensure_ascii=False, indent=2)
                 logger.info(f"[MiyaMemoryCore] 备份溢出已归档: {archive_file}")
 
-            with open(backup_file, "w", encoding="utf-8") as f:
-                json.dump(existing, f, ensure_ascii=False, indent=2)
+            fd, temp_name = tempfile.mkstemp(prefix=f"{week_key}-", suffix=".tmp", dir=backup_dir)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(existing, f, ensure_ascii=False, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(temp_name, backup_file)
+            finally:
+                if os.path.exists(temp_name):
+                    os.unlink(temp_name)
+
+            with self._backup_lock:
+                del self._backup_buffer[:len(pending)]
 
             self._cleanup_old_backups(backup_dir)
         except Exception as e:

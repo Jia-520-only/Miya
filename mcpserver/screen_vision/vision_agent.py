@@ -354,11 +354,13 @@ def get_vision_agency() -> VisionAgency:
 
 
 INTERPRETER_SYSTEM_PROMPT = (
-    "你是弥娅，正在通过摄像头看着你最爱的人——佳。"
+    "你是弥娅，正在通过摄像头观察画面里的人。"
     "你看到的是本机本地模型给出的线索，以及你自己的观察意图和先前印象。"
     "请像一个人那样去理解，而不是像仪表盘那样读数：结合线索、你先前看到的、和你正在留意的事，"
-    "形成对佳此刻状态的整体印象。"
+    "形成对画面中人物此刻状态的整体印象。"
     "严禁编造画面里没有的东西。看不清就直说看不清。"
+    "只有身份字段明确确认了佳，才可以称呼画面里的人为佳；身份未登记或未知时，"
+    "只能说画面里的人、有人，不能把猜测当成身份。"
     "不要提及摄像头、模型、识别、置信度、关键点这类字眼。"
     "只输出一个 JSON 对象，不要输出其它任何内容。"
 )
@@ -402,7 +404,7 @@ def build_interpreter_prompt(
         }
     }
     sections = [
-        "现在请你观察佳一次。",
+        "现在请你观察画面里的人一次。",
         "【这一刻的线索】\n" + json.dumps(facts, ensure_ascii=False, indent=1),
     ]
     if intent_card:
@@ -415,9 +417,9 @@ def build_interpreter_prompt(
         "手相对脸的位置和这些读数判断，判断不了就留空，不要凭常识硬猜。\n"
         "请只输出这样的 JSON：\n"
         '{"summary":"一句话描述你看到的（不超过40字）",'
-        '"activity":"你判断佳在做什么（不超过15字，判断不了就留空）",'
-        '"mood":"佳的情绪像什么（不超过10字，判断不了就留空）",'
-        '"attention":"佳是否看着屏幕/在电脑前（几个字，不确定就留空）",'
+        '"activity":"你判断画面里的人在做什么（不超过15字，判断不了就留空）",'
+        '"mood":"画面里的人情绪像什么（不超过10字，判断不了就留空）",'
+        '"attention":"画面里的人是否看着屏幕/在电脑前（几个字，不确定就留空）",'
         '"notable":true或false（是否值得让佳知道）,'
         '"say":"如果值得说，用一句不超过25字的自然口语；否则留空"}'
     )
@@ -498,6 +500,7 @@ class VisionAgent:
         self._preferred_index: int | None = None
         self._last_memory_at = 0.0
         self._last_memory_signature = ""
+        self._last_memory_activity = ""
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -695,7 +698,7 @@ class VisionAgent:
         return None
 
     @staticmethod
-    def _camera_selection(manager) -> tuple[str, set[int], int | None, set[str], str | None]:
+    def _camera_selection(manager) -> tuple[str, set[int], int | None, set[str], str | None, bool]:
         """Read the shared camera policy without making the observer own UI state.
 
         The control file is deliberately the single cross-process source of truth:
@@ -711,22 +714,96 @@ class VisionAgent:
         policy = str(state.get("camera_policy") or "auto").lower()
         if policy not in {"auto", "single", "multi"}:
             policy = "auto"
+        manager.refresh_names()
         selected: set[int] = set()
-        for value in state.get("camera_indices") or []:
+        source_map: dict[str, int] = {}
+        source_info_by_id: dict[str, dict[str, Any]] = {}
+        for index, item in manager.sources().items():
+            details = item.to_dict()
+            source_id = str(details.get("source_id") or "").strip()
+            if source_id:
+                source_map[source_id] = int(index)
+                source_info_by_id[source_id] = details
+        source_ids = {str(value).strip() for value in (state.get("camera_source_ids") or []) if str(value).strip()}
+        preferred_source_id = str(state.get("preferred_source_id") or "").strip() or None
+
+        # Migrate the legacy single-camera index once the current DirectShow
+        # inventory has a real friendly name. This preserves the camera the
+        # running system already selected, then makes future device reordering
+        # safe without guessing between unnamed devices.
+        if policy == "single" and not source_ids and preferred_source_id is None:
             try:
-                index = int(value)
+                legacy_index = int(state.get("preferred_index"))
             except (TypeError, ValueError):
-                continue
-            if index >= 0:
-                selected.add(index)
-        try:
-            preferred = state.get("preferred_index")
-            preferred_index = int(preferred) if preferred is not None and int(preferred) >= 0 else None
-        except (TypeError, ValueError):
-            preferred_index = None
+                legacy_index = -1
+            if legacy_index < 0:
+                legacy_indices = state.get("camera_indices") or []
+                legacy_index = int(legacy_indices[0]) if legacy_indices else -1
+            legacy_source = manager.sources().get(legacy_index)
+            legacy_details = legacy_source.to_dict() if legacy_source is not None else {}
+            legacy_source_id = str(legacy_details.get("source_id") or "").strip()
+            if legacy_source_id and str(legacy_details.get("name") or "").strip():
+                try:
+                    from core.camera_control import write_state
+
+                    write_state(
+                        str(state.get("mode") or "companion"),
+                        camera_source_ids=[legacy_source_id],
+                        preferred_source_id=legacy_source_id,
+                    )
+                    source_ids = {legacy_source_id}
+                    preferred_source_id = legacy_source_id
+                    logger.info(
+                        "[VisionAgent] 已将旧摄像头索引迁移为稳定源: index=%s name=%s source_id=%s",
+                        legacy_index,
+                        legacy_details.get("name"),
+                        legacy_source_id,
+                    )
+                except Exception:
+                    logger.warning("[VisionAgent] 摄像头稳定源迁移失败", exc_info=True)
+        source_selection_locked = bool(source_ids or preferred_source_id)
+        if source_ids:
+            selected = {source_map[source_id] for source_id in source_ids if source_id in source_map}
+        if source_selection_locked and not selected and preferred_source_id not in source_map:
+            logger.warning(
+                "[VisionAgent] 摄像头源身份未匹配，拒绝回退到旧索引: source_ids=%s preferred=%s",
+                sorted(source_ids), preferred_source_id or "",
+            )
+        if not source_selection_locked:
+            for value in state.get("camera_indices") or []:
+                try:
+                    index = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if index >= 0:
+                    selected.add(index)
+        if preferred_source_id:
+            preferred_index = source_map.get(preferred_source_id)
+        else:
+            try:
+                preferred = state.get("preferred_index")
+                preferred_index = int(preferred) if preferred is not None and int(preferred) >= 0 else None
+            except (TypeError, ValueError):
+                preferred_index = None
+        if policy == "single" and not source_selection_locked:
+            logger.debug(
+                "[VisionAgent] 当前摄像头仍按 OpenCV 索引选择，可能随设备重排串线: index=%s name=%s source_id=%s",
+                preferred_index,
+                manager.name_for(preferred_index) if preferred_index is not None else "(none)",
+                (manager.sources().get(preferred_index).to_dict().get("source_id")
+                 if preferred_index is not None and manager.sources().get(preferred_index) is not None else "(none)"),
+            )
+        logger.debug(
+            "[VisionAgent] 摄像头选择: policy=%s indices=%s preferred_index=%s preferred_source_id=%s locked=%s",
+            policy,
+            sorted(selected),
+            preferred_index,
+            preferred_source_id or "(none)",
+            source_selection_locked,
+        )
         selected_browser = {str(value) for value in (state.get("browser_source_ids") or []) if str(value).strip()}
         preferred_browser = str(state.get("preferred_browser_source_id") or "").strip() or None
-        return policy, selected, preferred_index, selected_browser, preferred_browser
+        return policy, selected, preferred_index, selected_browser, preferred_browser, source_selection_locked
 
     async def _look(self) -> dict[str, Any]:
         """Read every camera the machine has, one at a time, and fuse the result.
@@ -750,7 +827,7 @@ class VisionAgent:
 
         manager = get_camera_manager()
         pool = get_camera_pool()
-        policy, selected_indices, configured_preferred, selected_browser, configured_browser = self._camera_selection(manager)
+        policy, selected_indices, configured_preferred, selected_browser, configured_browser, source_selection_locked = self._camera_selection(manager)
         # Time actually spent obtaining pixels, measured rather than guessed.
         # This used to be reported as the whole round trip, so the panel showed
         # "capture" and "local analysis" as identical numbers.
@@ -791,15 +868,28 @@ class VisionAgent:
         def remember(index: Any, result: dict[str, Any], owner: str, thumbnail: str = "") -> None:
             observations.append({"index": index, "result": result, "owner": owner})
             inner = (result.get("observations") or [{}])[0]
+            source = manager.sources().get(int(index)) if isinstance(index, int) else None
+            source_info = source.to_dict() if source is not None else {}
             captures.append({
                 "index": index,
                 "owner": owner,
+                "source_id": str(source_info.get("source_id") or ""),
+                "source_name": str(source_info.get("name") or ""),
                 # A small JPEG for the panel, not the frame itself.
                 "thumbnail": thumbnail,
                 "reading_text": str(result.get("message") or ""),
                 "expression_text": str(inner.get("expression_text") or "") if isinstance(inner, dict) else "",
                 "rig": dict(inner.get("rig") or {}) if isinstance(inner, dict) else {},
             })
+            logger.info(
+                "[VisionAgent] 摄像头观测源: index=%s source_id=%s name=%s owner=%s faces=%s reading=%s",
+                index,
+                source_info.get("source_id") or "(none)",
+                source_info.get("name") or "(unknown)",
+                owner or "(unknown)",
+                result.get("faces", 0),
+                str(result.get("message") or "")[:80],
+            )
 
         async def analyze(index: Any, data_url: str, thumbnail: str, owner: str) -> bool:
             try:
@@ -807,7 +897,7 @@ class VisionAgent:
                     # pose_key ties this reading to the shared pose sequence for
                     # this camera, so the temporal action reader sees the frames
                     # the persistent reader sampled between observations.
-                    analyze_local_frame, data_url, identity=False, emotion=True, pose=True, faces=True,
+                    analyze_local_frame, data_url, identity=True, emotion=True, pose=True, faces=True,
                     pose_key=index,
                 )
             except Exception as exc:  # noqa: BLE001
@@ -924,7 +1014,7 @@ class VisionAgent:
             if policy == "single":
                 allowed = selected_indices or ({configured_preferred} if configured_preferred is not None else set())
                 indices = [index for index in manager.all_indices() if index in allowed]
-                if not indices:
+                if not indices and not source_selection_locked:
                     indices = manager.all_indices()[:1]
             elif policy == "multi":
                 indices = manager.all_indices() if sweep_due else retry_due
@@ -949,6 +1039,8 @@ class VisionAgent:
                 chosen = configured_preferred if configured_preferred is not None else self._preferred_index
                 if policy == "single" and selected_indices:
                     chosen = sorted(selected_indices)[0]
+                if policy == "single" and source_selection_locked and not selected_indices and configured_preferred is None:
+                    chosen = None
                 preferred = manager.sources().get(int(chosen)) if chosen is not None else None
                 target = chosen if chosen is not None and (preferred is None or preferred.usable) else None
             if target is None:
@@ -957,6 +1049,7 @@ class VisionAgent:
                     index for index in manager.all_indices()
                     if index in sources and (sources[index].usable or not sources[index].checked)
                     and (policy != "single" or not selected_indices or index in selected_indices)
+                    and not (policy == "single" and source_selection_locked and not selected_indices and configured_preferred is None)
                 ]
                 target = candidates[0] if candidates else None
             if target is not None and target not in handled:
@@ -1111,6 +1204,11 @@ class VisionAgent:
                         mode="autonomous",
                         status="success",
                         camera_indices=[int(item) for item in (fused.get("sources_used") or [])],
+                        camera_source_ids=[
+                            str(item.get("source_id") or "")
+                            for item in (captures or [])
+                            if item.get("source_id")
+                        ],
                         faces=int(fused.get("faces") or 0),
                     )
                 except Exception:
@@ -1244,9 +1342,16 @@ class VisionAgent:
         summary = str(impression.summary or "").strip()
         if not summary:
             return False
-        signature = "|".join((summary[:300], str(impression.activity or ""), str(impression.mood or "")))
+        activity = str(impression.activity or "").strip()
+        signature = "|".join((summary[:300], activity, str(impression.mood or "")))
         now = time.time()
-        if signature == self._last_memory_signature and now - self._last_memory_at < 1800.0:
+        # Model wording changes from round to round, so sentence-level
+        # deduplication is not enough. Keep one durable memory per interpreted
+        # activity during the cooldown; a real activity transition is allowed.
+        if now - self._last_memory_at < 1800.0 and (
+            (activity and activity == self._last_memory_activity)
+            or (not activity and signature == self._last_memory_signature)
+        ):
             return False
         try:
             from .proactive import remember_observation
@@ -1265,6 +1370,7 @@ class VisionAgent:
         if stored:
             self._last_memory_at = now
             self._last_memory_signature = signature
+            self._last_memory_activity = activity
         return bool(stored)
 
     async def _interpret(self, reading: dict[str, Any], agency: VisionAgency) -> dict[str, Any] | None:

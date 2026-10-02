@@ -150,6 +150,7 @@ def record_camera_event(
     mode: str = "autonomous",
     status: str = "success",
     camera_indices: list[int] | None = None,
+    camera_source_ids: list[str] | None = None,
     faces: int | None = None,
 ) -> dict[str, Any]:
     """Record one derived camera event from Miya's own observation loop.
@@ -176,6 +177,7 @@ def record_camera_event(
             "mode": str(mode or "autonomous"),
             "status": str(status or "success"),
             "camera_indices": list(camera_indices or []),
+            "camera_source_ids": [str(item)[:160] for item in (camera_source_ids or []) if str(item).strip()],
             "faces": faces,
         }
     )

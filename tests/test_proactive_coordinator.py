@@ -107,6 +107,22 @@ def test_different_sources_still_respect_the_global_interval():
         {"source": "earth_online", "event": "patrol"}, key="patrol")), "不同来源要走全局间隔"
 
 
+def test_an_event_can_follow_same_source_camera_voice():
+    """A state change is not blocked by the camera's preceding observation line."""
+    sent = []
+    coordinator = _fair_coordinator(
+        sent, min_interval_seconds=300, same_source_interval_seconds=90)
+
+    assert asyncio.run(coordinator.submit_message(
+        "画面里的人安静坐着", key="camera:voice:1", source="camera", kind="voice"
+    ))
+    assert asyncio.run(coordinator.submit_event(
+        {"source": "camera", "event": "presence_change"},
+        key="camera:presence:returned",
+    )), "在场变化事件不应被普通摄像头发言挡住"
+    assert len(sent) == 2
+
+
 def test_a_source_may_follow_its_own_shorter_interval():
     """The camera's own two facts must not silence each other for two minutes.
 

@@ -38,6 +38,8 @@ def _default_state() -> dict[str, Any]:
         "camera_policy": "auto",
         "camera_indices": [],
         "preferred_index": None,
+        "camera_source_ids": [],
+        "preferred_source_id": None,
         "browser_source_ids": [],
         "preferred_browser_source_id": None,
         "vision_control": "hybrid",
@@ -91,6 +93,10 @@ def read_state() -> dict[str, Any]:
         state["preferred_index"] = int(preferred) if preferred is not None and int(preferred) >= 0 else None
     except (TypeError, ValueError):
         state["preferred_index"] = None
+    raw_source_ids = state.get("camera_source_ids")
+    state["camera_source_ids"] = sorted({str(value)[:160] for value in raw_source_ids if str(value).strip()}) if isinstance(raw_source_ids, list) else []
+    preferred_source_id = state.get("preferred_source_id")
+    state["preferred_source_id"] = str(preferred_source_id)[:160] if preferred_source_id else None
     return state
 
 
@@ -103,6 +109,8 @@ def write_state(
     camera_policy: str | None = None,
     camera_indices: list[int] | None = None,
     preferred_index: int | None = None,
+    camera_source_ids: list[str] | None = None,
+    preferred_source_id: str | None = None,
     browser_source_ids: list[str] | None = None,
     preferred_browser_source_id: str | None = None,
     vision_control: str | None = None,
@@ -129,6 +137,10 @@ def write_state(
         state["camera_indices"] = camera_indices
     if preferred_index is not None:
         state["preferred_index"] = preferred_index
+    if camera_source_ids is not None:
+        state["camera_source_ids"] = camera_source_ids
+    if preferred_source_id is not None:
+        state["preferred_source_id"] = preferred_source_id
     if browser_source_ids is not None:
         state["browser_source_ids"] = browser_source_ids
     if preferred_browser_source_id is not None:
@@ -151,6 +163,9 @@ def write_state(
     state["camera_policy"] = policy if policy in _VALID_POLICIES else "auto"
     raw_indices = state.get("camera_indices") if isinstance(state.get("camera_indices"), list) else []
     state["camera_indices"] = sorted({int(value) for value in raw_indices if str(value).lstrip("-").isdigit() and int(value) >= 0})
+    raw_source_ids = state.get("camera_source_ids") if isinstance(state.get("camera_source_ids"), list) else []
+    state["camera_source_ids"] = sorted({str(value)[:160] for value in raw_source_ids if str(value).strip()})
+    state["preferred_source_id"] = str(state.get("preferred_source_id") or "")[:160] or None
     state["browser_source_ids"] = sorted({str(value)[:120] for value in (state.get("browser_source_ids") or []) if str(value).strip()})
     state["preferred_browser_source_id"] = str(state.get("preferred_browser_source_id") or "")[:120] or None
     try:

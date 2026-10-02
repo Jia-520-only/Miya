@@ -178,7 +178,8 @@ def test_the_active_platform_is_stated_in_the_facts(monkeypatch):
     monkeypatch.setattr(proactive, "current_mood", lambda: {})
     snapshot = _Snapshot()
     event = asyncio.run(proactive.build_presence_event(snapshot))
-    assert event["facts"].get("他现在在哪") == "weixin_ilink"
+    assert event["facts"].get("消息发送平台（不是物理位置）") == "weixin_ilink"
+    assert event["facts"].get("物理位置") == "摄像头无法判断"
 
 
 def test_an_unknown_platform_falls_back_rather_than_dropping_the_message(monkeypatch, real_coordinator, quiet):

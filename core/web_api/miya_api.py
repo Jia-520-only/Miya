@@ -65,6 +65,8 @@ class MiyaAPI:
                     camera_policy=body.get("camera_policy"),
                     camera_indices=body.get("camera_indices"),
                     preferred_index=body.get("preferred_index"),
+                    camera_source_ids=body.get("camera_source_ids"),
+                    preferred_source_id=body.get("preferred_source_id"),
                     browser_source_ids=body.get("browser_source_ids"),
                     preferred_browser_source_id=body.get("preferred_browser_source_id"),
                     vision_control=body.get("vision_control"),

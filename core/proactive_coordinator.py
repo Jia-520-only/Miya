@@ -66,6 +66,7 @@ class ProactiveCoordinator:
         # Which source produced the most recent message: the cooldown it sets is
         # the one the next message has to respect.
         self._last_origin = ""
+        self._last_kind = VOICE
         self._fingerprints: Dict[str, float] = {}
         self._lock = asyncio.Lock()
 
@@ -135,8 +136,16 @@ class ProactiveCoordinator:
         # presence event two minutes later - two different facts, queued up behind
         # each other for no reason.
         last_origin = self._last_origin
+        last_kind = self._last_kind
         last_at = self._sent_at[-1] if self._sent_at else 0.0
-        gap = self._same_source_interval if last_origin == source else self._min_interval
+        # A real state-change event must not wait behind a conversational camera
+        # observation from the same source. Events still retain their own key,
+        # fingerprint, and hourly limits, and two consecutive events still use
+        # the normal same-source interval.
+        event_after_voice = kind == EVENT and last_origin == source and last_kind != EVENT
+        gap = 0.0 if event_after_voice else (
+            self._same_source_interval if last_origin == source else self._min_interval
+        )
         if last_at and (now - last_at) < gap and urgency not in {"high", "critical"}:
             logger.info("[主动协调] %s冷却中，跳过 key=%s",
                         "同来源" if last_origin == source else "全局", key)
@@ -167,6 +176,7 @@ class ProactiveCoordinator:
             return False
         self._sent_at.append(now)
         self._last_origin = source
+        self._last_kind = kind
         self._last_by_key[key] = now
         self._last_by_source[source] = now
         self._source_counts.setdefault(bucket, deque()).append(now)
@@ -186,6 +196,8 @@ class ProactiveCoordinator:
                 "请先判断现在是否值得给主人发送一条消息：没有实际价值、只是重复状态、"
                 "或会打扰休息时回复 SKIP。值得通知时，只输出一条简短消息。"
                 "不得补造 JSON 之外的事实；必须保留异常、失败、未恢复和资源数值。"
+                "摄像头在场事件只能说明检测到或没检测到人脸，不能据此推断去了厕所、微信、喝水或其它地点。"
+                "JSON 中的消息发送平台只是投递路线，不是人的现实位置；没有物理位置证据就不要写具体去向。"
                 "可以参考 candidate_message，但必须按当前人格重新表达。不要输出标题、分析、JSON、模块名或动作描述。",
                 personality=self._personality,
                 ai_client=self._ai_client,

@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+import threading
 import time
 from typing import Any
 
@@ -44,6 +46,24 @@ TRANSITION_MAX_AGE_SECONDS = 150.0
 # that they remain memorable. Every-30-seconds would be 2880 entries a day.
 MEMORY_MIN_INTERVAL_SECONDS = 1800.0
 MEMORY_PRIORITY = 0.62
+_memory_gate_lock = threading.Lock()
+_memory_gate_at = 0.0
+_memory_gate_key = ""
+
+
+def _memory_observation_key(summary: str, activity: str) -> str:
+    """Collapse equivalent camera activities across both memory producers."""
+    text = f"{activity} {summary}".lower()
+    if any(term in text for term in ("打盹", "发呆", "困倦", "睡着", "休息")):
+        return "resting"
+    if any(term in text for term in ("喝水", "吃东西", "喝水或吃东西")):
+        return "drink_or_eat"
+    if any(term in text for term in ("敲键盘", "打字", "typing")):
+        return "typing"
+    if any(term in text for term in ("看手机", "手机", "phone")):
+        return "phone"
+    raw = re.sub(r"\\s+", "", f"{activity}|{summary}")
+    return raw[:240]
 # Which presence transitions are worth her voice, per Jia's choice.
 SPEAK_ON_PRESENCE = {"returned", "left"}
 
@@ -63,9 +83,12 @@ _LOCATION_TEXT = "电脑前"
 # Plain sentences for the changes worth speaking about, keyed by the tracker's
 # own transition names.
 _PRESENCE_CHANGE_TEXT = {
-    "returned": "佳刚回到电脑前",
-    "left": "佳离开了电脑前",
-    "away": "佳可能离开了座位",
+    # Presence tracking is not identity recognition. Until a frame has an
+    # explicit identity match, camera-derived facts must not address the person
+    # as the owner merely because the message is routed to the owner.
+    "returned": "画面里的人刚回到电脑前",
+    "left": "画面里的人离开了电脑前",
+    "away": "画面里的人可能离开了座位",
 }
 
 
@@ -98,9 +121,16 @@ async def remember_observation(
     not called for every observation: an entry every 30 seconds would bury the
     things actually worth remembering.
     """
+    global _memory_gate_at, _memory_gate_key
     text = str(summary or "").strip()
     if not text:
         return False
+    gate_key = _memory_observation_key(text, str(activity or ""))
+    current_at = float(time.time() if now is None else now)
+    with _memory_gate_lock:
+        if gate_key and gate_key == _memory_gate_key and current_at - _memory_gate_at < MEMORY_MIN_INTERVAL_SECONDS:
+            logger.info("[CameraProactive] 重复视觉记忆已抑制: %s", gate_key)
+            return False
     try:
         from memory import MemoryLevel, MemorySource, get_memory_bus
 
@@ -121,6 +151,9 @@ async def remember_observation(
                 "at": float(time.time() if now is None else now),
             },
         )
+        with _memory_gate_lock:
+            _memory_gate_at = current_at
+            _memory_gate_key = gate_key
         logger.info("[CameraProactive] 已记入记忆: %s", text[:60])
         return True
     except Exception as exc:  # noqa: BLE001 - memory is best effort
@@ -286,7 +319,10 @@ async def build_presence_event(snapshot, *, changed_at: float = 0.0) -> dict[str
         "facts": facts,
     }
     if platform:
-        event["facts"]["他现在在哪"] = platform
+        # This is only the delivery route. It says where Miya can send a
+        # message, never where the person physically went.
+        event["facts"]["消息发送平台（不是物理位置）"] = platform
+        event["facts"]["物理位置"] = "摄像头无法判断"
     if _mood_text(mood):
         event["facts"]["弥娅当下"] = _mood_text(mood)
     if context_tail:
@@ -572,7 +608,7 @@ class CameraProactiveBridge:
             return False
         duration = float(getattr(snapshot, "duration", 0.0) or 0.0)
         minutes = int(duration // 60)
-        summary = f"佳{phrase}" + (f"，持续了约 {minutes} 分钟" if minutes >= 5 else "")
+        summary = f"画面里的人{phrase}" + (f"，持续了约 {minutes} 分钟" if minutes >= 5 else "")
         stored = await remember_observation(
             summary=summary,
             activity=str(getattr(snapshot, "kind", "") or ""),

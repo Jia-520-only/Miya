@@ -339,7 +339,8 @@ def test_a_momentary_change_is_remembered_without_pretending_it_lasted(monkeypat
     """Rate limiting is the only filter on memory now: a wave is worth recalling.
 
     The old duration gate existed to keep short activities out of memory, but the
-    30-minute interval already does that, and "佳在跟你挥手" is exactly the kind of
+    30-minute interval already does that, and a generic camera subject is exactly
+    the kind of
     thing she should be able to bring up later.
     """
     bridge, _coordinator = bridge_and_coordinator
@@ -352,7 +353,7 @@ def test_a_momentary_change_is_remembered_without_pretending_it_lasted(monkeypat
     monkeypatch.setattr(proactive, "remember_observation", _remember)
     snapshot = _Snapshot(kind="wave", phrase="在跟你挥手", duration=0.0)
     assert asyncio.run(bridge._remember_activity(snapshot, time.time())) is True
-    assert calls and calls[0]["summary"] == "佳在跟你挥手"
+    assert calls and calls[0]["summary"] == "画面里的人在跟你挥手"
     assert "持续" not in calls[0]["summary"]
 
 

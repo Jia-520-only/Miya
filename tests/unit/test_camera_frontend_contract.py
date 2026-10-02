@@ -69,6 +69,59 @@ def test_the_api_types_describe_the_keys_that_actually_arrive():
     assert "usable_indices?: number[]" not in source, "类型声明不能再写 snake_case"
 
 
+def test_camera_control_persists_stable_source_identity():
+    """A selected camera must survive OpenCV index reordering."""
+    source = (ROOT / "core" / "camera_control.py").read_text(encoding="utf-8")
+    api = (ROOT / "miya_frontend" / "src" / "api" / "core.ts").read_text(encoding="utf-8")
+
+    assert "camera_source_ids" in source
+    assert "preferred_source_id" in source
+    assert "camera_source_ids?: string[]" in api
+    assert "preferred_source_id?: string" in api
+
+
+def test_legacy_single_camera_index_is_migrated_to_stable_source(monkeypatch):
+    """The first post-upgrade observation binds the already-selected named device."""
+    from mcpserver.screen_vision.vision_agent import VisionAgent
+
+    class _Source:
+        def to_dict(self):
+            return {"source_id": "dshow:face-camera", "name": "4K USB Camera"}
+
+    class _Manager:
+        def refresh_names(self):
+            return [0]
+
+        def sources(self):
+            return {0: _Source()}
+
+        def name_for(self, index):
+            return "4K USB Camera" if index == 0 else ""
+
+    saved = {}
+    monkeypatch.setattr("core.camera_control.read_state", lambda: {
+        "mode": "companion",
+        "camera_policy": "single",
+        "camera_indices": [0],
+        "preferred_index": 0,
+        "camera_source_ids": [],
+        "preferred_source_id": None,
+    })
+    monkeypatch.setattr(
+        "core.camera_control.write_state",
+        lambda mode, **kwargs: saved.update({"mode": mode, **kwargs}) or saved,
+    )
+
+    policy, selected, preferred, _browser, _preferred_browser, locked = VisionAgent._camera_selection(_Manager())
+
+    assert policy == "single"
+    assert selected == {0}
+    assert preferred == 0
+    assert locked is True
+    assert saved["preferred_source_id"] == "dshow:face-camera"
+    assert saved["camera_source_ids"] == ["dshow:face-camera"]
+
+
 def test_the_inventory_reports_what_each_camera_saw():
     """The backend must expose per-camera content, not only "it works"."""
     from mcpserver.screen_vision.camera_manager import CameraSource
@@ -102,6 +155,15 @@ def test_the_observation_loop_reads_one_camera_at_a_time():
     assert "pool.start_reader" in source[loop_end:], (
         "循环之外仍应保留一个常驻读帧，否则姿态采样就只剩每轮一次"
     )
+
+
+def test_autonomous_vision_checks_identity_before_calling_someone_jia():
+    """Unenrolled or unknown faces must not be promoted to the user."""
+    source = VISION_AGENT.read_text(encoding="utf-8")
+
+    assert "identity=True" in source
+    assert "身份未登记或未知时" in source
+    assert "只能说画面里的人、有人" in source
 
 
 def test_the_sweep_does_not_probe_before_it_walks():

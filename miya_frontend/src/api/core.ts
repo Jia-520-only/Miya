@@ -183,6 +183,8 @@ export class CoreApiClient extends ApiClient {
     camera_policy?: 'auto' | 'single' | 'multi'
     camera_indices?: number[]
     preferred_index?: number
+    camera_source_ids?: string[]
+    preferred_source_id?: string
     vision_control?: 'user' | 'miya' | 'hybrid'
     startup_policy?: 'on_demand' | 'resident'
     consent_granted?: boolean
