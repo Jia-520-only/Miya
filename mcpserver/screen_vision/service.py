@@ -1035,23 +1035,41 @@ class ScreenVisionService:
                 index = int(raw_index) if raw_index is not None else None
             except (TypeError, ValueError):
                 index = None
-            get_camera_manager().forget_browser_frame(index)
+            manager = get_camera_manager()
+            source_ids = call.get("browser_source_ids") or event.get("browser_source_ids") or []
+            if isinstance(source_ids, list) and source_ids:
+                for source_id in source_ids:
+                    # A browser-only phone source has no OpenCV index; the
+                    # source id is the authoritative release key.
+                    manager.forget_browser_frame(None, browser_source_id=str(source_id))
+            else:
+                manager.forget_browser_frame(
+                    index,
+                    browser_source_id=call.get("browser_source_id") or event.get("browser_source_id"),
+                )
             get_camera_pool().release_browser(index)
             return json.dumps({"status": "success", "released": index}, ensure_ascii=False)
 
         from core.vision_context import get_vision_context
 
-        recorded = get_vision_context().add({
-            "source": "camera",
-            "kind": str(event.get("kind") or "observation"),
-            "summary": str(event.get("summary") or "摄像头事件"),
-            "confidence": float(event.get("confidence") or 0),
-            "mode": str(event.get("mode") or "companion"),
-            "status": "success",
-        })
+        event_kind = str(event.get("kind") or "observation")
+        # A preview heartbeat carries pixels to the backend but has no semantic
+        # meaning. Storing it as the latest camera event used to hide real
+        # gestures from the proactive trigger every 15 seconds.
+        recorded = None
+        if event_kind not in {"companion_frame", "preview_heartbeat"}:
+            recorded = get_vision_context().add({
+                "source": "camera",
+                "kind": event_kind,
+                "summary": str(event.get("summary") or "摄像头事件"),
+                "confidence": float(event.get("confidence") or 0),
+                "mode": str(event.get("mode") or "companion"),
+                "status": "success",
+            })
         logger.info(
             "[ScreenVision] 摄像头事件: kind=%s summary=%s confidence=%.2f",
-            recorded.get("kind"), recorded.get("summary"), float(recorded.get("confidence") or 0),
+            event_kind, (recorded or {}).get("summary", "取帧心跳"),
+            float((recorded or {}).get("confidence") or 0),
         )
         # The desktop preview owns the device while it is running, so the frame it
         # sends here is the only way the backend can see through that camera.
@@ -1067,7 +1085,13 @@ class ScreenVisionService:
                 index = int(index) if index is not None else None
                 if index is not None and index < 0:
                     index = None
-                get_camera_manager().remember_browser_frame(index=index, data_url=frame)
+                get_camera_manager().remember_browser_frame(
+                    index=index,
+                    data_url=frame,
+                    browser_source_id=call.get("browser_source_id") or event.get("browser_source_id"),
+                    device_id_hash=call.get("device_id_hash") or event.get("device_id_hash"),
+                    label=call.get("camera_label") or event.get("camera_label") or "",
+                )
                 # Also publish into the shared pool: the preview owns that device,
                 # so this frame is the only way anything else can see through it.
                 if index is not None and index >= 0:

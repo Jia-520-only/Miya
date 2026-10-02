@@ -496,6 +496,8 @@ class VisionAgent:
         # a reader is holding between rounds.
         self._last_sweep = 0.0
         self._preferred_index: int | None = None
+        self._last_memory_at = 0.0
+        self._last_memory_signature = ""
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -692,6 +694,40 @@ class VisionAgent:
                 return int(index)
         return None
 
+    @staticmethod
+    def _camera_selection(manager) -> tuple[str, set[int], int | None, set[str], str | None]:
+        """Read the shared camera policy without making the observer own UI state.
+
+        The control file is deliberately the single cross-process source of truth:
+        the browser can preview one device while the autonomous observer chooses a
+        different one, and both sides still agree on what the policy means.
+        """
+        try:
+            from core.camera_control import read_state
+
+            state = read_state()
+        except Exception:
+            state = {}
+        policy = str(state.get("camera_policy") or "auto").lower()
+        if policy not in {"auto", "single", "multi"}:
+            policy = "auto"
+        selected: set[int] = set()
+        for value in state.get("camera_indices") or []:
+            try:
+                index = int(value)
+            except (TypeError, ValueError):
+                continue
+            if index >= 0:
+                selected.add(index)
+        try:
+            preferred = state.get("preferred_index")
+            preferred_index = int(preferred) if preferred is not None and int(preferred) >= 0 else None
+        except (TypeError, ValueError):
+            preferred_index = None
+        selected_browser = {str(value) for value in (state.get("browser_source_ids") or []) if str(value).strip()}
+        preferred_browser = str(state.get("preferred_browser_source_id") or "").strip() or None
+        return policy, selected, preferred_index, selected_browser, preferred_browser
+
     async def _look(self) -> dict[str, Any]:
         """Read every camera the machine has, one at a time, and fuse the result.
 
@@ -714,6 +750,7 @@ class VisionAgent:
 
         manager = get_camera_manager()
         pool = get_camera_pool()
+        policy, selected_indices, configured_preferred, selected_browser, configured_browser = self._camera_selection(manager)
         # Time actually spent obtaining pixels, measured rather than guessed.
         # This used to be reported as the whole round trip, so the panel showed
         # "capture" and "local analysis" as identical numbers.
@@ -732,7 +769,9 @@ class VisionAgent:
         # - she spent most of her life grabbing pixels. So the walk is periodic:
         # ordinary rounds read the one camera a reader already holds, and a sweep
         # every few minutes frees the bus and visits all of them.
-        sweep_due = (started - self._last_sweep) >= SWEEP_INTERVAL_SECONDS
+        # Explicit multi-camera mode means every round is a fused round. Auto
+        # keeps the warm-reader optimization and performs periodic sweeps.
+        sweep_due = policy == "multi" or (started - self._last_sweep) >= SWEEP_INTERVAL_SECONDS
         retry_due = manager.retry_due_indices()
         if sweep_due or retry_due:
             try:
@@ -844,33 +883,53 @@ class VisionAgent:
             if await analyze(index, captured["image_data"], str(captured.get("thumbnail") or ""), "backend"):
                 looked.append(index)
 
-        handled: set[int] = set()
+        handled: set[Any] = set()
         # The browser owns whatever it is previewing; its frame is authoritative,
         # and it goes into the pool so any other consumer sees it too.
-        browser = manager.browser_frame()
-        if browser and browser.get("data_url"):
+        browsers = manager.browser_frames()
+        if browsers:
             from .camera_capture import thumbnail_from_data_url
-
-            raw_index = browser.get("index")
-            index = int(raw_index) if isinstance(raw_index, int) else -1
-            handled.add(index)
-            if index >= 0:
-                pool.publish_browser_frame(
-                    index,
-                    browser["data_url"],
-                    thumbnail=await asyncio.to_thread(thumbnail_from_data_url, browser["data_url"]),
+            for browser in browsers:
+                raw_index = browser.get("index")
+                index = int(raw_index) if isinstance(raw_index, int) else -1
+                allowed_browser = policy != "single" or (
+                    bool(selected_indices) and index in selected_indices
+                ) or (
+                    not selected_indices and configured_preferred is not None and index == configured_preferred
+                ) or (
+                    index < 0 and (
+                        (bool(selected_browser) and str(browser.get("browser_source_id")) in selected_browser)
+                        or (not selected_browser and configured_browser and str(browser.get("browser_source_id")) == configured_browser)
+                    )
                 )
-            await analyze(index, browser["data_url"], "", "browser")
-            if captures and captures[-1]["index"] == index:
-                captures[-1]["thumbnail"] = (
-                    pool.latest(index).thumbnail if pool.latest(index) else ""
-                )
+                if not allowed_browser:
+                    continue
+                browser_key = str(browser.get("browser_source_id") or f"browser:{index}")
+                handled.add(browser_key)
+                if index >= 0:
+                    pool.publish_browser_frame(
+                        index,
+                        browser["data_url"],
+                        thumbnail=await asyncio.to_thread(thumbnail_from_data_url, browser["data_url"]),
+                    )
+                analyze_key: Any = index if index >= 0 else browser_key
+                await analyze(analyze_key, browser["data_url"], "", "browser")
+                if captures and captures[-1]["index"] == analyze_key:
+                    captures[-1]["thumbnail"] = str(browser.get("thumbnail") or "")
 
         looked: list[int] = []
         if sweep_due or retry_due:
             # Full sweeps visit every camera; between them, retry only devices
             # whose bounded backoff elapsed. Captures stay serialized.
-            indices = manager.all_indices() if sweep_due else retry_due
+            if policy == "single":
+                allowed = selected_indices or ({configured_preferred} if configured_preferred is not None else set())
+                indices = [index for index in manager.all_indices() if index in allowed]
+                if not indices:
+                    indices = manager.all_indices()[:1]
+            elif policy == "multi":
+                indices = manager.all_indices() if sweep_due else retry_due
+            else:
+                indices = manager.all_indices() if sweep_due else retry_due
             for index in indices:
                 if index in handled:
                     continue
@@ -887,13 +946,17 @@ class VisionAgent:
                 # - and a camera pointed at a wall looks frozen. Giving up here
                 # would mean she sees nothing at all until the next sweep, so the
                 # round falls back to opening one camera itself.
-                preferred = manager.sources().get(int(self._preferred_index)) if self._preferred_index is not None else None
-                target = self._preferred_index if preferred is None or preferred.usable else None
+                chosen = configured_preferred if configured_preferred is not None else self._preferred_index
+                if policy == "single" and selected_indices:
+                    chosen = sorted(selected_indices)[0]
+                preferred = manager.sources().get(int(chosen)) if chosen is not None else None
+                target = chosen if chosen is not None and (preferred is None or preferred.usable) else None
             if target is None:
                 sources = manager.sources()
                 candidates = [
                     index for index in manager.all_indices()
                     if index in sources and (sources[index].usable or not sources[index].checked)
+                    and (policy != "single" or not selected_indices or index in selected_indices)
                 ]
                 target = candidates[0] if candidates else None
             if target is not None and target not in handled:
@@ -921,6 +984,10 @@ class VisionAgent:
             if current is not None and not current.usable:
                 alternatives = manager.usable_indices()
                 self._preferred_index = alternatives[0] if alternatives else None
+        if policy == "single":
+            allowed = selected_indices or ({configured_preferred} if configured_preferred is not None else set())
+            if self._preferred_index is not None and allowed and self._preferred_index not in allowed:
+                self._preferred_index = sorted(allowed)[0]
         if self._preferred_index is not None:
             try:
                 pool.start_reader(int(self._preferred_index))
@@ -1096,6 +1163,7 @@ class VisionAgent:
             impression.say = ""
             impression.notable = False
         agency.record(impression)
+        memory_stored = await self._remember_notable(impression, interpretation)
         if impression.say:
             self._queue_message(impression)
 
@@ -1159,7 +1227,45 @@ class VisionAgent:
             "impression": impression.to_dict(),
             "event": event.to_dict(include_thumbnails=False),
             "cadence": cadence,
+            "memory_stored": memory_stored,
         }
+
+    async def _remember_notable(self, impression: Impression,
+                                interpretation: dict[str, Any] | None) -> bool:
+        """Let Miya's own notable decision gate long-term visual memory.
+
+        Raw rounds remain in the bounded observation stream. Only an interpreted
+        round marked notable by the interpreter is eligible for durable memory,
+        with a cooldown and signature guard so a persistent scene is not copied
+        into memory every observation interval.
+        """
+        if not interpretation or not bool(impression.notable):
+            return False
+        summary = str(impression.summary or "").strip()
+        if not summary:
+            return False
+        signature = "|".join((summary[:300], str(impression.activity or ""), str(impression.mood or "")))
+        now = time.time()
+        if signature == self._last_memory_signature and now - self._last_memory_at < 1800.0:
+            return False
+        try:
+            from .proactive import remember_observation
+
+            stored = await remember_observation(
+                summary=summary,
+                activity=str(impression.activity or ""),
+                mood=str(impression.mood or ""),
+                significance=0.7,
+                tags=["弥娅判断为重要"],
+                now=now,
+            )
+        except Exception:  # noqa: BLE001 - memory must not stop seeing
+            logger.debug("[VisionAgent] 写入重要视觉记忆失败", exc_info=True)
+            return False
+        if stored:
+            self._last_memory_at = now
+            self._last_memory_signature = signature
+        return bool(stored)
 
     async def _interpret(self, reading: dict[str, Any], agency: VisionAgency) -> dict[str, Any] | None:
         """Ask Miya's own model what she makes of this moment."""

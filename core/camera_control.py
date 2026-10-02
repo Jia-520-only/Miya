@@ -21,6 +21,9 @@ _STATE_PATH = _ROOT / "data" / "camera_control.json"
 _REQUEST_PATH = _ROOT / "data" / "camera_observation_request.json"
 _RESULT_PATH = _ROOT / "data" / "camera_observation_result.json"
 _VALID_MODES = {"off", "companion", "snapshot"}
+_VALID_POLICIES = {"auto", "single", "multi"}
+_VALID_VISION_CONTROLS = {"user", "miya", "hybrid"}
+_VALID_STARTUP_POLICIES = {"on_demand", "resident"}
 
 
 def _default_state() -> dict[str, Any]:
@@ -29,6 +32,17 @@ def _default_state() -> dict[str, Any]:
         "local_only": True,
         "action_recognition": True,
         "autonomous": False,
+        # Which physical sources the autonomous observer may use. ``auto`` lets
+        # Miya adapt between the preferred source and periodic multi-camera
+        # sweeps; ``single`` and ``multi`` are explicit user choices.
+        "camera_policy": "auto",
+        "camera_indices": [],
+        "preferred_index": None,
+        "browser_source_ids": [],
+        "preferred_browser_source_id": None,
+        "vision_control": "hybrid",
+        "startup_policy": "resident",
+        "consent_granted": False,
         "request_id": "initial",
         "updated_at": 0.0,
     }
@@ -49,6 +63,34 @@ def read_state() -> dict[str, Any]:
     state["local_only"] = bool(state["local_only"])
     state["action_recognition"] = bool(state["action_recognition"])
     state["autonomous"] = bool(state["autonomous"])
+    control = str(state.get("vision_control") or "hybrid").strip().lower()
+    state["vision_control"] = control if control in _VALID_VISION_CONTROLS else "hybrid"
+    startup = str(state.get("startup_policy") or "resident").strip().lower()
+    state["startup_policy"] = startup if startup in _VALID_STARTUP_POLICIES else "resident"
+    state["consent_granted"] = bool(state.get("consent_granted"))
+    policy = str(state.get("camera_policy") or "auto").strip().lower()
+    state["camera_policy"] = policy if policy in _VALID_POLICIES else "auto"
+    raw_indices = state.get("camera_indices")
+    if not isinstance(raw_indices, list):
+        raw_indices = []
+    indices: list[int] = []
+    for value in raw_indices:
+        try:
+            index = int(value)
+        except (TypeError, ValueError):
+            continue
+        if index >= 0 and index not in indices:
+            indices.append(index)
+    state["camera_indices"] = indices
+    raw_browser = state.get("browser_source_ids")
+    state["browser_source_ids"] = [str(value)[:120] for value in raw_browser if str(value).strip()] if isinstance(raw_browser, list) else []
+    preferred_browser = state.get("preferred_browser_source_id")
+    state["preferred_browser_source_id"] = str(preferred_browser)[:120] if preferred_browser else None
+    try:
+        preferred = state.get("preferred_index")
+        state["preferred_index"] = int(preferred) if preferred is not None and int(preferred) >= 0 else None
+    except (TypeError, ValueError):
+        state["preferred_index"] = None
     return state
 
 
@@ -58,6 +100,14 @@ def write_state(
     local_only: bool | None = None,
     action_recognition: bool | None = None,
     autonomous: bool | None = None,
+    camera_policy: str | None = None,
+    camera_indices: list[int] | None = None,
+    preferred_index: int | None = None,
+    browser_source_ids: list[str] | None = None,
+    preferred_browser_source_id: str | None = None,
+    vision_control: str | None = None,
+    startup_policy: str | None = None,
+    consent_granted: bool | None = None,
 ) -> dict[str, Any]:
     """Atomically publish a new desired mode and return the persisted state."""
     if mode not in _VALID_MODES:
@@ -70,6 +120,44 @@ def write_state(
         state["action_recognition"] = bool(action_recognition)
     if autonomous is not None:
         state["autonomous"] = bool(autonomous)
+    if camera_policy is not None:
+        policy = str(camera_policy).strip().lower()
+        if policy not in _VALID_POLICIES:
+            raise ValueError(f"unsupported camera policy: {camera_policy}")
+        state["camera_policy"] = policy
+    if camera_indices is not None:
+        state["camera_indices"] = camera_indices
+    if preferred_index is not None:
+        state["preferred_index"] = preferred_index
+    if browser_source_ids is not None:
+        state["browser_source_ids"] = browser_source_ids
+    if preferred_browser_source_id is not None:
+        state["preferred_browser_source_id"] = preferred_browser_source_id
+    if vision_control is not None:
+        control = str(vision_control).strip().lower()
+        if control not in _VALID_VISION_CONTROLS:
+            raise ValueError(f"unsupported vision control: {vision_control}")
+        state["vision_control"] = control
+    if startup_policy is not None:
+        startup = str(startup_policy).strip().lower()
+        if startup not in _VALID_STARTUP_POLICIES:
+            raise ValueError(f"unsupported startup policy: {startup_policy}")
+        state["startup_policy"] = startup
+    if consent_granted is not None:
+        state["consent_granted"] = bool(consent_granted)
+    # Re-apply the same normalization used on reads before persisting values
+    # supplied by the HTTP/UI boundary.
+    policy = str(state.get("camera_policy") or "auto").strip().lower()
+    state["camera_policy"] = policy if policy in _VALID_POLICIES else "auto"
+    raw_indices = state.get("camera_indices") if isinstance(state.get("camera_indices"), list) else []
+    state["camera_indices"] = sorted({int(value) for value in raw_indices if str(value).lstrip("-").isdigit() and int(value) >= 0})
+    state["browser_source_ids"] = sorted({str(value)[:120] for value in (state.get("browser_source_ids") or []) if str(value).strip()})
+    state["preferred_browser_source_id"] = str(state.get("preferred_browser_source_id") or "")[:120] or None
+    try:
+        preferred = state.get("preferred_index")
+        state["preferred_index"] = int(preferred) if preferred is not None and int(preferred) >= 0 else None
+    except (TypeError, ValueError):
+        state["preferred_index"] = None
     state["request_id"] = uuid.uuid4().hex
     state["updated_at"] = time.time()
 
@@ -94,7 +182,8 @@ def describe_state(state: dict[str, Any] | None = None) -> str:
         f"摄像头视觉：{mode_names.get(state.get('mode'), '关闭')}；"
         f"弥娅自主观察：{'开' if state.get('autonomous') else '关'}；"
         f"本地动作识别：{'开' if state.get('action_recognition', True) else '关'}；"
-        f"仅本地：{'开' if state.get('local_only') else '关'}。"
+        f"仅本地：{'开' if state.get('local_only') else '关'}；"
+        f"摄像头策略：{'自动' if state.get('camera_policy') == 'auto' else '单路' if state.get('camera_policy') == 'single' else '多路'}。"
     )
 
 

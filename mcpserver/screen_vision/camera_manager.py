@@ -161,6 +161,7 @@ class CameraManager:
         self._last_scan = 0.0
         self._scanning = False
         self._browser_frame: dict[str, Any] | None = None
+        self._browser_frames: dict[str, dict[str, Any]] = {}
 
     # -- inventory ---------------------------------------------------------
 
@@ -363,7 +364,11 @@ class CameraManager:
             # stale devices. If enumeration is unavailable, retain the last
             # known inventory and let capture failures update its health.
             if names_available:
-                present = set(range(len(names)))
+                # The DirectShow list is authoritative for removals only within
+                # its named range. Keep the configured probe window alive so a
+                # Media Foundation-only or phone bridge can still be discovered
+                # by the actual capture sweep.
+                present = set(range(max(MAX_INDEX, len(names))))
                 browser = self._browser_frame
                 if browser and isinstance(browser.get("index"), int):
                     if now - float(browser.get("at") or 0) <= BROWSER_FRAME_FRESH_SECONDS:
@@ -441,6 +446,9 @@ class CameraManager:
         index: int | None = None,
         data_url: str = "",
         at: float | None = None,
+        browser_source_id: str | None = None,
+        device_id_hash: str | None = None,
+        label: str = "",
     ) -> None:
         """Keep the most recent frame the desktop's browser sent us.
 
@@ -452,12 +460,25 @@ class CameraManager:
         """
         if not data_url:
             return
-        with self._lock:
-            self._browser_frame = {
+        source_id = str(browser_source_id or (f"index:{int(index)}" if index is not None else "browser:default"))[:160]
+        payload = {
                 "data_url": data_url,
                 "index": None if index is None else int(index),
                 "at": time.time() if at is None else float(at),
+                "browser_source_id": source_id,
+                "device_id_hash": str(device_id_hash or "")[:160],
+                "label": str(label or "")[:160],
             }
+        with self._lock:
+            cutoff = payload["at"] - max(BROWSER_FRAME_FRESH_SECONDS * 4, 120.0)
+            self._browser_frames = {
+                key: value for key, value in self._browser_frames.items()
+                if float(value.get("at") or 0) >= cutoff
+            }
+            self._browser_frames[source_id] = payload
+            # Preserve the old single-frame accessor for integrations that still
+            # call browser_frame(); it returns the freshest browser source.
+            self._browser_frame = payload
             if index is not None and int(index) not in self._sources:
                 self._sources[int(index)] = CameraSource(
                     index=int(index), usable=True, owner="browser",
@@ -467,28 +488,47 @@ class CameraManager:
     def browser_frame(self, *, max_age_seconds: float = 30.0) -> dict[str, Any] | None:
         with self._lock:
             frame = dict(self._browser_frame) if self._browser_frame else None
-        if not frame:
-            return None
-        if (time.time() - float(frame.get("at") or 0)) > max_age_seconds:
+        if not frame or (time.time() - float(frame.get("at") or 0)) > max_age_seconds:
             return None
         return frame
 
-    def forget_browser_frame(self, index: int | None = None) -> None:
+    def browser_frames(self, *, max_age_seconds: float = 30.0) -> list[dict[str, Any]]:
+        with self._lock:
+            # ``_browser_frame`` remains the compatibility/session-live marker;
+            # older integrations clear it directly when resetting the manager.
+            if self._browser_frame is None:
+                return []
+            frames = [dict(item) for item in self._browser_frames.values()]
+            if not frames:
+                frames = [dict(self._browser_frame)]
+        now = time.time()
+        return [frame for frame in frames if (now - float(frame.get("at") or 0)) <= max_age_seconds]
+
+    def forget_browser_frame(self, index: int | None = None, browser_source_id: str | None = None) -> None:
         """Forget a browser-owned frame as soon as the preview releases it."""
         with self._lock:
-            current = self._browser_frame
-            if current is None:
-                return
-            current_index = current.get("index")
-            if index is not None and current_index != int(index):
-                return
-            self._browser_frame = None
-            if current_index is not None:
-                source = self._sources.get(int(current_index))
+            selected = list(self._browser_frames.items())
+            if not selected and self._browser_frame:
+                selected = [(str(self._browser_frame.get("browser_source_id") or "browser:default"), self._browser_frame)]
+            removed = False
+            for source_id, current in selected:
+                current_index = current.get("index")
+                if browser_source_id and source_id != str(browser_source_id):
+                    continue
+                if index is not None and current_index != int(index):
+                    continue
+                self._browser_frames.pop(source_id, None)
+                removed = True
+                if current_index is not None:
+                    source = self._sources.get(int(current_index))
+                else:
+                    source = None
                 if source is not None and source.owner == "browser":
                     source.owner = "idle"
                     source.usable = False
                     source.reason = "浏览器预览已释放，等待下一次采集"
+            if removed:
+                self._browser_frame = max(self._browser_frames.values(), key=lambda item: float(item.get("at") or 0), default=None)
 
     def describe(self) -> dict[str, Any]:
         with self._lock:

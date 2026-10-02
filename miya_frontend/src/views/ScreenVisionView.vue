@@ -265,6 +265,10 @@ function handleDeviceChange(event: Event) {
   camera.selectDevice((event.target as HTMLSelectElement).value)
 }
 
+function handleCameraPolicyChange(event: Event) {
+  void camera.setCameraPolicy((event.target as HTMLSelectElement).value as 'auto' | 'single' | 'multi')
+}
+
 function setFaceRecognition(event: Event) {
   camera.setFaceRecognition((event.target as HTMLInputElement).checked)
 }
@@ -283,6 +287,14 @@ function setLocalOnly(event: Event) {
 
 function setAlwaysOn(event: Event) {
   camera.setAlwaysOn((event.target as HTMLInputElement).checked)
+}
+
+function handleVisionControlChange(event: Event) {
+  void camera.setVisionControl((event.target as HTMLSelectElement).value as 'user' | 'miya' | 'hybrid')
+}
+
+function handleStartupPolicyChange(event: Event) {
+  void camera.setStartupPolicy((event.target as HTMLSelectElement).value as 'on_demand' | 'resident')
 }
 
 async function enrollCurrentIdentity() {
@@ -394,6 +406,14 @@ onBeforeUnmount(() => {
         <div class="camera-mapping-state" :class="{ warn: camera.backendDeviceMapping.value !== 'matched' && !!camera.selectedDeviceId.value }">
           {{ mappingText }}
         </div>
+        <div class="camera-controls">
+          <label class="field-label" for="camera-policy-both">使用策略</label>
+          <select id="camera-policy-both" class="camera-select" :value="camera.cameraPolicy.value" @change="handleCameraPolicyChange">
+            <option value="auto">弥娅自动选择</option>
+            <option value="single">只使用当前摄像头</option>
+            <option value="multi">使用所有可用摄像头</option>
+          </select>
+        </div>
         <textarea v-model="cameraQuery" class="vision-textarea" placeholder="想让弥娅结合你的状态和屏幕内容留意什么？" rows="2" :disabled="loading" />
         <div class="vision-actions camera-actions">
           <button class="vision-btn primary" :disabled="loading" @click="doLookBoth">{{ loading ? '观察中...' : '一起观察' }}</button>
@@ -444,6 +464,14 @@ onBeforeUnmount(() => {
             <option v-for="device in camera.devices.value" :key="device.deviceId" :value="device.deviceId">{{ device.label || `摄像头 ${camera.devices.value.indexOf(device) + 1}` }}</option>
           </select>
         </div>
+        <div class="camera-controls">
+          <label class="field-label" for="camera-policy">使用策略</label>
+          <select id="camera-policy" class="camera-select" :value="camera.cameraPolicy.value" @change="handleCameraPolicyChange">
+            <option value="auto">弥娅自动选择</option>
+            <option value="single">只使用当前摄像头</option>
+            <option value="multi">使用所有可用摄像头</option>
+          </select>
+        </div>
 
         <textarea v-model="cameraQuery" class="vision-textarea" placeholder="想让弥娅特别留意什么？例如：看看我现在是不是很累" rows="2" :disabled="loading || companionActive" />
         <div class="vision-actions camera-actions">
@@ -454,6 +482,17 @@ onBeforeUnmount(() => {
         <div class="camera-event" :class="{ active: companionActive }">
           <span class="event-dot" />
           {{ camera.localEvent.value || '预览待机 · 画面由弥娅自己判断' }}
+        </div>
+        <div v-if="camera.activeBrowserSources.value.length" class="device-panel browser-device-panel">
+          <div class="identity-heading"><span>浏览器已连接的摄像头</span><small>{{ camera.activeBrowserSources.value.length }} 路</small></div>
+          <div class="device-list">
+            <div v-for="source in camera.activeBrowserSources.value" :key="source.sourceId" class="device-row">
+              <span class="device-index">{{ source.label }}</span>
+              <span class="device-detail">浏览器采集 · {{ source.deviceId === camera.selectedDeviceId.value ? '主视角' : '辅助视角' }}</span>
+              <span class="device-tag">在线</span>
+            </div>
+          </div>
+          <small class="privacy-note">手机摄像头如果只被浏览器发现，也会通过这一路参与弥娅的观察。</small>
         </div>
 
         <div class="agency-panel" :class="{ watching }">
@@ -498,7 +537,9 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="camera-options">
-          <label title="前端启动后自动保持摄像头本地动作识别；关闭后会立即停止"><input type="checkbox" :checked="camera.alwaysOn.value" @change="setAlwaysOn"><span>启动时持续本地识别</span></label>
+          <label class="camera-option-select"><span>视觉控制</span><select class="camera-select" :value="camera.visionControl.value" @change="handleVisionControlChange"><option value="hybrid">混合：弥娅决定采样</option><option value="miya">弥娅自主决定</option><option value="user">完全由我控制</option></select></label>
+          <label class="camera-option-select"><span>设备保持</span><select class="camera-select" :value="camera.startupPolicy.value" @change="handleStartupPolicyChange"><option value="resident">已授权后保持连接</option><option value="on_demand">按需启动</option></select></label>
+          <label title="前端启动后自动保持摄像头连接；关闭后会立即停止"><input type="checkbox" :checked="camera.alwaysOn.value" @change="setAlwaysOn"><span>保持视觉连接</span></label>
           <label title="使用本地登记的人脸特征进行身份匹配，不保存原始画面"><input type="checkbox" :checked="camera.faceRecognitionEnabled.value" @change="setFaceRecognition"><span>身份线索</span></label>
           <label title="只推测可见表情线索，不作为心理或医疗判断"><input type="checkbox" :checked="camera.emotionInferenceEnabled.value" @change="setEmotionInference"><span>表情线索（实验）</span></label>
           <label title="使用本地姿态模型和短时序关键点识别常见动作"><input type="checkbox" :checked="camera.actionRecognitionEnabled.value" @change="setActionRecognition"><span>本地动作识别</span></label>

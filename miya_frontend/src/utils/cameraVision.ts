@@ -4,6 +4,9 @@ import { rigCommandFromAnalysis } from '@/utils/facialTracking'
 import { proxySetFacialTracking } from '@/utils/live2dProxy'
 
 export type CameraMode = 'off' | 'snapshot' | 'companion'
+export type CameraPolicy = 'auto' | 'single' | 'multi'
+export type VisionControl = 'user' | 'miya' | 'hybrid'
+export type StartupPolicy = 'on_demand' | 'resident'
 
 export interface LocalCameraCapabilities {
   status: 'ready' | 'partial' | 'unavailable' | 'unknown'
@@ -20,6 +23,8 @@ const error = ref('')
 const devices = ref<MediaDeviceInfo[]>([])
 const selectedDeviceId = ref(localStorage.getItem('miya-camera-device') || '')
 const stream = shallowRef<MediaStream | null>(null)
+const streams = shallowRef<Record<string, MediaStream>>({})
+const activeBrowserSources = ref<Array<Record<string, any>>>([])
 const lastObservation = ref('')
 // One line about what this side is doing. It no longer carries a locally
 // invented motion score: the backend measures that, and the panel shows it.
@@ -29,6 +34,9 @@ const emotionInferenceEnabled = ref(localStorage.getItem('miya-emotion-inference
 const actionRecognitionEnabled = ref(localStorage.getItem('miya-action-recognition') !== 'false')
 const localOnly = ref(localStorage.getItem('miya-camera-local-only') === 'true')
 const alwaysOn = ref(localStorage.getItem('miya-camera-always-on') !== 'false')
+const cameraPolicy = ref<CameraPolicy>((localStorage.getItem('miya-camera-policy') as CameraPolicy) || 'auto')
+const visionControl = ref<VisionControl>((localStorage.getItem('miya-vision-control') as VisionControl) || 'hybrid')
+const startupPolicy = ref<StartupPolicy>((localStorage.getItem('miya-vision-startup') as StartupPolicy) || 'resident')
 const localCapabilities = ref<LocalCameraCapabilities>({
   status: 'unknown',
   message: '正在检查本地视觉模型…',
@@ -79,7 +87,7 @@ const visionBridge = ref<Record<string, any> | null>(null)
 let timer: ReturnType<typeof setTimeout> | null = null
 let analysisInFlight = false
 let previewVideo: HTMLVideoElement | null = null
-let mediaVideo: HTMLVideoElement | null = null
+const mediaVideos = new Map<string, HTMLVideoElement>()
 let deviceChangeHandler: (() => void) | null = null
 let remotePollTimer: ReturnType<typeof setInterval> | null = null
 let remoteCommandInFlight = false
@@ -104,19 +112,53 @@ const SNAPSHOT_INTERVAL_MS = 3000
 const FRAME_SHARE_INTERVAL_MS = 15_000
 const EVENT_REPEAT_COOLDOWN_MS = 90_000
 
-function handleStreamEnded() {
-  if (!stream.value) return
-  stop('摄像头已断开，请检查设备或权限')
+function handleStreamEnded(sourceId = 'primary') {
+  const ended = streams.value[sourceId]
+  if (ended) removeStream(sourceId)
+  if (!Object.keys(streams.value).length) stop('摄像头已断开，请检查设备或权限')
 }
 
-function getMediaVideo() {
-  if (!mediaVideo) {
-    mediaVideo = document.createElement('video')
-    mediaVideo.autoplay = true
-    mediaVideo.muted = true
-    mediaVideo.playsInline = true
+function getMediaVideo(sourceId = selectedDeviceId.value || 'primary') {
+  let video = mediaVideos.get(sourceId)
+  if (!video) {
+    video = document.createElement('video')
+    video.autoplay = true
+    video.muted = true
+    video.playsInline = true
+    mediaVideos.set(sourceId, video)
   }
-  return mediaVideo
+  return video
+}
+
+function browserSourceId(deviceId: string, index: number) {
+  const raw = `${deviceId || `index-${index}`}`
+  let hash = 2166136261
+  for (let i = 0; i < raw.length; i += 1) hash = Math.imul(hash ^ raw.charCodeAt(i), 16777619)
+  return `browser:${(hash >>> 0).toString(16)}`
+}
+
+function removeStream(sourceId: string) {
+  const current = streams.value[sourceId]
+  if (!current) return
+  current.getTracks().forEach(track => track.stop())
+  const next = { ...streams.value }
+  delete next[sourceId]
+  streams.value = next
+  const video = mediaVideos.get(sourceId)
+  if (video) video.srcObject = null
+  activeBrowserSources.value = activeBrowserSources.value.filter(item => item.sourceId !== sourceId)
+  if (stream.value === current) {
+    const primary = Object.values(next)[0] || null
+    stream.value = primary
+    if (previewVideo) previewVideo.srcObject = primary
+  }
+}
+
+function primarySourceId() {
+  return activeBrowserSources.value.find(item => item.deviceId === selectedDeviceId.value)?.sourceId
+    || activeBrowserSources.value[0]?.sourceId
+    || selectedDeviceId.value
+    || 'primary'
 }
 
 function publishState() {
@@ -174,11 +216,11 @@ function attachPreview(video: HTMLVideoElement | null) {
   }
 }
 
-async function attachStreamToVideos(activeStream: MediaStream) {
-  const source = getMediaVideo()
+async function attachStreamToVideos(activeStream: MediaStream, sourceId = selectedDeviceId.value || 'primary') {
+  const source = getMediaVideo(sourceId)
   source.srcObject = activeStream
   await source.play().catch(() => {})
-  if (previewVideo) {
+  if (previewVideo && activeStream === stream.value) {
     previewVideo.srcObject = activeStream
     await previewVideo.play().catch(() => {})
   }
@@ -189,7 +231,7 @@ async function open(modeToUse: Exclude<CameraMode, 'off'>) {
     throw new Error('当前环境不支持摄像头访问')
   }
 
-  if (stream.value) {
+  if (stream.value && (cameraPolicy.value !== 'multi' || Object.keys(streams.value).length > 1)) {
     mode.value = modeToUse
     status.value = modeToUse === 'companion' ? '陪伴视觉运行中' : '准备看你'
     publishState()
@@ -200,29 +242,48 @@ async function open(modeToUse: Exclude<CameraMode, 'off'>) {
   error.value = ''
   status.value = '正在请求摄像头权限'
   publishState()
-  const constraints: MediaStreamConstraints = {
-    audio: false,
-    video: selectedDeviceId.value && devices.value.some(device => device.deviceId === selectedDeviceId.value)
-      ? { deviceId: { exact: selectedDeviceId.value }, width: { ideal: 640 }, height: { ideal: 480 } }
-      : { width: { ideal: 640 }, height: { ideal: 480 } },
-  }
-
   try {
-    stream.value = await navigator.mediaDevices.getUserMedia(constraints)
-    stream.value.getTracks().forEach(track => {
-      track.addEventListener('ended', handleStreamEnded, { once: true })
-    })
+    await listDevices()
+    const candidates = cameraPolicy.value === 'multi'
+      ? devices.value
+      : [devices.value.find(device => device.deviceId === selectedDeviceId.value) || devices.value[0]].filter(Boolean)
+    const opened: Record<string, MediaStream> = {}
+    const sources: Array<Record<string, any>> = []
+    for (let index = 0; index < candidates.length; index += 1) {
+      const device = candidates[index]
+      const sourceId = browserSourceId(device?.deviceId || '', index)
+      try {
+        const activeStream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: device?.deviceId
+            ? { deviceId: { exact: device.deviceId }, width: { ideal: 640 }, height: { ideal: 480 } }
+            : { width: { ideal: 640 }, height: { ideal: 480 } },
+        })
+        opened[sourceId] = activeStream
+        activeStream.getTracks().forEach(track => track.addEventListener('ended', () => handleStreamEnded(sourceId), { once: true }))
+        await attachStreamToVideos(activeStream, sourceId)
+        sources.push({ sourceId, deviceId: device?.deviceId || '', label: device?.label || `摄像头 ${index + 1}`, backendIndex: null })
+      } catch (err) {
+        if (cameraPolicy.value !== 'multi') throw err
+      }
+    }
+    if (!Object.keys(opened).length) throw new Error('没有可用的浏览器摄像头')
+    streams.value = opened
+    const primarySource = activeBrowserSources.value.find(item => item.deviceId === selectedDeviceId.value)
+    stream.value = (primarySource ? opened[primarySource.sourceId] : undefined) || Object.values(opened)[0] || null
+    activeBrowserSources.value = sources
     if (!deviceChangeHandler && navigator.mediaDevices.addEventListener) {
       deviceChangeHandler = () => { void listDevices() }
       navigator.mediaDevices.addEventListener('devicechange', deviceChangeHandler)
     }
     mode.value = modeToUse
     status.value = modeToUse === 'companion' ? '陪伴视觉运行中' : '准备看你'
-    await attachStreamToVideos(stream.value)
-    await listDevices()
+    await attachStreamToVideos(stream.value, activeBrowserSources.value.find(item => item.deviceId === selectedDeviceId.value)?.sourceId || 'primary')
     publishState()
   } catch (err: any) {
     mode.value = 'off'
+    Object.keys(streams.value).forEach(removeStream)
+    streams.value = {}
     stream.value = null
     status.value = '摄像头未启用'
     error.value = err?.name === 'NotAllowedError' ? '摄像头权限被拒绝' : (err?.message || '摄像头启动失败')
@@ -234,26 +295,27 @@ async function open(modeToUse: Exclude<CameraMode, 'off'>) {
 function stop(reason = '') {
   companionStartVersion += 1
   lastFrameSharedAt = 0
-  const releaseIndex = selectedDeviceId.value && backendDeviceMapping.value === 'matched'
-    ? backendDeviceIndex.value
-    : null
+  const releaseIndex = selectedDeviceId.value && backendDeviceMapping.value === 'matched' ? backendDeviceIndex.value : null
   if (timer) {
     clearTimeout(timer)
     timer = null
   }
-  stream.value?.getTracks().forEach(track => track.stop())
+  Object.values(streams.value).forEach(active => active.getTracks().forEach(track => track.stop()))
+  streams.value = {}
   stream.value = null
+  activeBrowserSources.value = []
   if (deviceChangeHandler && navigator.mediaDevices?.removeEventListener) {
     navigator.mediaDevices.removeEventListener('devicechange', deviceChangeHandler)
     deviceChangeHandler = null
   }
-  if (mediaVideo) mediaVideo.srcObject = null
+  mediaVideos.forEach(video => { video.srcObject = null })
   if (previewVideo) previewVideo.srcObject = null
   // Tell the backend immediately. Without this handshake its ownership grace
   // period keeps the physical device reserved after this tab has stopped it.
   void API.mcpCall('screen_vision', 'camera_event', {
     event: { kind: 'preview_released', ...(releaseIndex === null ? {} : { camera_index: releaseIndex }) },
     ...(releaseIndex === null ? {} : { camera_index: releaseIndex }),
+    browser_source_ids: activeBrowserSources.value.map(item => item.sourceId),
   }).catch(() => {})
   mode.value = 'off'
   status.value = reason || '摄像头关闭'
@@ -265,9 +327,11 @@ function stop(reason = '') {
   publishState()
 }
 
-function captureFrame() {
-  const source = getMediaVideo()
-  if (!stream.value || source.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+function captureFrame(sourceId = primarySourceId()) {
+  const resolvedSourceId = streams.value[sourceId] ? sourceId : primarySourceId()
+  const activeStream = streams.value[resolvedSourceId] || stream.value
+  const source = getMediaVideo(resolvedSourceId)
+  if (!activeStream || source.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
     throw new Error('摄像头画面还没有准备好')
   }
   const canvas = document.createElement('canvas')
@@ -282,7 +346,7 @@ function captureFrame() {
 }
 
 async function waitForMediaFrame() {
-  const source = getMediaVideo()
+  const source = getMediaVideo(primarySourceId())
   for (let index = 0; index < 25; index += 1) {
     if (source.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && source.videoWidth > 0) return
     await new Promise(resolve => setTimeout(resolve, 100))
@@ -303,7 +367,7 @@ async function publishLocalEvent(
   kind: string,
   summary: string,
   confidence = 1,
-  options: { repeatable?: boolean, imageData?: string } = {},
+  options: { repeatable?: boolean, imageData?: string, source?: Record<string, any> } = {},
 ) {
   const now = Date.now()
   // Repeatable publications (sharing a frame on a slow cadence) must not be
@@ -318,12 +382,23 @@ async function publishLocalEvent(
     // it. The frame is captured by the caller so a failed capture cannot send an
     // event that claims one.
     const imageData = options.imageData || ''
-    const index = selectedDeviceId.value && backendDeviceMapping.value !== 'matched'
+    const source = options.source || activeBrowserSources.value.find(item => item.deviceId === selectedDeviceId.value)
+    const index = source?.backendIndex !== null && source?.backendIndex !== undefined
+      ? Number(source.backendIndex)
+      : selectedDeviceId.value && backendDeviceMapping.value !== 'matched'
       ? null
       : backendDeviceIndex.value
     await API.mcpCall('screen_vision', 'camera_event', {
-      event: { kind, summary, confidence, mode: 'companion', status: 'success' },
+      event: {
+        kind, summary, confidence, mode: 'companion', status: 'success',
+        ...(source?.sourceId ? { browser_source_id: source.sourceId } : {}),
+        ...(source?.deviceId ? { device_id_hash: browserSourceId(source.deviceId, 0) } : {}),
+        ...(source?.label ? { camera_label: source.label } : {}),
+      },
       ...(index === null ? {} : { camera_index: index }),
+      ...(source?.sourceId ? { browser_source_id: source.sourceId } : {}),
+      ...(source?.deviceId ? { device_id_hash: browserSourceId(source.deviceId, 0) } : {}),
+      ...(source?.label ? { camera_label: source.label } : {}),
       ...(imageData ? { image_data: imageData } : {}),
     })
   } catch {
@@ -527,13 +602,16 @@ async function companionTick() {
     // what to do with it; this side only supplies the pixels.
     if (now - lastFrameSharedAt >= FRAME_SHARE_INTERVAL_MS) {
       lastFrameSharedAt = now
-      const frame = captureFrame()
-      if (frame) {
+      const frameSources = cameraPolicy.value === 'multi' ? activeBrowserSources.value : activeBrowserSources.value.slice(0, 1)
+      if (frameSources.length) {
         analysisInFlight = true
         try {
-          if (tickVersion !== companionStartVersion || mode.value !== 'companion' || !stream.value) return
-          await publishLocalEvent('companion_frame', '预览正在把画面交给弥娅', 0.5,
-            { repeatable: true, imageData: frame })
+          for (const source of frameSources) {
+            if (tickVersion !== companionStartVersion || mode.value !== 'companion' || !stream.value) return
+            const frame = captureFrame(source.sourceId)
+            if (frame) await publishLocalEvent('companion_frame', '预览正在把画面交给弥娅', 0.5,
+              { repeatable: true, imageData: frame, source })
+          }
           if (tickVersion !== companionStartVersion || mode.value !== 'companion' || !stream.value) return
           status.value = '预览运行中 · 正在把画面交给弥娅'
         } finally {
@@ -587,11 +665,19 @@ async function startAlwaysOnCompanion() {
   try {
     const response = await API.setCameraControl({
       mode: 'companion',
-      local_only: true,
+      local_only: localOnly.value,
       action_recognition: actionRecognitionEnabled.value,
       autonomous: true,
+      camera_policy: cameraPolicy.value,
+      camera_indices: cameraPolicy.value === 'single' ? [backendDeviceIndex.value] : [],
+      preferred_index: backendDeviceIndex.value,
+      vision_control: visionControl.value,
+      startup_policy: startupPolicy.value,
+      consent_granted: true,
+      browser_source_ids: activeBrowserSources.value.map(item => item.sourceId),
+      preferred_browser_source_id: activeBrowserSources.value.find(item => item.deviceId === selectedDeviceId.value)?.sourceId,
     })
-    const requestId = String(response?.state?.request_id || '')
+    const requestId = String(response?.state?.requestId || '')
     if (requestId) {
       lastRemoteCommandId = requestId
       localStorage.setItem('miya-camera-command-seen', requestId)
@@ -603,6 +689,35 @@ async function startAlwaysOnCompanion() {
   }
 }
 
+async function setCameraPolicy(value: CameraPolicy) {
+  const wasActive = mode.value === 'companion'
+  cameraPolicy.value = value
+  localStorage.setItem('miya-camera-policy', value)
+  try {
+    await API.setCameraControl({
+      mode: mode.value === 'off' ? 'off' : mode.value,
+      local_only: localOnly.value,
+      action_recognition: actionRecognitionEnabled.value,
+      autonomous: alwaysOn.value,
+      camera_policy: value,
+      camera_indices: value === 'single' ? [backendDeviceIndex.value] : [],
+      preferred_index: backendDeviceIndex.value,
+      vision_control: visionControl.value,
+      startup_policy: startupPolicy.value,
+      consent_granted: Boolean(mode.value !== 'off'),
+      browser_source_ids: activeBrowserSources.value.map(item => item.sourceId),
+      preferred_browser_source_id: activeBrowserSources.value.find(item => item.deviceId === selectedDeviceId.value)?.sourceId,
+    })
+  } catch (err: any) {
+    error.value = err?.message || '摄像头策略同步失败'
+  }
+  if (wasActive) {
+    stop()
+    await startCompanion().catch(() => {})
+  }
+  return cameraPolicy.value
+}
+
 function setAlwaysOn(value: boolean) {
   alwaysOn.value = value
   localStorage.setItem('miya-camera-always-on', String(value))
@@ -612,6 +727,36 @@ function setAlwaysOn(value: boolean) {
     return
   }
   void enableAlwaysOn().catch(() => {})
+}
+
+async function setVisionControl(value: VisionControl) {
+  visionControl.value = value
+  localStorage.setItem('miya-vision-control', value)
+  await API.setCameraControl({
+    mode: mode.value === 'off' ? 'off' : mode.value,
+    autonomous: value !== 'user' && alwaysOn.value,
+    vision_control: value,
+    startup_policy: startupPolicy.value,
+    consent_granted: Boolean(mode.value !== 'off'),
+    camera_policy: cameraPolicy.value,
+    preferred_index: backendDeviceIndex.value,
+  }).catch(() => {})
+  return value
+}
+
+async function setStartupPolicy(value: StartupPolicy) {
+  startupPolicy.value = value
+  alwaysOn.value = value === 'resident'
+  localStorage.setItem('miya-vision-startup', value)
+  localStorage.setItem('miya-camera-always-on', String(alwaysOn.value))
+  await API.setCameraControl({
+    mode: mode.value === 'off' ? 'off' : mode.value,
+    autonomous: visionControl.value !== 'user' && alwaysOn.value,
+    vision_control: visionControl.value,
+    startup_policy: value,
+    consent_granted: Boolean(mode.value !== 'off'),
+  }).catch(() => {})
+  return value
 }
 
 async function enableAlwaysOn() {
@@ -633,7 +778,7 @@ async function syncRemoteCommand() {
   try {
     const response = await API.getCameraControl()
     const state = response?.state
-    const requestId = String(state?.request_id || '')
+    const requestId = String(state?.requestId || '')
     if (!requestId || requestId === 'initial' || requestId === lastRemoteCommandId) return
     lastRemoteCommandId = requestId
     localStorage.setItem('miya-camera-command-seen', requestId)
@@ -643,8 +788,22 @@ async function syncRemoteCommand() {
       if (mode.value !== 'off' || companionStartInFlight) stop('已按命令关闭摄像头')
       return
     }
-    localOnly.value = Boolean(state.local_only)
-    actionRecognitionEnabled.value = state.action_recognition !== false
+    localOnly.value = Boolean(state.localOnly)
+    actionRecognitionEnabled.value = state.actionRecognition !== false
+    if (state.cameraPolicy === 'auto' || state.cameraPolicy === 'single' || state.cameraPolicy === 'multi') {
+      cameraPolicy.value = state.cameraPolicy
+      localStorage.setItem('miya-camera-policy', cameraPolicy.value)
+    }
+    if (state.visionControl === 'user' || state.visionControl === 'miya' || state.visionControl === 'hybrid') {
+      visionControl.value = state.visionControl
+      localStorage.setItem('miya-vision-control', visionControl.value)
+    }
+    if (state.startupPolicy === 'on_demand' || state.startupPolicy === 'resident') {
+      startupPolicy.value = state.startupPolicy
+      alwaysOn.value = startupPolicy.value === 'resident'
+      localStorage.setItem('miya-vision-startup', startupPolicy.value)
+      localStorage.setItem('miya-camera-always-on', String(alwaysOn.value))
+    }
     localStorage.setItem('miya-camera-local-only', String(localOnly.value))
     localStorage.setItem('miya-action-recognition', String(actionRecognitionEnabled.value))
     if (state.mode === 'snapshot') {
@@ -667,15 +826,15 @@ async function syncObservationRequest() {
   try {
     const response = await API.getCameraRequest()
     const request = response?.request
-    const requestId = String(request?.request_id || '')
+    const requestId = String(request?.requestId || '')
     if (!request || !requestId || requestId === lastObservationRequestId) return
     if (mode.value !== 'companion' || !stream.value) return
     currentRequestId = requestId
-    const requestLocalOnly = request.local_only === undefined || request.local_only === null
+    const requestLocalOnly = request.localOnly === undefined || request.localOnly === null
       ? localOnly.value
-      : typeof request.local_only === 'string'
-        ? ['true', '1', 'yes', 'on'].includes(request.local_only.trim().toLowerCase())
-        : Boolean(request.local_only)
+      : typeof request.localOnly === 'string'
+        ? ['true', '1', 'yes', 'on'].includes(request.localOnly.trim().toLowerCase())
+        : Boolean(request.localOnly)
     await waitForMediaFrame()
     const imageData = captureFrame()
     let result: any
@@ -930,7 +1089,7 @@ async function refreshVisionStream() {
     visionEvents.value = Array.isArray(response?.events) ? [...response.events].reverse() : []
     visionStreamStatus.value = response?.status || {}
     visionCadence.value = response?.cadence || {}
-    thumbnailsEnabled.value = Boolean(response?.status?.thumbnails_enabled)
+    thumbnailsEnabled.value = Boolean(response?.status?.thumbnailsEnabled)
   } catch {
     // The stream is a view onto her work; never disturb the preview over it.
   }
@@ -951,7 +1110,7 @@ async function setThumbnailStorage(enabled: boolean) {
   try {
     const response = await API.setVisionThumbnails(enabled)
     visionStreamStatus.value = response?.status || visionStreamStatus.value
-    thumbnailsEnabled.value = Boolean(response?.status?.thumbnails_enabled)
+    thumbnailsEnabled.value = Boolean(response?.status?.thumbnailsEnabled)
     await refreshVisionStream()
   } catch (err: any) {
     error.value = err?.message || '无法切换缩略图存储'
@@ -981,6 +1140,7 @@ async function refreshVisionSources() {
       visionSources.value = {
         sources: payload.sources || {},
         names: payload.names || {},
+        browserFrames: payload.browserFrames || [],
         browserOwned: payload.browserOwned || [],
         backendOwned: payload.backendOwned || [],
         readersRunning: payload.readersRunning || [],
@@ -1041,12 +1201,14 @@ export function useCameraVision() {
   return {
     mode, status, error, devices, selectedDeviceId, stream, lastObservation, localEvent,
     faceRecognitionEnabled, emotionInferenceEnabled, actionRecognitionEnabled,
-    alwaysOn,
+    alwaysOn, cameraPolicy,
     localOnly, localCapabilities, backendDevices, cameraSourcesMessage, presence, activity, backendDeviceIndex, backendDeviceMapping, backendNames,
+    streams, activeBrowserSources, visionControl, startupPolicy,
     agentState, agentAgency, agentVoice, agentVoiceQueue,
     visionEvents, visionStreamStatus, visionCadence, thumbnailsEnabled, cameraHealth, visionSources, visionBridge,
     listDevices, refreshCapabilities, attachPreview, open, stop, lookAtMe, lookBoth, startCompanion, selectDevice,
-    setFaceRecognition, setEmotionInference, setActionRecognition, setLocalOnly, setAlwaysOn, enableAlwaysOn, enrollIdentity, listIdentities, deleteIdentity,
+    setFaceRecognition, setEmotionInference, setActionRecognition, setLocalOnly, setAlwaysOn, enableAlwaysOn, setCameraPolicy, enrollIdentity, listIdentities, deleteIdentity,
+    setVisionControl, setStartupPolicy,
     syncRemoteCommand, startRemoteCommandPolling, stopRemoteCommandPolling, startAlwaysOnCompanion,
     refreshBackendDevices, refreshPresence, refreshActivity, refreshCameraSources, setBackendDeviceIndex,
     refreshAgentState, setWatching, refreshAgentVoice, takeAgentVoice, clearAgentVoice,

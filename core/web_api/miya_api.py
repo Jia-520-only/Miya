@@ -62,6 +62,14 @@ class MiyaAPI:
                     local_only=body.get("local_only"),
                     action_recognition=body.get("action_recognition"),
                     autonomous=body.get("autonomous"),
+                    camera_policy=body.get("camera_policy"),
+                    camera_indices=body.get("camera_indices"),
+                    preferred_index=body.get("preferred_index"),
+                    browser_source_ids=body.get("browser_source_ids"),
+                    preferred_browser_source_id=body.get("preferred_browser_source_id"),
+                    vision_control=body.get("vision_control"),
+                    startup_policy=body.get("startup_policy"),
+                    consent_granted=body.get("consent_granted"),
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -262,7 +270,18 @@ class MiyaAPI:
                 try:
                     from mcpserver.screen_vision.camera_manager import get_camera_manager
 
-                    payload["names"] = get_camera_manager().describe().get("names") or {}
+                    manager = get_camera_manager()
+                    payload["names"] = manager.describe().get("names") or {}
+                    payload["browser_frames"] = [
+                        {
+                            "browser_source_id": item.get("browser_source_id"),
+                            "device_id_hash": item.get("device_id_hash"),
+                            "label": item.get("label"),
+                            "index": item.get("index"),
+                            "at": item.get("at"),
+                        }
+                        for item in manager.browser_frames()
+                    ]
                 except Exception:  # noqa: BLE001 - names are decoration
                     payload["names"] = {}
                 return {"success": True, **payload}

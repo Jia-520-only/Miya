@@ -180,6 +180,14 @@ export class CoreApiClient extends ApiClient {
     local_only?: boolean
     action_recognition?: boolean
     autonomous?: boolean
+    camera_policy?: 'auto' | 'single' | 'multi'
+    camera_indices?: number[]
+    preferred_index?: number
+    vision_control?: 'user' | 'miya' | 'hybrid'
+    startup_policy?: 'on_demand' | 'resident'
+    consent_granted?: boolean
+    browser_source_ids?: string[]
+    preferred_browser_source_id?: string
   }): Promise<{ success: boolean, state: Record<string, any> }> {
     return this.instance.post('/api/camera/control', data)
   }
@@ -293,6 +301,7 @@ export class CoreApiClient extends ApiClient {
     browserOwned: number[]
     backendOwned: number[]
     readersRunning: number[]
+    browserFrames?: Array<Record<string, any>>
   }> {
     return this.instance.get('/api/vision/sources')
   }

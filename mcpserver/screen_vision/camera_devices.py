@@ -261,7 +261,12 @@ def list_camera_devices(*, width: int = 640, height: int = 480, probe: bool = Tr
     # the end of it only opens devices that do not exist, and every open is the
     # riskiest call this process makes. Without ffmpeg the old index range is the
     # only way to find anything.
-    limit = max(1, len(names)) if names else max(1, MAX_INDEX)
+    # DirectShow names are useful labels, but they are not a complete device
+    # inventory: Windows phone-camera bridges and Media Foundation-only drivers
+    # can be addressable by OpenCV without appearing in ffmpeg's dshow list.
+    # Always probe the configured index window as well, then retain named
+    # devices that fail so the UI can explain their state.
+    limit = max(1, MAX_INDEX, len(names))
     for index in range(limit):
         name = name_for_index(index, names=names)
         if not probe:
