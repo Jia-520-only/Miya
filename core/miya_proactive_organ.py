@@ -43,6 +43,7 @@ class MiyaProactiveOrgan(MiyaOrgan):
         self._quiet_until: float = 0.0  # 安静期截止时间戳
         self._suppressed: bool = False
         self._coordinator = None
+        self._pending_future = None
 
     def bind_proactive_coordinator(self, coordinator) -> None:
         """让灵魂主动表达也使用统一主动性协调器。"""
@@ -87,6 +88,8 @@ class MiyaProactiveOrgan(MiyaOrgan):
             return
         if now < self._quiet_until:
             return
+        if self._pending_future is not None and not self._pending_future.done():
+            return
 
         message = state.proactive_message.strip()
         if not message or len(message) < 2:
@@ -105,8 +108,9 @@ class MiyaProactiveOrgan(MiyaOrgan):
                         ),
                         self._spine._loop,
                     )
-                    if not future.result(timeout=5):
-                        return
+                    self._pending_future = future
+                    future.add_done_callback(self._on_delivery_done)
+                    return
                 else:
                     self._spine._proactive_sender(message)
                 self._last_proactive_time = now
@@ -114,6 +118,15 @@ class MiyaProactiveOrgan(MiyaOrgan):
                 logger.info(f"弥娅主动表达 (#{self._proactive_count}): msg={message[:50]}")
             except Exception as e:
                 logger.warning(f"主动消息发送失败: {e}")
+
+    def _on_delivery_done(self, future) -> None:
+        try:
+            if future.result():
+                self._last_proactive_time = time.time()
+                self._proactive_count += 1
+                logger.info("弥娅主动表达投递成功 (#%s)", self._proactive_count)
+        except Exception as exc:
+            logger.warning("主动消息发送失败: %s", exc)
 
     # ── 控制接口 ──
 

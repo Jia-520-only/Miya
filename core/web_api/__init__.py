@@ -1268,13 +1268,9 @@ class WebAPI:
 
         @self.router.get("/api/chat/pending/{user_id}")
         async def get_pending_messages(user_id: str):
-            """获取并清除移动端的待发送主动消息 (v9.0: 合并 default 队列)"""
+            """领取目标的待发送主动消息；default 是所有者队列的别名。"""
             try:
-                pending = getattr(self.decision_hub, "_mobile_pending", {})
-                msgs = pending.pop(str(user_id), [])
-                # v9.0: 如果用户队列为空，也提供 default 兜底队列
-                if not msgs and user_id != "default":
-                    msgs = pending.pop("default", [])
+                msgs = self.decision_hub.take_pending_proactive_messages(str(user_id))
                 return {"messages": msgs}
             except Exception:
                 return {"messages": []}

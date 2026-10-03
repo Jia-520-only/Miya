@@ -499,6 +499,7 @@ class ManagementAPI:
         reply_to_message_id: str = "",
         timestamp: str = "",
         group_id: str = "",
+        delivery_id: str = "",
     ):
         """向所有 WebSocket 客户端广播跨平台消息"""
         payload = {
@@ -515,16 +516,23 @@ class ManagementAPI:
                 "message_id": message_id,
                 "reply_to_message_id": reply_to_message_id,
                 "group_id": group_id,
+                "delivery_id": delivery_id,
                 "timestamp": timestamp or datetime.now().isoformat(),
             },
         }
         dead = set()
+        delivered = 0
         for ws in self._ws_clients:
             try:
                 await ws.send_json(payload)
+                delivered += 1
             except Exception:
                 dead.add(ws)
         self._ws_clients -= dead
+        for ws in dead:
+            self._ws_client_types.pop(ws, None)
+            self._ws_client_users.pop(ws, None)
+        return delivered
 
     async def push_to_client_type(
         self,
@@ -540,8 +548,9 @@ class ManagementAPI:
             payload: 推送数据
         """
         if not payload:
-            return
+            return 0
         dead = set()
+        delivered = 0
         for ws in self._ws_clients:
             ws_type = self._ws_client_types.get(ws, "unknown")
             ws_user = self._ws_client_users.get(ws, "")
@@ -549,12 +558,14 @@ class ManagementAPI:
                 if not user_id or ws_user == user_id:
                     try:
                         await ws.send_json(payload)
+                        delivered += 1
                     except Exception:
                         dead.add(ws)
         self._ws_clients -= dead
         for ws in dead:
             self._ws_client_types.pop(ws, None)
             self._ws_client_users.pop(ws, None)
+        return delivered
 
     async def push_mobile_pending(
         self,
@@ -579,6 +590,7 @@ class ManagementAPI:
         message: str,
         platform: str = "",
         target_client: str = "desktop",
+        delivery_id: str = "",
     ):
         """向桌面/Web 端推送主动消息 (v9.0: WS 直推)"""
         payload = {
@@ -588,9 +600,13 @@ class ManagementAPI:
                 "user_id": user_id,
                 "message": message,
                 "platform": platform,
+                "delivery_id": delivery_id,
+                "message_id": delivery_id,
+                "direction": "out",
+                "sender_name": "弥娅",
             },
         }
-        await self.push_to_client_type(target_client, user_id=user_id, payload=payload)
+        return await self.push_to_client_type(target_client, user_id=user_id, payload=payload)
 
     def register_platform_awareness_callbacks(self):
         """注册平台感知 WS 推送回调 (v9.0)"""

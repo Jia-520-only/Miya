@@ -410,7 +410,11 @@ def camera_aware_config() -> dict[str, Any]:
     try:
         from core.proactive_chat import get_proactive_chat_system
 
-        config = getattr(get_proactive_chat_system(), "_camera_aware_config", None)
+        system = get_proactive_chat_system()
+        system.reload_config_if_changed()
+        if not system.is_enabled():
+            return {"enabled": False}
+        config = getattr(system, "_camera_aware_config", None)
         if isinstance(config, dict):
             return config
     except Exception:
@@ -531,7 +535,7 @@ class CameraProactiveBridge:
                     # trigger). The instance is identified by the tracker's timestamp
                     # inside the event facts, which the coordinator's fingerprint
                     # compares.
-                    submitted = await self._submit(event, key=f"camera:presence:{transition}")
+                    submitted = await self._submit(event, key=f"camera:presence:{transition}:{stamp}")
                     result["presence"] = submitted
                 if submitted or not speak_enabled:
                     # Nothing left to try when speaking about presence is off.

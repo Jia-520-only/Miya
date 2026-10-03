@@ -89,7 +89,7 @@ export function useMIYARealtime() {
       handlePlatformEvent(data)
     }
 
-    if (data.type === 'new_message' || data.type === 'message') {
+    if (data.type === 'new_message' || data.type === 'message' || data.type === 'proactive_message') {
       handleNewMessage(data)
     }
   }
@@ -165,6 +165,8 @@ export function useMIYARealtime() {
     const timestamp = msg.timestamp || msg.time || null
 
     if (!content.trim()) return
+    if (messageId && MESSAGES.value.some(message => message.messageId === messageId))
+      return
 
     // 去重：检查最近 5 条已有消息，按内容和平台近似匹配
     const trimmed = content.trim()

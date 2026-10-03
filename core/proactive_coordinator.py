@@ -9,12 +9,16 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import time
 from collections import deque
 from datetime import datetime
 from typing import Any, Awaitable, Callable, Dict, Optional
+from uuid import uuid4
+
+from core.proactive_delivery import DeliveryResult, delivery_accepted
 
 logger = logging.getLogger("Miya.ProactiveCoordinator")
 
@@ -69,8 +73,36 @@ class ProactiveCoordinator:
         self._last_kind = VOICE
         self._fingerprints: Dict[str, float] = {}
         self._lock = asyncio.Lock()
+        self._reservations: dict[str, dict] = {}
+        self._send_timeout = 30.0
+        self._decision_timeout = 30.0
+        self._send_attempts = 1
 
     def configure(
+        self, *, ai_client=None, personality=None, send_callback=None,
+        config: Optional[dict] = None, default_target_id: str = "default",
+    ) -> None:
+        """完整验证后原子应用策略，非法配置不会污染已有策略。"""
+        import math
+
+        cfg = config or {}
+        for key in ("max_messages_per_hour", "max_messages_per_source_per_hour", "max_events_per_source_per_hour",
+                    "min_interval_seconds", "same_source_interval_seconds", "send_timeout_seconds",
+                    "decision_timeout_seconds", "send_attempts"):
+            if key in cfg:
+                value = cfg[key]
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                    raise ValueError(f"主动协调配置 {key} 必须是非负有限数值")
+        hours = cfg.get("quiet_hours", list(self._quiet_hours))
+        if not isinstance(hours, list) or any(type(hour) is not int or not 0 <= hour <= 23 for hour in hours):
+            raise ValueError("静默时段必须是 0 到 23 的整数列表")
+        staged = object.__new__(type(self))
+        staged.__dict__ = self.__dict__.copy()
+        staged._apply_configuration(ai_client=ai_client, personality=personality, send_callback=send_callback,
+                                    config=cfg, default_target_id=default_target_id)
+        self.__dict__.update(staged.__dict__)
+
+    def _apply_configuration(
         self,
         *,
         ai_client=None,
@@ -99,6 +131,9 @@ class ProactiveCoordinator:
         self._min_interval = max(0.0, float(cfg.get("min_interval_seconds", self._min_interval)))
         self._quiet_hours = {int(h) for h in cfg.get("quiet_hours", self._quiet_hours)}
         self._quiet_hours_enabled = bool(cfg.get("quiet_hours_enabled", self._quiet_hours_enabled))
+        self._send_timeout = max(0.01, float(cfg.get("send_timeout_seconds", self._send_timeout)))
+        self._decision_timeout = max(0.01, float(cfg.get("decision_timeout_seconds", self._decision_timeout)))
+        self._send_attempts = max(1, min(3, int(cfg.get("send_attempts", self._send_attempts))))
         if default_target_id and default_target_id != "default":
             self._default_target_id = str(default_target_id)
 
@@ -121,12 +156,12 @@ class ProactiveCoordinator:
             if not stamps:
                 self._source_counts.pop(bucket, None)
 
-    def _claim(self, key: str, facts: str, urgency: str, source: str = "", kind: str = VOICE) -> bool:
+    def _claim(self, key: str, facts: str, urgency: str, source: str = "", kind: str = VOICE) -> Optional[str]:
         now = time.time()
         source = str(source or "unknown")
         kind = str(kind or VOICE)
         self._prune(now)
-        if len(self._sent_at) >= self._max_per_hour:
+        if len(self._sent_at) + len(self._reservations) >= self._max_per_hour:
             logger.info("[主动协调] 小时总额度已满，跳过 key=%s", key)
             return False
         # The gap that has to be respected is the one belonging to whoever spoke
@@ -138,6 +173,10 @@ class ProactiveCoordinator:
         last_origin = self._last_origin
         last_kind = self._last_kind
         last_at = self._sent_at[-1] if self._sent_at else 0.0
+        if self._reservations:
+            latest = max(self._reservations.values(), key=lambda item: item["at"])
+            if latest["at"] >= last_at:
+                last_at, last_origin, last_kind = latest["at"], latest["source"], latest["kind"]
         # A real state-change event must not wait behind a conversational camera
         # observation from the same source. Events still retain their own key,
         # fingerprint, and hourly limits, and two consecutive events still use
@@ -163,25 +202,77 @@ class ProactiveCoordinator:
         bucket = (source, kind)
         stamps = self._source_counts.setdefault(bucket, deque())
         allowance = self._max_events_per_source_per_hour if kind == EVENT else self._max_per_source_per_hour
-        if len(stamps) >= allowance:
+        reserved_count = sum(
+            item["source"] == source and item["kind"] == kind for item in self._reservations.values()
+        )
+        if len(stamps) + reserved_count >= allowance:
             logger.info("[主动协调] 来源 %s 的%s配额已满，跳过 key=%s",
                         source, "事件" if kind == EVENT else "发言", key)
             return False
-        if now - self._last_by_key.get(key, 0) < self._min_interval:
+        key_window = 3600 if key.startswith(("camera:presence:", "camera:voice:")) else self._min_interval
+        if now - self._last_by_key.get(key, 0) < key_window:
             logger.info("[主动协调] 同类事件冷却中，跳过 key=%s", key)
             return False
         fingerprint = hashlib.sha256(facts.encode("utf-8")).hexdigest()
+        if any(item["key"] == key or item["fingerprint"] == fingerprint for item in self._reservations.values()):
+            return None
         if now - self._fingerprints.get(fingerprint, 0) < 3600:
             logger.info("[主动协调] 重复事实已去重，跳过 key=%s", key)
             return False
-        self._sent_at.append(now)
-        self._last_origin = source
-        self._last_kind = kind
-        self._last_by_key[key] = now
-        self._last_by_source[source] = now
-        self._source_counts.setdefault(bucket, deque()).append(now)
-        self._fingerprints[fingerprint] = now
-        return True
+        token = uuid4().hex
+        self._reservations[token] = {
+            "at": now, "key": key, "fingerprint": fingerprint, "source": source, "kind": kind,
+        }
+        return token
+
+    async def _send_reserved(self, token: str, message: str, target_id: str,
+                             chat_type: str, platform: str, trigger_type: str, detailed: bool = False):
+        accepted = False
+        try:
+            callback = self._send_callback
+            if callback is None:
+                return False
+            try:
+                parameters = inspect.signature(callback).parameters
+                accepts_id = "delivery_id" in parameters or any(
+                    parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
+                )
+            except (TypeError, ValueError):
+                accepts_id = False
+            for attempt in range(self._send_attempts):
+                kwargs = {"delivery_id": token} if accepts_id else {}
+                result = callback(message, target_id, chat_type, platform, trigger_type, **kwargs)
+                if inspect.isawaitable(result):
+                    result = await asyncio.wait_for(result, timeout=self._send_timeout)
+                accepted = delivery_accepted(result)
+                if accepted:
+                    logger.info("[主动协调] 投递已接受 status=%s delivery_id=%s",
+                                result.status if isinstance(result, DeliveryResult) else "sent", token)
+                    return result if detailed and isinstance(result, DeliveryResult) else (
+                        DeliveryResult("sent", token) if detailed else True
+                    )
+                if isinstance(result, DeliveryResult) and result.status == "rejected":
+                    break
+                if attempt + 1 < self._send_attempts:
+                    await asyncio.sleep(0.1)
+            return False
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("[主动协调] 投递失败 delivery_id=%s: %s", token, exc)
+            return False
+        finally:
+            async with self._lock:
+                reservation = self._reservations.pop(token, None)
+                if accepted and reservation:
+                    now = time.time()
+                    source, kind = reservation["source"], reservation["kind"]
+                    self._sent_at.append(now)
+                    self._last_origin, self._last_kind = source, kind
+                    self._last_by_key[reservation["key"]] = now
+                    self._last_by_source[source] = now
+                    self._source_counts.setdefault((source, kind), deque()).append(now)
+                    self._fingerprints[reservation["fingerprint"]] = now
 
     async def _decide_message(self, event: dict) -> Optional[str]:
         facts = json.dumps(event, ensure_ascii=False, separators=(",", ":"), default=str)
@@ -202,17 +293,18 @@ class ProactiveCoordinator:
                 personality=self._personality,
                 ai_client=self._ai_client,
             )
-            response = await self._ai_client.chat(
+            response = await asyncio.wait_for(self._ai_client.chat(
                 messages=[AIMessage(role="system", content=system), AIMessage(role="user", content=facts)],
                 use_miya_prompt=False,
-            )
+                tools=[], tool_choice="none",
+            ), timeout=self._decision_timeout)
             text = str(response or "").strip()
             if not text or text.upper().startswith("SKIP"):
                 return None
             return text[:240]
         except Exception as exc:
-            logger.debug("[主动协调] 人格化判断失败，回退事实: %s", exc)
-            return facts
+            logger.warning("[主动协调] 人格化判断失败，保留事件等待重试: %s", exc)
+            return None
 
     async def submit_event(
         self,
@@ -227,7 +319,7 @@ class ProactiveCoordinator:
         source: str = "",
     ) -> bool:
         """提交后台事件；返回是否实际发出消息。"""
-        if not self._enabled:
+        if not self._enabled or not self._send_callback:
             return False
         if target_id == "default":
             target_id = self._default_target_id
@@ -249,20 +341,12 @@ class ProactiveCoordinator:
             logger.info("[主动协调] AI 判断无需通知 key=%s", key)
             return False
         async with self._lock:
-            if not self._claim(key, facts, urgency, origin, EVENT):
+            if not self._enabled or (self._in_quiet_hours() and not force and urgency not in {"high", "critical"}):
                 return False
-            if not self._send_callback:
-                logger.warning("[主动协调] 发送出口未就绪，保留事件但不发送 key=%s", key)
-                return False
-            try:
-                result = self._send_callback(message, target_id, chat_type, platform, trigger_type)
-                if asyncio.iscoroutine(result):
-                    result = await result
-                logger.info("[主动协调] 已发送 source=%s key=%s", origin, key)
-                return result is not False
-            except Exception as exc:
-                logger.warning("[主动协调] 统一发送失败 key=%s: %s", key, exc)
-                return False
+            token = self._claim(key, facts, urgency, origin, EVENT)
+        if not token:
+            return False
+        return await self._send_reserved(token, message, target_id, chat_type, platform, trigger_type)
 
     async def submit_message(
         self,
@@ -275,21 +359,25 @@ class ProactiveCoordinator:
         trigger_type: str = "proactive_chat",
         source: str = "proactive_chat",
         kind: str = VOICE,
+        detailed: bool = False,
     ) -> bool:
         """接收已经经过主动聊天判断的消息，只统一执行总限频和发送。"""
         if not message or not self._enabled:
             return False
         if self._in_quiet_hours():
             return False
-        event = {"source": source, "event": "chat_candidate", "message": message}
+        if target_id == "default":
+            target_id = self._default_target_id
+        event = {"source": source, "event": "chat_candidate", "message": message,
+                 "target_id": str(target_id), "chat_type": chat_type, "platform": platform}
         facts = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
         async with self._lock:
-            if not self._send_callback or not self._claim(key, facts, "normal", source, kind):
+            if not self._send_callback or not self._enabled or self._in_quiet_hours():
                 return False
-            result = self._send_callback(message, target_id, chat_type, platform, trigger_type)
-            if asyncio.iscoroutine(result):
-                result = await result
-            return result is not False
+            token = self._claim(key, facts, "normal", source, kind)
+        if not token:
+            return False
+        return await self._send_reserved(token, message, target_id, chat_type, platform, trigger_type, detailed)
 
 
 _coordinator: Optional[ProactiveCoordinator] = None

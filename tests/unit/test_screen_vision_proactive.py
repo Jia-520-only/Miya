@@ -427,7 +427,7 @@ def test_a_real_return_is_submitted(monkeypatch, bridge_and_coordinator):
 
     assert result["presence"] is True, "真实存在场变化没有提交给协调器"
     assert len(coordinator.events) == 1
-    assert coordinator.events[0]["key"] == "camera:presence:returned"
+    assert coordinator.events[0]["key"].startswith("camera:presence:returned:")
 
 
 def test_two_real_returns_in_one_evening_are_both_submitted(monkeypatch, bridge_and_coordinator):
@@ -454,10 +454,10 @@ def test_two_real_returns_in_one_evening_are_both_submitted(monkeypatch, bridge_
     go_away_and_come_back(0.0)
     go_away_and_come_back(3600.0)
 
-    assert [item["key"] for item in coordinator.events] == [
-        "camera:presence:returned",
-        "camera:presence:returned",
-    ], "一整晚的第二次回到电脑前被当成重复丢掉了"
+    keys = [item["key"] for item in coordinator.events]
+    assert len(keys) == 2, "一整晚的第二次回到电脑前被当成重复丢掉了"
+    assert all(key.startswith("camera:presence:returned:") for key in keys)
+    assert keys[0] != keys[1]
 
 
 def test_the_bridge_does_not_steal_the_activity_change_from_the_poll(monkeypatch, bridge_and_coordinator):

@@ -21,8 +21,11 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Callable, Optional
+from pathlib import Path
+from uuid import uuid4
 
 from core.ai_client import AIMessage
+from core.proactive_delivery import delivery_accepted
 
 logger = logging.getLogger(__name__)
 
@@ -418,6 +421,10 @@ class ProactiveResult:
     rollback: Optional[Callable[[], None]] = None
     # 真正投递成功后才该做的收尾（例如把"这个变化我已经用过了"落定）。
     on_delivered: Optional[Callable[[], None]] = None
+    delivery_id: str = field(default_factory=lambda: uuid4().hex)
+    delivery_status: str = "pending"
+    coordination_key: str = ""
+    delivery_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     def undo(self) -> None:
         """撤销提案阶段记下的账；重复调用是安全的。"""
@@ -480,6 +487,11 @@ class ProactiveChatSystem:
 
         self._initialized = True
         self._config = load_config()
+        self._config_path = Path(__file__).resolve().parent.parent / "config" / "proactive_chat.yaml"
+        self._config_stamp = self._config_path.stat().st_mtime_ns if self._config_path.exists() else None
+        self._checking_targets: set = set()
+        self._proposals: dict = {}
+        self._decision_timeout = 30.0
 
         # 核心开关
         self._enabled = self._config.get("enabled", True)
@@ -606,6 +618,87 @@ class ProactiveChatSystem:
 
         # 从 text_config.json 缓存文本配置
         self._cache_text_configs()
+
+    def apply_config(self, config: dict) -> None:
+        """验证并热更新主动策略，保留运行中的状态和已用额度。"""
+        import copy
+        from core.proactive_coordinator import get_proactive_coordinator
+
+        config = copy.deepcopy(config)
+        limits = config.get("limits", {})
+        coordination = config.get("coordination", {})
+        numeric = {
+            "check_interval": config.get("check_interval", 45),
+            "global_cooldown": limits.get("global_cooldown", 300),
+            "max_daily_per_target": limits.get("max_daily_per_target", 10),
+            "max_hourly_per_target": limits.get("max_hourly_per_target", 3),
+            "duplicate_window": limits.get("duplicate_window", 60),
+            "user_message_cooldown": config.get("user_message_cooldown", 5),
+            "reply_cooldown": config.get("reply_cooldown", 120),
+            "send_timeout_seconds": coordination.get("send_timeout_seconds", 30),
+            "decision_timeout_seconds": coordination.get("decision_timeout_seconds", 30),
+        }
+        import math
+
+        for key, value in numeric.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                raise ValueError(f"主动配置 {key} 必须是非负有限数值")
+        if numeric["check_interval"] < 1 or min(numeric["send_timeout_seconds"], numeric["decision_timeout_seconds"]) <= 0:
+            raise ValueError("轮询间隔至少 1 秒，超时必须大于 0")
+        for hours in (limits.get("quiet_hours", []), coordination.get("quiet_hours", [])):
+            if not isinstance(hours, list) or any(type(hour) is not int or not 0 <= hour <= 23 for hour in hours):
+                raise ValueError("静默时段必须是 0 到 23 的整数列表")
+        coordinator = get_proactive_coordinator()
+        coordinator.configure(config={**coordination, "enabled": bool(config.get("enabled", True))
+                                     and bool(coordination.get("enabled", True))})
+        self._config = config
+        self._enabled = bool(config.get("enabled", True))
+        for trigger in ("keyword", "time", "context", "emotion", "check_in", "ai"):
+            setattr(self, f"_{trigger}_config", config.get("triggers", {}).get(trigger, {}))
+        self._screen_aware_config = config.get("screen_aware", _normalize_screen_aware_config(None))
+        self._camera_aware_config = config.get("camera_aware", get_default_camera_aware_config())
+        self._global_cooldown = numeric["global_cooldown"]
+        self._max_daily = numeric["max_daily_per_target"]
+        self._max_hourly = numeric["max_hourly_per_target"]
+        self._duplicate_window = numeric["duplicate_window"]
+        self._user_message_cooldown = numeric["user_message_cooldown"]
+        self._reply_cooldown = numeric["reply_cooldown"]
+        self._poll_interval = numeric["check_interval"]
+        self._decision_timeout = numeric["decision_timeout_seconds"]
+        self._quiet_hours = limits.get("quiet_hours", [])
+        self._quiet_hours_enabled = limits.get("quiet_hours_enabled", True)
+        self._trigger_type_cooldown = config.get("trigger_type_cooldown") or get_default_config()["trigger_type_cooldown"]
+        scene = config.get("scene", {})
+        self._scene_enabled = scene.get("enabled", True)
+        self._platform_multipliers = scene.get("platform_multipliers", {})
+        self._group_activity_cfg = scene.get("group_activity", {})
+        self._mixed_strategy = scene.get("mixed_strategy", {})
+        continuity = config.get("continuity_trigger", {})
+        self._continuity_config = continuity
+        self._continuity_enabled = continuity.get("enabled", True)
+        self._continuity_min_delay = continuity.get("min_delay_seconds", 2)
+        self._continuity_max_delay = continuity.get("max_delay_seconds", 5)
+        self._continuity_max_turns = continuity.get("max_extra_turns", 2)
+        self._cache_text_configs()
+
+    def reload_config_if_changed(self, *, force: bool = False) -> bool:
+        """仅接受完整合法的 YAML；错误配置不会替换当前策略。"""
+        try:
+            stamp = self._config_path.stat().st_mtime_ns
+            if not force and stamp == self._config_stamp:
+                return False
+            import yaml
+
+            raw = yaml.safe_load(self._config_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict) or not isinstance(raw.get("proactive_chat"), dict):
+                raise ValueError("缺少 proactive_chat 配置对象")
+            self.apply_config(_normalize_config(raw["proactive_chat"]))
+            self._config_stamp = stamp
+            logger.info("[主动聊天] 配置已热更新")
+            return True
+        except Exception as exc:
+            logger.warning("[主动聊天] 热更新失败，保留当前策略: %s", exc)
+            return False
 
     def set_screen_aware(self, screen_aware) -> None:
         """注入 ScreenAwareProactive 实例，由 DecisionHub 调用"""
@@ -965,6 +1058,7 @@ class ProactiveChatSystem:
         while True:
             try:
                 await asyncio.sleep(self._poll_interval)
+                self.reload_config_if_changed()
                 poll_count += 1
 
                 if not self._enabled or self._is_in_quiet_hours():
@@ -1200,7 +1294,7 @@ class ProactiveChatSystem:
 
         return False
 
-    def _forget_message_proposal(self, target_id: int, message: str) -> None:
+    def _forget_message_proposal(self, target_id: int, message: str, trigger_type: str = "camera_aware") -> None:
         """撤销一次没能投递出去的提案留下的记账。
 
         清掉内容去重记忆、`_message_cache` 里的指纹、同类触发的冷却时间戳，并退还
@@ -1221,7 +1315,7 @@ class ProactiveChatSystem:
         if by_type:
             # The camera's own three sub-triggers share this one cooldown slot, so
             # a rejected line used to silence the next real event for 180 seconds.
-            by_type.pop("camera_aware", None)
+            by_type.pop(trigger_type, None)
 
     def _remember_message(self, target_id: int, message: str) -> None:
         """记下"这句话真的说出去了"。
@@ -1243,7 +1337,7 @@ class ProactiveChatSystem:
 
         self._last_trigger_time[target_id] = now
 
-        if target_id not in self._daily_count:
+        if target_id not in self._daily_count or self._daily_count[target_id].get("date") != today:
             self._daily_count[target_id] = {"date": today, "count": 0}
         self._daily_count[target_id]["count"] += 1
 
@@ -1271,13 +1365,19 @@ class ProactiveChatSystem:
             stamps.pop()
 
     async def _deliver_background_result(self, target_id: int, result: ProactiveResult) -> bool:
+        async with result.delivery_lock:
+            return await self._deliver_background_result_locked(target_id, result)
+
+    async def _deliver_background_result_locked(self, target_id: int, result: ProactiveResult) -> bool:
         """把一个后台提案交到发送出口，并如实记录它有没有真的出去。
 
         返回佳是否真的收到了。被统一协调器拦下的提案不花她任何额度——它根本没发出去，
         不该占这一小时的预算。以前这里无条件写"已发送"，于是日志说着"发了"，
         而她其实一个字都没到佳面前。
         """
-        if not result.message:
+        if result.delivered:
+            return True
+        if result.delivery_status != "pending" or not result.message:
             return False
         ctx = result.context
         chat_type = ctx.chat_type if ctx else "private"
@@ -1285,26 +1385,30 @@ class ProactiveChatSystem:
         platform = ctx.platform if ctx else "terminal"
 
         if not self._send_callback:
-            self._refund_trigger(target_id)
-            result.undo()
+            self._reject_result(target_id, result)
             logger.info(
                 "[主动聊天] [后台] [%s] target=%s 没有发送出口，未发送（额度已退还）",
                 result.trigger_type, target_id,
             )
             return False
         try:
+            import inspect
+
+            parameters = inspect.signature(self._send_callback).parameters
+            kwargs = {"key": result.coordination_key or result.delivery_id} if "key" in parameters else {}
             sent = await self._send_callback(
-                result.message, target, chat_type, platform, result.trigger_type
+                result.message, target, chat_type, platform, result.trigger_type, **kwargs,
             )
+        except asyncio.CancelledError:
+            self._reject_result(target_id, result)
+            raise
         except Exception as e:
             logger.error(f"[主动聊天] 发送回调失败: {e}")
-            self._refund_trigger(target_id)
-            result.undo()
+            self._reject_result(target_id, result)
             return False
         # 发送出口返回 False 表示被统一协调器拦下（限频/静默/去重）。
-        if sent is False:
-            self._refund_trigger(target_id)
-            result.undo()
+        if not delivery_accepted(sent):
+            self._reject_result(target_id, result)
             logger.info(
                 "[主动聊天] [后台] [%s] target=%s 被协调器拦下，未发送（额度已退还）: %s",
                 result.trigger_type, target_id, result.message[:30],
@@ -1315,7 +1419,17 @@ class ProactiveChatSystem:
             result.trigger_type, target_id, result.message[:30],
         )
         result.settle()
+        result.delivered = True
+        result.delivery_status = getattr(sent, "status", "sent")
         return True
+
+    def _reject_result(self, target_id: int, result: ProactiveResult) -> None:
+        if result.delivery_status != "pending":
+            return
+        result.delivery_status = "failed"
+        self._refund_trigger(target_id)
+        result.undo()
+        self._forget_message_proposal(target_id, result.message, result.trigger_type)
 
     def _calculate_scene_profile(self, context: ChatContext) -> float:
         """Layer1 场景感知概率衰减 → 返回最终概率乘数 [0, 1]"""
@@ -1445,6 +1559,56 @@ class ProactiveChatSystem:
         return ""
 
     async def check_and_respond(self, target_id: int, user_message: Optional[str] = None) -> Optional[ProactiveResult]:
+        """同一目标只保留一个决策或待投递提案。"""
+        self.reload_config_if_changed()
+        if target_id in self._checking_targets or target_id in self._proposals:
+            return None
+        self._checking_targets.add(target_id)
+        context = self._context_cache.get(target_id)
+        old_expectation = context.user_expectation if context else None
+        old_emotion = context.detected_emotion if context else None
+        old_last_trigger = self._last_trigger_time.get(target_id)
+        try:
+            result = await asyncio.wait_for(
+                self._check_and_respond_once(target_id, user_message), timeout=self._decision_timeout,
+            )
+            if result is None or result.delivered:
+                return result
+            rollback, settle = result.rollback, result.on_delivered
+            proposal_expectation = context.user_expectation if context else None
+            proposal_emotion = context.detected_emotion if context else None
+
+            def undo_proposal():
+                if rollback:
+                    rollback()
+                self._proposals.pop(target_id, None)
+                self._forget_message_proposal(target_id, result.message, result.trigger_type)
+                if old_last_trigger is None:
+                    self._last_trigger_time.pop(target_id, None)
+                else:
+                    self._last_trigger_time[target_id] = old_last_trigger
+                if context and context.user_expectation == proposal_expectation:
+                    context.user_expectation = old_expectation
+                    if old_expectation:
+                        self._last_expectation.setdefault(target_id, old_expectation)
+                if context and context.detected_emotion == proposal_emotion:
+                    context.detected_emotion = old_emotion
+
+            def settle_proposal():
+                self._proposals.pop(target_id, None)
+                if settle:
+                    settle()
+
+            result.rollback, result.on_delivered = undo_proposal, settle_proposal
+            self._proposals[target_id] = result
+            return result
+        except asyncio.TimeoutError:
+            logger.warning("[主动聊天] 主动决策超时 target=%s", target_id)
+            return None
+        finally:
+            self._checking_targets.discard(target_id)
+
+    async def _check_and_respond_once(self, target_id: int, user_message: Optional[str] = None) -> Optional[ProactiveResult]:
         """检查是否需要主动发言"""
         if not self._enabled:
             return None
@@ -1490,11 +1654,6 @@ class ProactiveChatSystem:
         # 场景过滤：后续触发器需通过 Layer1
         if scene_mult < 0:
             return None
-
-            # 2. 情绪感知触发
-            result = await self._check_context_trigger(target_id, context)
-            if result:
-                return result
 
         # 2. 情绪感知触发
         if self.is_trigger_enabled("emotion") and context.detected_emotion:
@@ -1579,7 +1738,7 @@ class ProactiveChatSystem:
             return None
         kind = str(event.get("kind") or "")
         summary = str(event.get("summary") or "")
-        event_key = f"{kind}:{summary[:120]}"
+        event_key = f"{kind}:{event.get('timestamp')}:{summary[:120]}"
         if event_key == self._last_camera_event_key:
             return None
         if now - self._last_camera_event_time < float(self._camera_aware_config.get("min_interval", 90)):
@@ -1601,7 +1760,7 @@ class ProactiveChatSystem:
         label, topic, mood = matched
         if matched_key not in allowed and label not in allowed:
             return None
-        confidence = float(event.get("confidence") or 1.0)
+        confidence = float(event.get("confidence", 1.0))
         if confidence < float(self._camera_aware_config.get("min_confidence", 0.62)):
             return None
         if not self._check_trigger_type_cooldown(target_id, "camera_aware"):
@@ -1611,7 +1770,10 @@ class ProactiveChatSystem:
             f"请用{mood}的语气，对佳说一句自然的话，围绕{topic}，不超过25字。"
         )
         try:
-            response = await self.ai_client.chat(messages=[AIMessage(role="user", content=prompt)], tools=[], tool_choice="none")
+            response = await self.ai_client.chat(
+                messages=[AIMessage(role="user", content=self._camera_persona_prompt(prompt))],
+                tools=[], tool_choice="none",
+            )
             message = str(response or "").strip()
         except Exception:
             return None
@@ -1762,14 +1924,14 @@ class ProactiveChatSystem:
         # this, one throttled greeting marked the arrival as already-greeted and
         # she stayed silent about it for the rest of the process.
         return ProactiveResult(True, message, "camera_aware", context,
-                               rollback=lambda: self._forget_presence_proposal(target_id, transition_key, message))
+                               rollback=lambda: self._forget_presence_proposal(target_id, transition_key, message),
+                               coordination_key=f"camera:presence:{transition_key}")
 
     def _forget_presence_proposal(self, target_id: int, transition_key: str, message: str) -> None:
         """Undo the bookkeeping of a presence greeting that never went out."""
         if getattr(self, "_last_presence_key", "") == transition_key:
             self._last_presence_key = ""
         self._forget_message_proposal(target_id, message)
-        self._refund_trigger(target_id)
 
     async def _check_activity_trigger(self, target_id: int, context: ChatContext) -> Optional[ProactiveResult]:
         """React to a change in what Jia is doing, if the model judges it worth it.
@@ -1867,7 +2029,6 @@ class ProactiveChatSystem:
         not be offered again.
         """
         self._forget_message_proposal(target_id, message)
-        self._refund_trigger(target_id)
 
     async def _check_miya_vision_trigger(self, target_id: int, context: ChatContext) -> Optional[ProactiveResult]:
         """Use what Miya herself decided was worth saying while watching.
@@ -1988,7 +2149,7 @@ class ProactiveChatSystem:
 
     async def _check_context_trigger(self, target_id: int, context: ChatContext) -> Optional[ProactiveResult]:
         """上下文触发 - 行为期望跟进（AI 优先）"""
-        expectations_config = self._context_config.get("expectations", {})
+        expectations_config = self._context_config.get("expectations", self._context_config)
         if not expectations_config.get("enabled", True):
             return None
 
@@ -2515,24 +2676,27 @@ class ProactiveChatSystem:
                     continue
                 if intent.turns_taken >= intent.max_extra_turns:
                     break
-                if self._is_in_quiet_hours():
+                if not self._enabled or not self._continuity_enabled or self._is_in_quiet_hours():
                     continue
                 message = await self._execute_continuation(intent)
                 if not message:
                     logger.info(f"[意图持续] AI返回SKIP: {intent.intent_id}")
                     break
-                intent.turns_taken += 1
-                intent.last_continuation = datetime.now()
-                intent.continuation_history.append(message)
                 if self._send_callback:
                     try:
-                        await self._send_callback(
+                        sent = await self._send_callback(
                             message,
                             intent.target_id,
                             intent.chat_type,
                             intent.platform,
                             intent.intent_type,  # intent_type = comfort/task/reminder...
                         )
+                        if not delivery_accepted(sent):
+                            logger.info("[意图持续] 投递未接受: %s", intent.intent_id)
+                            break
+                        intent.turns_taken += 1
+                        intent.last_continuation = datetime.now()
+                        intent.continuation_history.append(message)
                         logger.info(
                             f"[意图持续] [{intent.intent_type}/{intent.progression_type}] "
                             f"推进 #{intent.turns_taken}: {message[:50]}"
@@ -2542,6 +2706,7 @@ class ProactiveChatSystem:
                         break
                 else:
                     logger.warning(f"[意图持续] 无发送回调: {message[:50]}")
+                    break
             logger.info(
                 f"[意图持续] 循环结束: {intent.intent_id} "
                 f"({intent.intent_type}/{intent.progression_type}, {intent.turns_taken}/{intent.max_extra_turns} 轮)"

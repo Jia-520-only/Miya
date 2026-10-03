@@ -625,7 +625,8 @@ class DecisionHub:
             self.proactive_chat.set_rich_context_provider(_rich_context_provider)
 
             async def _proactive_send_callback(
-                message: str, target_id: int, chat_type: str, platform: str = "terminal", trigger_type: str = ""
+                message: str, target_id: int, chat_type: str, platform: str = "terminal", trigger_type: str = "",
+                key: str = "",
             ):
                 """主动聊天消息发送回调 — 委托到统一分发 (v8.1)"""
                 if not message or not target_id:
@@ -635,7 +636,7 @@ class DecisionHub:
 
                     return await self.proactive_coordinator.submit_message(
                         message,
-                        key=f"chat:{target_id}:{trigger_type or 'proactive_chat'}",
+                        key=key or f"chat:{target_id}:{trigger_type}:{message}",
                         target_id=str(target_id),
                         chat_type=chat_type,
                         platform=platform,
@@ -657,8 +658,9 @@ class DecisionHub:
                         # kind="voice", and marks itself delivered so it never lands
                         # here.
                         kind=EVENT if trigger_type == "camera_aware" else VOICE,
+                        detailed=True,
                     )
-                await self._dispatch_proactive_message(
+                return await self._dispatch_proactive_message(
                     message=message,
                     target_id=target_id,
                     chat_type=chat_type,
@@ -666,7 +668,6 @@ class DecisionHub:
                     trigger_type=trigger_type,
                     store_memory=True,
                 )
-                return True
 
             self.proactive_chat.set_send_callback(_proactive_send_callback)
 
@@ -892,21 +893,9 @@ class DecisionHub:
                     )
                     return result
 
-                ctx_platform = result.context.platform if result.context else None
-                platform = ctx_platform or perception.get("platform", "terminal")
-                target_to_send = result.context.target_id if result.context else target_id
-
-                # 委托统一分发 (v8.1)
-                await self._dispatch_proactive_message(
-                    message=result.message,
-                    target_id=target_to_send,
-                    chat_type=chat_type,
-                    platform=platform,
-                    trigger_type=result.trigger_type,
-                    store_memory=True,
-                )
-
-                return result
+                if await self.proactive_chat._deliver_background_result(target_id, result):
+                    return result
+                return None
 
             return None
 
@@ -915,6 +904,69 @@ class DecisionHub:
             return None
 
     async def _dispatch_proactive_message(
+        self, message: str, target_id: int, chat_type: str = "private",
+        platform: str = "terminal", trigger_type: str = "", store_memory: bool = True,
+        delivery_id: str = "",
+    ):
+        """按投递 ID 幂等分发，并区分发送、排队、拒绝和失败。"""
+        import time
+        from uuid import uuid4
+        from core.proactive_delivery import DeliveryResult
+
+        delivery_id = delivery_id or uuid4().hex
+        if not message or not target_id:
+            return DeliveryResult("rejected", delivery_id, "empty_message_or_target")
+        if not hasattr(self, "_proactive_delivery_results"):
+            self._proactive_delivery_results = {}
+        if not hasattr(self, "_proactive_delivery_locks"):
+            self._proactive_delivery_locks = {}
+        now = time.time()
+        for identity, (stamp, _) in list(self._proactive_delivery_results.items()):
+            if now - stamp >= 3600:
+                self._proactive_delivery_results.pop(identity, None)
+        lock = self._proactive_delivery_locks.setdefault(delivery_id, asyncio.Lock())
+        try:
+            async with lock:
+                cached = self._proactive_delivery_results.get(delivery_id)
+                if cached:
+                    return cached[1]
+                try:
+                    return await self._dispatch_proactive_message_once(
+                        message, target_id, chat_type, platform, trigger_type, store_memory, delivery_id,
+                    )
+                except asyncio.CancelledError:
+                    if delivery_id in self._proactive_delivery_results:
+                        return self._proactive_delivery_results[delivery_id][1]
+                    raise
+                except Exception as exc:
+                    logger.warning("[主动分发] 投递失败 delivery_id=%s: %s", delivery_id, exc)
+                    return DeliveryResult("failed", delivery_id, str(exc))
+        finally:
+            if len(self._proactive_delivery_locks) > 256:
+                for identity, cached_lock in list(self._proactive_delivery_locks.items()):
+                    if not cached_lock.locked() and identity != delivery_id:
+                        self._proactive_delivery_locks.pop(identity, None)
+                    if len(self._proactive_delivery_locks) <= 192:
+                        break
+
+    async def _attempt_proactive_send(self, callback, *args) -> bool:
+        try:
+            coordinator = getattr(self, "proactive_coordinator", None)
+            timeout = getattr(coordinator, "_send_timeout", 30.0)
+            return bool(await asyncio.wait_for(callback(*args), timeout=timeout))
+        except Exception as exc:
+            logger.warning("[主动分发] 平台发送失败: %s", exc)
+            return False
+
+    def take_pending_proactive_messages(self, user_id: str) -> list:
+        from core.proactive_delivery import take_pending_deliveries
+
+        if user_id == "default":
+            coordinator = getattr(self, "proactive_coordinator", None)
+            user_id = getattr(coordinator, "_default_target_id", "default")
+        return take_pending_deliveries(getattr(self, "_mobile_pending", {}), str(user_id))
+
+    async def _dispatch_proactive_message_once(
         self,
         message: str,
         target_id: int,
@@ -922,7 +974,8 @@ class DecisionHub:
         platform: str = "terminal",
         trigger_type: str = "",
         store_memory: bool = True,
-    ) -> bool:
+        delivery_id: str = "",
+    ):
         """主动消息跨平台分发 — 统一路由入口 (v8.1)
 
         分发优先级:
@@ -932,7 +985,12 @@ class DecisionHub:
         4. 无 trigger_type 的广播平台 → 广播到所有在线支持主动消息的平台
         5. mobile 或失败 → mobile_pending 兜底队列
         """
+        import time
+        from core.proactive_delivery import DeliveryResult, enqueue_delivery
+
         sent = False
+        queued = False
+        broadcasted = False
 
         # 1) 平台注册表直接发送 (v8.2: 启用跨平台 ID 翻译)
         if self.platform_registry and platform and platform != "terminal":
@@ -940,28 +998,28 @@ class DecisionHub:
             if inst and hasattr(inst, "is_online") and inst.is_online:
                 if chat_type == "group" and hasattr(inst, "send_group_message"):
                     logger.info(f"[主动分发] 发送群消息 (via {platform}): {message[:50]}")
-                    sent = await inst.send_group_message(target_id, message)
-                elif hasattr(inst, "send_private_message"):
+                    sent = await self._attempt_proactive_send(inst.send_group_message, target_id, message)
+                elif chat_type != "group" and hasattr(inst, "send_private_message"):
                     resolved_id = self._resolve_cross_platform_target_id(str(target_id), platform)
                     logger.info(
                         f"[主动分发] 发送私聊消息 (via {platform}"
                         f"{', resolved_id=' + resolved_id if resolved_id != str(target_id) else ''})"
                         f": {message[:50]}"
                     )
-                    sent = await inst.send_private_message(resolved_id, message)
+                    sent = await self._attempt_proactive_send(inst.send_private_message, resolved_id, message)
 
         # 2) QQ 系列 → OneBot 回退 (仅 QQ 类平台)
         _qq_platforms = MiyaPlatform.qq_family()
         if not sent and self.onebot_client and platform in _qq_platforms:
             if chat_type == "group":
-                sent = await self.onebot_client.send_group_message(target_id, message)
+                sent = await self._attempt_proactive_send(self.onebot_client.send_group_message, target_id, message)
             else:
-                sent = await self.onebot_client.send_private_message(target_id, message)
+                sent = await self._attempt_proactive_send(self.onebot_client.send_private_message, target_id, message)
 
         # 3) 需要路由判断的平台 → AI 感知 / 优先级 / 广播
         # v9.0: mobile/desktop 跳过 AI 路由，直接走 WS 兜底
         _ws_direct_platforms = MiyaPlatform.ws_direct_platforms()
-        if not sent and platform not in _ws_direct_platforms:
+        if not sent and chat_type != "group" and platform not in _ws_direct_platforms:
             routing_config = self._get_platform_routing_config()
             mode = routing_config.get("mode", "ai_aware")
 
@@ -979,7 +1037,7 @@ class DecisionHub:
                         if hasattr(inst, "send_private_message"):
                             try:
                                 resolved_id = self._resolve_cross_platform_target_id(str(target_id), selected_platform)
-                                result = await inst.send_private_message(resolved_id, message)
+                                result = await self._attempt_proactive_send(inst.send_private_message, resolved_id, message)
                                 if result:
                                     logger.info(
                                         f"[主动分发] AI 路由 → {selected_platform}"
@@ -995,69 +1053,45 @@ class DecisionHub:
                 sent = await self._send_by_priority(target_id, message, chat_type, routing_config)
 
         # 4) mobile/desktop 兜底 + WS 直推 (v9.0)
-        if MiyaPlatform.is_ws_direct(platform) or not sent:
+        if not sent and chat_type != "group":
             if not sent:
                 logger.info(f"[主动分发] 无法直接发送到 {platform}，使用 WS 兜底: {message[:50]}")
 
             _key = str(target_id)
-            if _key not in self._mobile_pending:
-                self._mobile_pending[_key] = []
-            self._mobile_pending[_key].append(
-                {
-                    "message": message,
-                    "timestamp": datetime.utcnow().isoformat(),
-                }
-            )
-            # v9.0: 同时写入 default 队列 (兼容手机端轮询 /api/chat/pending/default)
-            if "default" not in self._mobile_pending:
-                self._mobile_pending["default"] = []
-            self._mobile_pending["default"].append(
-                {
-                    "message": message,
-                    "timestamp": datetime.utcnow().isoformat(),
-                }
-            )
-
             try:
                 from core.management_api import get_management_api
-                from core.platform_awareness import get_platform_awareness
 
                 mgmt = get_management_api()
                 if mgmt:
-                    if platform == "mobile":
-                        await mgmt.push_proactive_message(
+                    if platform in ("desktop", "web"):
+                        broadcasted = bool(await mgmt.broadcast_message(
+                            content=message[:2000], platform=platform, sender_name="弥娅", sender_id="miya",
+                            user_id=_key, direction="out", message_id=delivery_id, delivery_id=delivery_id,
+                            group_id="",
+                        ))
+                        sent = broadcasted
+                    elif platform == "mobile":
+                        sent = bool(await mgmt.push_proactive_message(
                             user_id=_key,
                             message=message,
                             platform=platform,
                             target_client="mobile",
-                        )
-                    elif platform in ("desktop", "web"):
-                        await mgmt.push_proactive_message(
-                            user_id=_key,
-                            message=message,
-                            platform=platform,
-                            target_client="desktop",
-                        )
-
-                awareness = get_platform_awareness()
-                if platform == "mobile":
-                    awareness.add_mobile_pending(_key, message)
-                sent = True
+                            delivery_id=delivery_id,
+                        ))
             except Exception as e:
                 logger.debug(f"[主动分发] WS 兜底失败: {e}")
+            if not sent:
+                if not hasattr(self, "_mobile_pending"):
+                    self._mobile_pending = {}
+                enqueue_delivery(self._mobile_pending, _key, message, delivery_id)
+                queued = True
 
-        if not sent and platform != "mobile":
-            if "default" not in self._mobile_pending:
-                self._mobile_pending["default"] = []
-            self._mobile_pending["default"].append(
-                {
-                    "message": message,
-                    "timestamp": datetime.utcnow().isoformat(),
-                }
-            )
-
-        if not sent:
+        result = DeliveryResult("sent" if sent else "queued" if queued else "failed", delivery_id)
+        if not result:
             logger.info(f"[主动分发] 无法发送到 {platform}: {message[:50]}")
+            return result
+        self._proactive_delivery_results[delivery_id] = (time.time(), result)
+        logger.info("[主动分发] status=%s delivery_id=%s platform=%s", result.status, delivery_id, platform)
 
         # 5) 记入记忆 + WS 广播到桌面前端
         if store_memory:
@@ -1068,6 +1102,7 @@ class DecisionHub:
                     "group_id": str(target_id) if chat_type == "group" else "0",
                     "message_type": chat_type,
                     "response": message,
+                    "_meta": {"delivery_id": delivery_id, "delivery_status": result.status},
                 }
                 await self.memory_manager.store_unified_memory(perception, role="assistant")
                 # WS 广播——让桌面前端实时显示主动聊天内容
@@ -1075,7 +1110,7 @@ class DecisionHub:
                     from core.management_api import get_management_api
 
                     mgmt = get_management_api()
-                    if mgmt:
+                    if mgmt and sent and not broadcasted:
                         await mgmt.broadcast_message(
                             content=message[:2000],
                             platform=platform,
@@ -1083,15 +1118,16 @@ class DecisionHub:
                             sender_id="miya",
                             user_id=str(target_id),
                             direction="out",
-                            message_id="",
+                            message_id=delivery_id,
                             group_id=str(target_id) if chat_type == "group" else None,
+                            delivery_id=delivery_id,
                         )
                 except Exception:
                     pass
             except Exception as e:
                 logger.debug(f"[主动分发] 记忆存储失败: {e}")
 
-        return sent
+        return result
 
     def _get_platform_routing_config(self) -> dict:
         """获取平台路由配置 (从 proactive_chat._config 读取) (v8.1)"""
@@ -1470,7 +1506,7 @@ class DecisionHub:
             inst = self.platform_registry.get(pid)
             try:
                 resolved_id = self._resolve_cross_platform_target_id(str(target_id), pid)
-                success = await inst.send_private_message(resolved_id, message)
+                success = await self._attempt_proactive_send(inst.send_private_message, resolved_id, message)
                 if success:
                     boost_hint = ""
                     if cur_boost > 0:
@@ -1490,7 +1526,7 @@ class DecisionHub:
 
     async def start_proactive_background(self):
         """启动主动聊天后台轮询"""
-        if self.proactive_chat and self.proactive_chat.is_enabled():
+        if self.proactive_chat:
             await self.proactive_chat.start_background_loop()
         else:
             logger.info("[决策层] 主动聊天系统未启用，跳过后台轮询")

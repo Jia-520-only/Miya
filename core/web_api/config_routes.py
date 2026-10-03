@@ -1598,6 +1598,11 @@ class ConfigPanelRoutes:
             request = request or {}
             try:
                 result = save_form_values(form_id, request.get("values") or {})
+                if form_id == "proactive":
+                    proactive = getattr(self.decision_hub, "proactive_chat", None)
+                    hot = bool(proactive and proactive.reload_config_if_changed(force=True))
+                    return {"success": True, **result, "hot_reloaded": hot,
+                            "message": "已保存并热更新" if hot else "已保存，主动策略将在重启后生效"}
                 return {"success": True, **result, "message": "已保存"}
             except FileNotFoundError as e:
                 raise HTTPException(status_code=404, detail=str(e))

@@ -192,7 +192,7 @@ class MiyaDaemon:
             dh = getattr(self._miya, "decision_hub", None)
             if dh:
                 dh._deferred_init_event.wait(timeout=5)
-            if dh and getattr(dh, "proactive_chat", None) and dh.proactive_chat.is_enabled():
+            if dh and getattr(dh, "proactive_chat", None):
                 await dh.start_proactive_background()
                 logger.info("✅ 主动聊天后台轮询已启动")
             # Her camera is her own sense, not a side effect of proactive chat:
