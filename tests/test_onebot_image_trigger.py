@@ -91,3 +91,39 @@ def test_direct_image_analysis_requires_quote_in_private(monkeypatch):
     # 私聊直接图片不自动调用视觉模型；私聊引用图片由 reply 分支处理。
     assert platform._direct_image_analysis_allowed("随便", message_type="private") is False
     assert platform._direct_image_analysis_allowed("弥娅看看", message_type="private") is False
+
+
+def test_group_reply_image_requires_trigger_or_reply_to_bot(monkeypatch):
+    import core.text_loader as text_loader
+
+    monkeypatch.setattr(text_loader, "get_chatbot_keywords", lambda: ["弥娅"])
+    platform = _platform()
+
+    assert platform._reply_image_analysis_allowed(
+        "",
+        message_type="group",
+        reply_to_bot=False,
+        user_id="999",
+        group_id="10001",
+    ) is False
+    assert platform._reply_image_analysis_allowed(
+        "",
+        message_type="group",
+        is_at_bot=True,
+        reply_to_bot=False,
+    ) is True
+    assert platform._reply_image_analysis_allowed(
+        "弥娅看看",
+        message_type="group",
+        reply_to_bot=False,
+    ) is True
+    assert platform._reply_image_analysis_allowed(
+        "",
+        message_type="group",
+        reply_to_bot=True,
+    ) is True
+    assert platform._reply_image_analysis_allowed(
+        "",
+        message_type="private",
+        reply_to_bot=False,
+    ) is True

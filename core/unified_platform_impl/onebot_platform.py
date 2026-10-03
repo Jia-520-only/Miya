@@ -287,6 +287,29 @@ class OneBotPlatform(MessageMixin, BasePlatform):
 
         return False
 
+    def _reply_image_analysis_allowed(
+        self,
+        content: str = "",
+        *,
+        message_type: str = "group",
+        is_at_bot: bool = False,
+        is_owner: bool = False,
+        user_id: str = "",
+        group_id: str = "",
+        reply_to_bot: bool = False,
+    ) -> bool:
+        """判断引用消息中的图片是否允许进入视觉模型。"""
+        if message_type != "group" or reply_to_bot:
+            return True
+        return self._direct_image_analysis_allowed(
+            content,
+            message_type=message_type,
+            is_at_bot=is_at_bot,
+            is_owner=is_owner,
+            user_id=user_id,
+            group_id=group_id,
+        )
+
     # ============ 群名解析 (OneBot 专用) ============
 
     async def _resolve_group_name(self, group_id: str) -> str:
@@ -1064,6 +1087,15 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                 # reply_to_bot 检测
                 reply_sender_id = str(reply_data.get("sender", {}).get("user_id", ""))
                 extra["reply_to_bot"] = reply_sender_id == bot_qq
+                reply_image_analysis_allowed = self._reply_image_analysis_allowed(
+                    content,
+                    message_type=msg_type,
+                    is_at_bot=is_at_bot,
+                    is_owner=is_owner,
+                    user_id=user_id,
+                    group_id=group_id_str,
+                    reply_to_bot=extra["reply_to_bot"],
+                )
                 # 提取引用文本
                 reply_content = ""
                 reply_has_images = False
@@ -1096,72 +1128,92 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                     # 引用图片即使视觉模型失败，也仍然是已收到的媒体消息。
                     # 这样后续不会被“看看/分析”误判成群文件请求。
                     has_media = True
-                    reply_image_segs = [s for s in reply_raw if s.get("type") in ("image", "video")]
-                    analyzed = False
-                    analysis_error = ""
-                    for seg in reply_image_segs[:2]:
-                        img_data = seg.get("data", {})
-                        image_bytes = await self._download_reference_image(img_data)
-                        if not image_bytes:
-                            analysis_error = "OneBot get_image/图片 URL 下载失败"
-                            continue
-                        asyncio.ensure_future(self._auto_save_image_bytes(image_bytes, user_id, img_data))
-                        try:
-                            from core.image_vision_router import analyze_cloud_image
-
-                            result = await analyze_cloud_image(image_bytes)
-                            if result.get("success"):
-                                extra["image_analysis"] = result
-                                extra["has_image"] = True
-                                has_media = True
-                                desc = result.get("description") or "图片"
-                                content = f"[回复图片: {desc[:100]}] {content}"
-                                analyzed = True
-                                logger.info(f"[{self.platform_id}] 引用图片分析完成: {desc[:50]}...")
-                                break
-                            analysis_error = str(result.get("error_message") or result.get("description") or "视觉模型未返回有效结果")
-                        except Exception as e:
-                            analysis_error = str(e)
-                            logger.warning(f"[{self.platform_id}] 引用图片视觉分析失败: {e}")
-                    if not analyzed:
-                        if not reply_content:
-                            content = f"[回复图片] {content}"
-                        extra["image_analysis_error"] = analysis_error or "引用图片未能完成视觉分析"
-                        logger.warning(
-                            f"[{self.platform_id}] 引用图片未完成分析: {extra['image_analysis_error']}"
+                    if not reply_image_analysis_allowed:
+                        logger.debug(
+                            f"[{self.platform_id}] 跳过未触发的群聊引用图片视觉分析: "
+                            f"group={group_id_str}, reply_id={reply_id}"
                         )
+                    else:
+                        reply_image_segs = [s for s in reply_raw if s.get("type") in ("image", "video")]
+                        analyzed = False
+                        analysis_error = ""
+                        for seg in reply_image_segs[:2]:
+                            img_data = seg.get("data", {})
+                            image_bytes = await self._download_reference_image(img_data)
+                            if not image_bytes:
+                                analysis_error = "OneBot get_image/图片 URL 下载失败"
+                                continue
+                            asyncio.ensure_future(self._auto_save_image_bytes(image_bytes, user_id, img_data))
+                            try:
+                                from core.image_vision_router import analyze_cloud_image
+
+                                result = await analyze_cloud_image(image_bytes)
+                                if result.get("success"):
+                                    extra["image_analysis"] = result
+                                    extra["has_image"] = True
+                                    has_media = True
+                                    desc = result.get("description") or "图片"
+                                    content = f"[回复图片: {desc[:100]}] {content}"
+                                    analyzed = True
+                                    logger.info(f"[{self.platform_id}] 引用图片分析完成: {desc[:50]}...")
+                                    break
+                                analysis_error = str(
+                                    result.get("error_message")
+                                    or result.get("description")
+                                    or "视觉模型未返回有效结果"
+                                )
+                            except Exception as e:
+                                analysis_error = str(e)
+                                logger.warning(f"[{self.platform_id}] 引用图片视觉分析失败: {e}")
+                        if not analyzed:
+                            if not reply_content:
+                                content = f"[回复图片] {content}"
+                            extra["image_analysis_error"] = analysis_error or "引用图片未能完成视觉分析"
+                            logger.warning(
+                                f"[{self.platform_id}] 引用图片未完成分析: {extra['image_analysis_error']}"
+                            )
                 elif "[CQ:image" in str(reply_raw):
                     # 字符串格式的引用图片 — 也尝试下载分析
                     has_media = True
-                    cq_files = _re.findall(r"\[CQ:image,file=([^,\]]+)", str(reply_raw))
-                    analyzed_str = False
-                    analysis_error = ""
-                    for fid in cq_files[:2]:
-                        image_bytes = await self._download_reference_image({"file": fid})
-                        if not image_bytes:
-                            analysis_error = "OneBot get_image/图片 URL 下载失败"
-                            continue
-                        asyncio.ensure_future(self._auto_save_image_bytes(image_bytes, user_id, {"file": fid}))
-                        try:
-                            from core.image_vision_router import analyze_cloud_image
+                    if not reply_image_analysis_allowed:
+                        logger.debug(
+                            f"[{self.platform_id}] 跳过未触发的群聊引用图片(CQ)视觉分析: "
+                            f"group={group_id_str}, reply_id={reply_id}"
+                        )
+                    else:
+                        cq_files = _re.findall(r"\[CQ:image,file=([^,\]]+)", str(reply_raw))
+                        analyzed_str = False
+                        analysis_error = ""
+                        for fid in cq_files[:2]:
+                            image_bytes = await self._download_reference_image({"file": fid})
+                            if not image_bytes:
+                                analysis_error = "OneBot get_image/图片 URL 下载失败"
+                                continue
+                            asyncio.ensure_future(self._auto_save_image_bytes(image_bytes, user_id, {"file": fid}))
+                            try:
+                                from core.image_vision_router import analyze_cloud_image
 
-                            result = await analyze_cloud_image(image_bytes)
-                            if result.get("success"):
-                                extra["image_analysis"] = result
-                                extra["has_image"] = True
-                                has_media = True
-                                desc = result.get("description") or "图片"
-                                content = f"[回复图片: {desc[:100]}] {content}"
-                                analyzed_str = True
-                                logger.info(f"[{self.platform_id}] 引用图片(CQ)分析完成: {desc[:50]}...")
-                                break
-                            analysis_error = str(result.get("error_message") or result.get("description") or "视觉模型未返回有效结果")
-                        except Exception as e:
-                            analysis_error = str(e)
-                            logger.warning(f"[{self.platform_id}] 引用图片(CQ)视觉分析失败: {e}")
-                    if not analyzed_str:
-                        content = f"[回复图片] {content}"
-                        extra["image_analysis_error"] = analysis_error or "引用图片未能完成视觉分析"
+                                result = await analyze_cloud_image(image_bytes)
+                                if result.get("success"):
+                                    extra["image_analysis"] = result
+                                    extra["has_image"] = True
+                                    has_media = True
+                                    desc = result.get("description") or "图片"
+                                    content = f"[回复图片: {desc[:100]}] {content}"
+                                    analyzed_str = True
+                                    logger.info(f"[{self.platform_id}] 引用图片(CQ)分析完成: {desc[:50]}...")
+                                    break
+                                analysis_error = str(
+                                    result.get("error_message")
+                                    or result.get("description")
+                                    or "视觉模型未返回有效结果"
+                                )
+                            except Exception as e:
+                                analysis_error = str(e)
+                                logger.warning(f"[{self.platform_id}] 引用图片(CQ)视觉分析失败: {e}")
+                        if not analyzed_str:
+                            content = f"[回复图片] {content}"
+                            extra["image_analysis_error"] = analysis_error or "引用图片未能完成视觉分析"
             else:
                 logger.warning(f"[{self.platform_id}] 引用获取失败: id={reply_id}")
 
