@@ -307,6 +307,47 @@ def test_default_detection_still_follows_identity_and_emotion(monkeypatch):
     assert calls, "开启身份时必须检测人脸"
 
 
+def test_pose_history_uses_the_camera_key_for_autonomous_readers(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        local_camera._pose_sequence,
+        "history",
+        lambda **kwargs: seen.update(kwargs) or [],
+    )
+    pose = {"keypoints": [{"x": 0.5, "y": 0.5, "confidence": 0.9}] * 17}
+
+    local_camera.classify_pose_action(None, pose, pose_key=7)
+
+    assert seen["key"] == 7
+
+
+def test_pose_preprocessing_maps_letterboxed_points_back_to_source(monkeypatch):
+    class _Input:
+        shape = [1, 192, 192, 3]
+
+    class _Session:
+        def get_inputs(self):
+            return [_Input()]
+
+    monkeypatch.setattr(local_camera, "_session", lambda _feature: _Session())
+
+    captured = {}
+
+    def fake_run(_session, tensor):
+        captured["tensor"] = tensor
+        points = [[0.125, 0.5, 0.9]] * 17
+        return [local_camera.np.asarray([[points]], dtype=local_camera.np.float32)]
+
+    monkeypatch.setattr(local_camera, "_run", fake_run)
+    from PIL import Image
+
+    pose = local_camera._pose(Image.new("RGB", (640, 480), (120, 120, 120)))
+
+    assert pose["keypoints"][0]["x"] == pytest.approx(0.5, abs=0.01)
+    assert pose["keypoints"][0]["y"] == pytest.approx(0.0, abs=0.01)
+    assert captured["tensor"].shape == (1, 192, 192, 3)
+
+
 def test_a_turned_head_shows_as_a_nose_offset():
     frontal = expression_signals(_face(nose_shift=0.0))
     turned = expression_signals(_face(nose_shift=0.6))

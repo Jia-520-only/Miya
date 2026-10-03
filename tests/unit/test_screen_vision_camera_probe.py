@@ -94,6 +94,19 @@ class _FakeCv2:
         return capture
 
 
+class _BackendAwareFakeCv2(_FakeCv2):
+    def VideoCapture(self, index, backend=None):
+        self.opens.append(index)
+        if backend == self.CAP_DSHOW:
+            capture = _Capture(frame=None)
+        elif backend == self.CAP_MSMF:
+            capture = _Capture(frame=_Frame())
+        else:
+            capture = _Capture(opened=False)
+        self.captures.append(capture)
+        return capture
+
+
 def _prepare(monkeypatch, fake) -> None:
     monkeypatch.setitem(sys.modules, "cv2", fake)
     monkeypatch.setattr(camera_devices, "PROBE_ATTEMPTS", 1)
@@ -128,6 +141,18 @@ def test_a_release_that_raises_does_not_erase_a_failed_probe(monkeypatch):
 
     assert result == {"index": 3, "available": False, "usable": False,
                       "name": "", "reason": "该索引没有可用摄像头"}
+
+
+def test_probe_continues_after_a_dark_backend(monkeypatch):
+    """A virtual camera may be dark in DSHOW but live in MSMF."""
+    fake = _BackendAwareFakeCv2({0: "usable"})
+    _prepare(monkeypatch, fake)
+
+    result = camera_devices._probe_index(fake, 0, 640, 480)
+
+    assert result["usable"] is True
+    assert result["backend"] == "msmf"
+    assert len(fake.captures) == 2
 
 
 def test_discovery_still_reports_the_inventory(monkeypatch):

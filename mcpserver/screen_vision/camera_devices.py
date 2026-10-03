@@ -27,6 +27,10 @@ PROBE_ATTEMPTS = int(os.getenv("MIYA_CAMERA_PROBE_ATTEMPTS", "4"))
 PROBE_INTERVAL_SECONDS = float(os.getenv("MIYA_CAMERA_PROBE_INTERVAL", "0.12"))
 MAX_INDEX = int(os.getenv("MIYA_CAMERA_MAX_INDEX", "6"))
 DARK_FRAME_MEAN = float(os.getenv("MIYA_CAMERA_BLANK_MEAN", "4.0"))
+# Phone-as-webcam bridges can display a Windows permission prompt only after
+# opening the device. Give the user a real chance to approve it during the
+# inventory probe instead of returning a black result after four quick reads.
+VIRTUAL_CAMERA_STARTUP_GRACE_SECONDS = float(os.getenv("MIYA_VIRTUAL_CAMERA_STARTUP_GRACE", "12.0"))
 # How long a device that could not be opened at all is left alone. A camera whose
 # DirectShow pins refuse to connect blocks every open attempt for seconds, and
 # repeating that on each scan is both slow and the one call that has taken this
@@ -183,6 +187,12 @@ def _probe_index(cv2, index: int, width: int, height: int, name: str = "") -> di
 
 def _probe_index_unlocked(cv2, index: int, width: int, height: int, name: str = "") -> dict[str, Any]:
     """Open one index, read a frame, and classify the result."""
+    dark_results: list[dict[str, Any]] = []
+    no_frame_results: list[dict[str, Any]] = []
+    virtual_deadline = (
+        time.monotonic() + max(0.0, VIRTUAL_CAMERA_STARTUP_GRACE_SECONDS)
+        if is_virtual_name(name) else 0.0
+    )
     for backend_name, backend in _backends():
         capture = None
         try:
@@ -192,28 +202,35 @@ def _probe_index_unlocked(cv2, index: int, width: int, height: int, name: str = 
             capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
             capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
             frame = None
-            for _ in range(max(1, PROBE_ATTEMPTS)):
+            attempts = 0
+            while attempts < max(1, PROBE_ATTEMPTS) or (
+                virtual_deadline and time.monotonic() < virtual_deadline
+            ):
+                attempts += 1
                 ok, candidate = capture.read()
                 if ok and candidate is not None and getattr(candidate, "size", 0):
                     frame = candidate
-                    break
-                time.sleep(PROBE_INTERVAL_SECONDS)
+                    if float(candidate.mean()) >= DARK_FRAME_MEAN:
+                        break
+                if virtual_deadline and time.monotonic() < virtual_deadline:
+                    time.sleep(PROBE_INTERVAL_SECONDS)
             if frame is None:
                 reported = ""
                 try:
                     reported = str(capture.getBackendName() or "")
                 except Exception:
                     reported = ""
-                return {
+                no_frame_results.append({
                     "index": index, "available": True, "usable": False,
                     "name": name,
                     "backend": backend_name,
                     "reason": f"设备能打开但没有返回任何画面（后端 {backend_name}{'/' + reported if reported else ''}）"
                               "：通常是设备没被真正推流，或已被别的程序独占",
-                }
+                })
+                continue
             mean = float(frame.mean())
             usable = bool(mean >= DARK_FRAME_MEAN)
-            return {
+            result = {
                 "index": index,
                 "available": True,
                 "usable": usable,
@@ -225,11 +242,22 @@ def _probe_index_unlocked(cv2, index: int, width: int, height: int, name: str = 
                 "reason": "" if usable else _blind_reason(
                     frame, backend_name, mean, name),
             }
+            if usable:
+                return result
+            # A virtual camera can be black on DirectShow while producing a
+            # real frame through Media Foundation, so do not stop at the first
+            # openable-but-dark backend. Keep the best diagnostic if all paths
+            # are dark, but give every backend a chance to prove it works.
+            dark_results.append(result)
         except Exception as exc:  # noqa: BLE001 - a broken device must not break discovery
-            return {"index": index, "available": False, "usable": False,
-                    "name": name, "backend": backend_name, "reason": f"探测失败: {exc}"}
+            no_frame_results.append({"index": index, "available": False, "usable": False,
+                                     "name": name, "backend": backend_name, "reason": f"探测失败: {exc}"})
         finally:
             _safe_release(capture)
+    if dark_results:
+        return max(dark_results, key=lambda item: float(item.get("luminance") or 0.0))
+    if no_frame_results:
+        return no_frame_results[-1]
     return {"index": index, "available": False, "usable": False,
             "name": name, "reason": "该索引没有可用摄像头"}
 

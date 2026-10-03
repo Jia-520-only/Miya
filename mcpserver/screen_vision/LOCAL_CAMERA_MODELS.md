@@ -88,6 +88,10 @@ MoveNet singlepose lightning v4。执行前请阅读 `model_catalog.json` 中的
 打开成功，但只返回全黑帧**（手机息屏时就是这种情况），因此探测结果里带 `usable` 与
 `reason` 两个字段。
 
+Windows 的手机虚拟摄像头可能在打开设备后才弹出授权提示。探测会为被识别为虚拟摄像头的
+设备等待最多 12 秒（可用环境变量 `MIYA_VIRTUAL_CAMERA_STARTUP_GRACE` 调整），并继续尝试
+DirectShow 与 Media Foundation；某一个后端先返回黑帧，不再代表整台手机摄像头不可用。
+
 `mcpserver/screen_vision/camera_manager.py` 在这个探测之上做了三件事：
 
 1. **持续重扫**：暂不可用的设备默认每 45 秒（`MIYA_CAMERA_RESCAN_SECONDS`）重新探测一次。
@@ -1262,6 +1266,5 @@ key=f"camera:voice:{target_id}:{self._vision_voice_seq}"
 三个字段：`mouth_open_ratio`、`mouth_baseline_ratio`、`mouth_open_threshold`。
 如果 `mouth_open_ratio` 长期贴着阈值、而 `lower_face_dark_ratio` 缺失，那就是误判，
 该改的是"暗区不可用时不轻易下结论"，而不是继续调数字。
-
 
 

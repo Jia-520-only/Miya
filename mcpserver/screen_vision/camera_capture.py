@@ -11,6 +11,7 @@ import base64
 import logging
 import os
 import platform
+import time
 from typing import Any
 
 logger = logging.getLogger("screen_vision.camera_capture")
@@ -29,6 +30,10 @@ except ImportError:  # pragma: no cover - handled at call sites
 # delivering - a sleeping phone, or another program holding it. Kept in step with
 # camera_stream.BLANK_FRAME_MEAN so both paths agree on what "no picture" means.
 BLANK_FRAME_MEAN = float(os.getenv("MIYA_CAMERA_BLANK_MEAN", "4.0"))
+# Windows' phone-as-webcam bridge can show a permission prompt after the
+# virtual device has already opened. Keep that device alive long enough for the
+# user to approve it instead of treating the first black frames as final.
+VIRTUAL_CAMERA_STARTUP_GRACE_SECONDS = float(os.getenv("MIYA_VIRTUAL_CAMERA_STARTUP_GRACE", "12.0"))
 
 
 def make_thumbnail(frame, *, max_width: int = 160, quality: int = 70) -> str:
@@ -139,6 +144,15 @@ def _open_camera_unlocked(index: int, *, width: int, height: int, warmup: int = 
         )
 
     last_reason = "没有可用的采集后端"
+    try:
+        from .camera_names import is_virtual_name, name_for_index
+
+        device_name = name_for_index(index)
+        is_virtual = is_virtual_name(device_name)
+    except Exception:  # noqa: BLE001 - friendly names are optional
+        device_name = ""
+        is_virtual = False
+    startup_deadline = time.monotonic() + max(0.0, VIRTUAL_CAMERA_STARTUP_GRACE_SECONDS) if is_virtual else 0.0
     for name, flag in _backend_candidates():
         capture = None
         try:
@@ -151,9 +165,13 @@ def _open_camera_unlocked(index: int, *, width: int, height: int, warmup: int = 
             capture.set(cv2.CAP_PROP_FRAME_HEIGHT, int(height))
             brightest = 0.0
             frame = None
-            for _ in range(max(3, int(warmup))):
+            attempts = 0
+            while attempts < max(3, int(warmup)) or (is_virtual and time.monotonic() < startup_deadline):
+                attempts += 1
                 ok, candidate = capture.read()
                 if not ok or candidate is None or not getattr(candidate, "size", 0):
+                    if is_virtual and time.monotonic() < startup_deadline:
+                        time.sleep(0.15)
                     continue
                 luminance = _mean_luminance(candidate)
                 if luminance > brightest:
@@ -161,6 +179,8 @@ def _open_camera_unlocked(index: int, *, width: int, height: int, warmup: int = 
                     frame = candidate
                 if luminance >= BLANK_FRAME_MEAN:
                     return capture, name
+                if is_virtual and time.monotonic() < startup_deadline:
+                    time.sleep(0.15)
             if frame is None:
                 last_reason = f"{name} 打开了但没有画面"
             else:

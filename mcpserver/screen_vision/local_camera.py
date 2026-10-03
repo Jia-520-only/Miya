@@ -566,12 +566,13 @@ def _emotion(face_image: Image.Image) -> dict[str, Any]:
 def _keypoints_from_bgr(frame: Any) -> list[dict[str, Any]]:
     """MoveNet keypoints for a raw BGR frame (an OpenCV array).
 
-    Shared by the PIL path and the persistent reader, which only ever has the
-    numpy frame, so the pose math exists once.
+    MoveNet is square-input, but webcam frames are commonly 16:9 or 4:3. The
+    persistent reader used to resize those frames directly to a square, which
+    stretched the body horizontally and made temporal action geometry unstable.
+    Keep the aspect ratio with centred padding, then map the returned points
+    back to the original frame coordinates.
     """
     session = _session("pose")
-    # The verified MoveNet conversion uses NHWC int32 pixels, unlike the
-    # NCHW float tensors used by the face models above.
     shape = session.get_inputs()[0].shape
     height = int(shape[1]) if isinstance(shape[1], int) else 192
     width = int(shape[2]) if isinstance(shape[2], int) else 192
@@ -579,22 +580,41 @@ def _keypoints_from_bgr(frame: Any) -> list[dict[str, Any]]:
         import cv2
     except ImportError:
         return []
-    resized = cv2.resize(np.asarray(frame), (width, height), interpolation=cv2.INTER_LINEAR)
+    source = np.asarray(frame)
+    if source.ndim != 3 or source.shape[2] < 3:
+        return []
+    source_height, source_width = source.shape[:2]
+    if source_height < 1 or source_width < 1:
+        return []
+    scale = min(width / source_width, height / source_height)
+    resized_width = max(1, int(round(source_width * scale)))
+    resized_height = max(1, int(round(source_height * scale)))
+    resized = cv2.resize(source[:, :, :3], (resized_width, resized_height), interpolation=cv2.INTER_LINEAR)
+    canvas = np.zeros((height, width, 3), dtype=resized.dtype)
+    offset_x = (width - resized_width) // 2
+    offset_y = (height - resized_height) // 2
+    canvas[offset_y:offset_y + resized_height, offset_x:offset_x + resized_width] = resized
     # MoveNet expects RGB; the reader and the one-shot capture both hand over BGR.
-    tensor = np.asarray(resized[:, :, ::-1], dtype=np.int32)[None, ...]
+    tensor = np.asarray(canvas[:, :, ::-1], dtype=np.int32)[None, ...]
     output = np.asarray(_run(session, tensor)[0]).reshape((-1, 3))
-    return [{"x": round(float(point[1]), 5), "y": round(float(point[0]), 5),
-             "confidence": round(float(point[2]), 4)} for point in output]
+    points: list[dict[str, Any]] = []
+    for point in output:
+        canvas_x = float(point[1]) * width
+        canvas_y = float(point[0]) * height
+        source_x = (canvas_x - offset_x) / scale / source_width
+        source_y = (canvas_y - offset_y) / scale / source_height
+        points.append({
+            "x": round(float(source_x), 5),
+            "y": round(float(source_y), 5),
+            "confidence": round(float(point[2]), 4),
+        })
+    return points
 
 
 def _pose(image: Image.Image) -> dict[str, Any]:
-    """MoveNet keypoints for a PIL frame, letterboxed to the model's input."""
-    session = _session("pose")
-    shape = session.get_inputs()[0].shape
-    height = int(shape[1]) if isinstance(shape[1], int) else 192
-    width = int(shape[2]) if isinstance(shape[2], int) else 192
-    canvas, _ratio, _offset_x, _offset_y = _letterbox(image, (width, height))
-    return {"keypoints": _keypoints_from_bgr(np.asarray(canvas)[:, :, ::-1])}
+    """MoveNet keypoints for a PIL frame, preserving its aspect ratio."""
+    frame = np.asarray(image.convert("RGB"), dtype=np.uint8)[:, :, ::-1]
+    return {"keypoints": _keypoints_from_bgr(frame)}
 
 
 def _keypoint(pose: dict[str, Any] | None, index: int) -> tuple[float, float, float] | None:
@@ -756,7 +776,12 @@ def pose_sequence_status() -> dict[str, Any]:
     return _pose_sequence.describe()
 
 
-def classify_pose_action(pose_history: list[dict[str, Any]] | None, current_pose: dict[str, Any]) -> dict[str, Any]:
+def classify_pose_action(
+    pose_history: list[dict[str, Any]] | None,
+    current_pose: dict[str, Any],
+    *,
+    pose_key: Any = -1,
+) -> dict[str, Any]:
     """Classify what Jia appears to be doing, from a short skeleton history.
 
     MoveNet supplies a stable 17-point skeleton but no temporal action label, so
@@ -770,7 +795,7 @@ def classify_pose_action(pose_history: list[dict[str, Any]] | None, current_pose
     fire on the autonomous observation loop.
     """
     supplied = [item for item in (pose_history or []) if isinstance(item, (dict, list))]
-    history = (supplied if supplied else _pose_sequence.history())[-11:]
+    history = (supplied if supplied else _pose_sequence.history(key=pose_key))[-11:]
     sequence = history + [current_pose]
 
     def point(index: int, item: dict[str, Any] | list[dict[str, Any]]) -> tuple[float, float, float] | None:
@@ -1484,7 +1509,11 @@ def analyze_local_frame(
         # Feed this reading back into the shared sequence as well, so whichever
         # path has frames keeps the history dense.
         _pose_sequence.record(observation["pose"], key=pose_key)
-        observation["action"] = classify_pose_action(pose_history, observation["pose"])
+        observation["action"] = classify_pose_action(
+            pose_history,
+            observation["pose"],
+            pose_key=pose_key,
+        )
     if hands:
         # What is *in* his hand, which the skeleton cannot say. Failure here is
         # reported and then ignored: hand reading is an extra sense, and losing it

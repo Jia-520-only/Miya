@@ -901,7 +901,11 @@ class VisionAgent:
                     # pose_key ties this reading to the shared pose sequence for
                     # this camera, so the temporal action reader sees the frames
                     # the persistent reader sampled between observations.
-                    analyze_local_frame, data_url, identity=identity_recognition, emotion=True, pose=True, faces=True,
+                    # The enabled path is the same local identity=True check
+                    # used before autonomous interpretation; never infer a
+                    # person's identity from an unrequested cloud result.
+                    analyze_local_frame, data_url, identity=bool(identity_recognition),
+                    emotion=True, pose=True, faces=True,
                     pose_key=index,
                 )
             except Exception as exc:  # noqa: BLE001
