@@ -59,6 +59,10 @@ class GenerationService:
                         "strategy_guidance": state.strategy_guidance,
                         "selected_model": state.selected_model,
                         "task_type": state.task_type,
+                        "memory_context": state.context_snapshot.prompt_text() if state.context_snapshot else "",
+                        "session_id": request.session_id,
+                        "user_id": str(request.user_id),
+                        "group_id": str(request.group_id),
                     },
                 )
                 state.response = response
@@ -108,6 +112,8 @@ class GenerationService:
 
         if state.emotion_context:
             parts.append(state.emotion_context)
+        if state.context_snapshot:
+            parts.append(state.context_snapshot.prompt_text())
 
         return "\n\n".join(parts)
 

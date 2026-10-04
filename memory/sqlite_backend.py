@@ -291,7 +291,7 @@ class SQLiteBackend(MemoryBackend):
                 conditions.append("user_id = ?")
                 params.append(query.user_id)
             if query.group_id:
-                conditions.append("group_id = ?")
+                conditions.append("COALESCE(NULLIF(NULLIF(group_id, ''), '0'), json_extract(metadata, '$.group_id'), '') = ?")
                 params.append(query.group_id)
             if query.platform:
                 conditions.append("platform = ?")
@@ -306,6 +306,33 @@ class SQLiteBackend(MemoryBackend):
             if query.session_id:
                 conditions.append("session_id = ?")
                 params.append(query.session_id)
+            if query.session_ids:
+                placeholders = ", ".join(["?"] * len(query.session_ids))
+                conditions.append(f"session_id IN ({placeholders})")
+                params.extend(query.session_ids)
+            if query.platforms:
+                placeholders = ", ".join(["?"] * len(query.platforms))
+                conditions.append(f"platform IN ({placeholders})")
+                params.extend(query.platforms)
+            group_expression = "COALESCE(NULLIF(NULLIF(group_id, ''), '0'), NULLIF(json_extract(metadata, '$.group_id'), '0'), '')"
+            visibility_expression = "COALESCE(json_extract(metadata, '$.visibility'), '')"
+            if query.private_only:
+                conditions.append(f"{group_expression} = ''")
+            if query.scope_user_ids or query.scope_group_id:
+                public = f"({visibility_expression} IN ('public', 'global') OR (user_id = 'global' AND {group_expression} = '' AND {visibility_expression} NOT IN ('private', 'owner', 'group')))"
+                if query.scope_group_id:
+                    scoped = f"({group_expression} = ? AND {visibility_expression} NOT IN ('private', 'owner')"
+                    params.append(query.scope_group_id)
+                    if query.scope_platforms:
+                        placeholders = ", ".join(["?"] * len(query.scope_platforms))
+                        scoped += f" AND platform IN ({placeholders})"
+                        params.extend(query.scope_platforms)
+                    scoped += ")"
+                else:
+                    placeholders = ", ".join(["?"] * len(query.scope_user_ids))
+                    scoped = f"user_id IN ({placeholders})"
+                    params.extend(query.scope_user_ids)
+                conditions.append(f"({public} OR {scoped})")
             if query.min_priority > 0:
                 conditions.append("priority >= ?")
                 params.append(query.min_priority)
@@ -398,10 +425,17 @@ class SQLiteBackend(MemoryBackend):
             where_clause = " AND ".join(conditions) if conditions else "1=1"
             limit_clause = f"LIMIT {query.limit}"
             offset_clause = f"OFFSET {query.offset}" if query.offset > 0 else ""
+            order_columns = {
+                "priority": "priority", "created_at": "created_at", "updated_at": "created_at",
+                "access_count": "access_count",
+            }
+            order_column = order_columns.get(query.sort_by, "priority")
+            order_direction = "ASC" if query.sort_order == "asc" else "DESC"
+            order_clause = f"{order_column} {order_direction}, id {order_direction}"
 
             sql = (
                 f"SELECT * FROM {self._table_name} WHERE {where_clause} "
-                f"ORDER BY {self._order_clause} {limit_clause} {offset_clause}"
+                f"ORDER BY {order_clause} {limit_clause} {offset_clause}"
             )
             rows = conn.execute(sql, params).fetchall()
             return [self._row_to_memory(row) for row in rows]

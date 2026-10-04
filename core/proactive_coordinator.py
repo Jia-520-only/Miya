@@ -77,6 +77,10 @@ class ProactiveCoordinator:
         self._send_timeout = 30.0
         self._decision_timeout = 30.0
         self._send_attempts = 1
+        self._context_provider = None
+
+    def set_context_provider(self, provider) -> None:
+        self._context_provider = provider
 
     def configure(
         self, *, ai_client=None, personality=None, send_callback=None,
@@ -336,7 +340,17 @@ class ProactiveCoordinator:
         # stalled every other source - a single slow reply was enough to make the
         # whole proactive system look dead. Nothing here needs the lock: the
         # quota is only consumed by ``_claim``, which is still atomic.
-        message = await self._decide_message(event)
+        decision_event = dict(event)
+        if self._context_provider:
+            try:
+                context = self._context_provider(target_id, chat_type, platform, event)
+                if inspect.isawaitable(context):
+                    context = await asyncio.wait_for(context, timeout=6)
+                if context:
+                    decision_event["memory_context"] = str(context)[:8000]
+            except Exception as exc:
+                logger.warning("[主动协调] 上下文读取失败，继续处理真实事件: %s", exc)
+        message = await self._decide_message(decision_event)
         if not message:
             logger.info("[主动协调] AI 判断无需通知 key=%s", key)
             return False

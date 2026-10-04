@@ -186,7 +186,7 @@ class IdentityResolver:
             if not canonical:
                 # 兼容 platform_userid 前缀形式 (qq_1523878699 / aiocqhttp_1523878699)
                 for alias, canon in self._alias_to_canonical.items():
-                    if uid.endswith(f"_{alias}") or uid.endswith(alias):
+                    if uid.endswith(f"_{alias}"):
                         canonical = canon
                         break
         return canonical or uid

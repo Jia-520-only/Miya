@@ -280,11 +280,11 @@ class ConversationContextManager:
         ]
         return any(p in user_input for p in recall_patterns)
 
-    async def get_conversation_context(self, session_id: str, user_id: str = "", current_input: str = "") -> List[Dict]:
+    async def get_conversation_context(
+        self, session_id: str, user_id: str = "", current_input: str = "", group_id: str = "", platform: str = "unknown"
+    ) -> List[Dict]:
         if not self.enable_conversation_context:
             return []
-
-        conversation_history_ready = self.memory_net and self.memory_net.conversation_history
 
         if current_input:
             self._update_topic_tracking(session_id, current_input)
@@ -303,59 +303,14 @@ class ConversationContextManager:
             max_messages = base_limit
             logger.debug(f"[对话上下文] 正常对话，加载{max_messages}条: {session_id}")
 
-        context = []
-        total_tokens = 0
+        from hub.context_builder import ConsumerRequest, ContextBuilder
 
-        if conversation_history_ready:
-            try:
-                messages = await self.memory_net.conversation_history.get_history(session_id, limit=max_messages)
-
-                if messages:
-                    recent_messages = messages[-max_messages:] if len(messages) > max_messages else messages
-                    logger.debug(f"[对话上下文] MemoryNet 加载对话历史: {len(recent_messages)} 条")
-
-                    for msg in recent_messages:
-                        token_estimate = count_message_tokens(msg.content)
-                        if total_tokens + token_estimate > self.conversation_context_max_tokens:
-                            break
-                        context.append(
-                            {
-                                "role": msg.role,
-                                "content": msg.content,
-                                "timestamp": msg.timestamp,
-                                "metadata": msg.metadata or {},
-                            }
-                        )
-                        total_tokens += token_estimate
-            except Exception as e:
-                logger.debug(f"[对话上下文] MemoryNet 加载失败: {e}")
-
-        # 回退: MiyaMemoryCore 统一记忆后端（SQLite+JSON，跨平台回溯）
-        if not context and user_id:
-            try:
-                from memory import get_user_dialogue
-
-                memories = await get_user_dialogue(user_id=user_id, limit=max_messages)
-                if memories:
-                    for m in memories:
-                        content = getattr(m, "content", "")
-                        token_estimate = count_message_tokens(content)
-                        if total_tokens + token_estimate > self.conversation_context_max_tokens:
-                            break
-                        context.append(
-                            {
-                                "role": getattr(m, "role", "user"),
-                                "content": content,
-                                "timestamp": getattr(m, "created_at", ""),
-                            }
-                        )
-                        total_tokens += token_estimate
-                    logger.info(f"[对话上下文] MiyaMemoryCore 加载: user={user_id}, count={len(context)}")
-            except Exception as e:
-                logger.debug(f"[对话上下文] MiyaMemoryCore 加载失败: {e}")
-                logger.error(f"[对话上下文] 获取对话历史失败: {e}")
-
-        return context
+        allocation = await ContextBuilder(self.memory_net).build(
+            session_id=session_id, user_id=user_id, group_id=group_id, platform=platform,
+            current_input=current_input,
+            consumers=[ConsumerRequest("conversation", max_messages=max_messages, max_tokens=self.conversation_context_max_tokens)],
+        )
+        return allocation.get("conversation")
 
     def _is_deep_discussion(self, user_input: str) -> bool:
         """

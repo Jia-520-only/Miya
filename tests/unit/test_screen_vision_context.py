@@ -32,6 +32,9 @@ def _clean_stream():
     from mcpserver.screen_vision.presence import get_presence_tracker
 
     def clear_all() -> None:
+        from core.vision_context import get_vision_context
+
+        get_vision_context().clear()
         get_vision_stream().clear()
         get_presence_tracker().reset()
         get_activity_tracker().reset()
@@ -67,6 +70,17 @@ def _record_observation(**kwargs) -> None:
 def test_no_observation_at_all_produces_no_card():
     """A machine with no camera must not get a phantom "you cannot see" note."""
     assert vision_context.vision_context_card() == ""
+
+
+def test_browser_observation_is_shared_without_claiming_the_camera_is_blind():
+    from core.vision_context import get_vision_context
+
+    moment = time.time()
+    get_vision_context().add({"source": "camera", "summary": "浏览器看到人在敲键盘", "timestamp": moment})
+    card = vision_context.vision_context_card(now=moment)
+    assert "浏览器看到人在敲键盘" in card
+    assert "现在看不到" not in card
+    assert "浏览器看到人在敲键盘" not in vision_context.vision_context_card(now=moment + 181)
 
 
 def test_the_card_carries_her_reading_face_and_intents():

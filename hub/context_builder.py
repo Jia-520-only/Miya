@@ -73,6 +73,8 @@ class ContextBuilder:
         consumers: Optional[List[ConsumerRequest]] = None,
         needs_recall: bool = False,
         is_deep_discussion: bool = False,
+        group_id: str = "",
+        platform: str = "unknown",
     ) -> ContextAllocation:
         if not consumers:
             consumers = [
@@ -87,7 +89,9 @@ class ContextBuilder:
         elif is_deep_discussion:
             max_needed = max(max_needed, 60)
 
-        raw_messages = await self._load_messages(session_id, user_id, max_needed)
+        raw_messages = await self._load_messages(
+            session_id, user_id, max_needed, group_id=group_id, platform=platform,
+        )
 
         if not raw_messages:
             return ContextAllocation(
@@ -108,44 +112,30 @@ class ContextBuilder:
 
         return allocation
 
-    async def _load_messages(self, session_id: str, user_id: str = "", limit: int = 50) -> List[Any]:
-        """加载消息: MemoryNet 文件缓存 → MiyaMemoryCore 统一后端 双层回退"""
-        # 第一层: MemoryNet conversation_history（快速文件缓存）
-        if self._memory_net and self._memory_net.conversation_history:
-            try:
-                messages = await self._memory_net.conversation_history.get_history(session_id, limit=limit)
-                if messages:
-                    if len(messages) > limit:
-                        messages = messages[-limit:]
-                    return messages
-            except Exception as e:
-                logger.error(f"[ContextBuilder] MemoryNet 加载消息失败: {e}")
+    async def _load_messages(
+        self, session_id: str, user_id: str = "", limit: int = 50, group_id: str = "", platform: str = "unknown"
+    ) -> List[Any]:
+        """通过统一上下文装配器合并缓存、会话、用户和群聊历史。"""
+        from memory.context_assembler import ContextAssembler
+        from memory.context_identity import ContextIdentity
 
-        # 第二层: MiyaMemoryCore 统一记忆后端（跨平台 SQLite+JSON）
-        if user_id:
-            try:
-                from memory import get_user_dialogue
-
-                memories = await get_user_dialogue(user_id=user_id, limit=limit)
-                if memories:
-                    result = []
-                    for m in memories:
-                        result.append(
-                            _MemoryItemWrapper(
-                                role=getattr(m, "role", "user"),
-                                content=getattr(m, "content", ""),
-                                timestamp=getattr(m, "created_at", ""),
-                                metadata=getattr(m, "metadata", {}),
-                            )
-                        )
-                    if len(result) > limit:
-                        result = result[-limit:]
-                    logger.info(f"[ContextBuilder] MiyaMemoryCore 加载: user={user_id}, count={len(result)}")
-                    return result
-            except Exception as e:
-                logger.error(f"[ContextBuilder] MiyaMemoryCore 加载消息失败: {e}")
-
-        return []
+        default_identity = ContextIdentity.resolve(user_id=user_id, group_id=group_id, platform=platform)
+        identity = ContextIdentity.resolve(
+            user_id=user_id,
+            group_id=group_id,
+            platform=platform,
+            session_id="" if session_id in default_identity.session_ids else session_id,
+        )
+        messages = await ContextAssembler(self._memory_net).load_dialogue(identity, limit=limit)
+        return [
+            _MemoryItemWrapper(
+                role=message.role,
+                content=message.content,
+                timestamp=message.timestamp,
+                metadata=message.metadata,
+            )
+            for message in messages
+        ]
 
     def _allocate_slice(
         self,
@@ -158,7 +148,7 @@ class ContextBuilder:
         result = []
         total_tokens = 0
 
-        for msg in window:
+        for msg in reversed(window):
             content = getattr(msg, "content", "")
             if consumer.per_message_max_chars > 0:
                 content = content[: consumer.per_message_max_chars]
@@ -179,6 +169,7 @@ class ContextBuilder:
             result.append(entry)
             total_tokens += token_count
 
+        result.reverse()
         return ContextSlice(
             consumer=consumer.consumer,
             messages=result,

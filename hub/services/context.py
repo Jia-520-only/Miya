@@ -34,7 +34,9 @@ class ProcessRequest:
 
     @property
     def is_group(self) -> bool:
-        return bool(self.group_id and self.group_id != 0)
+        from memory.context_identity import normalize_group_id
+
+        return bool(normalize_group_id(self.group_id))
 
     @property
     def target_id(self) -> str:
@@ -69,6 +71,7 @@ class ProcessState:
     # 记忆
     memory_stored: bool = False
     memory_id: str = ""
+    context_snapshot: Any = None
 
 
 @dataclass

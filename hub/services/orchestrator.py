@@ -42,7 +42,7 @@ class MiyaOrchestrator:
         self._initialized = False
         self._legacy_deps: dict[str, Any] = {}
 
-    def wire_from_legacy(self, **deps: Any) -> "MiyaOrchestrator":
+    def wire_from_legacy(self, **deps: Any) -> MiyaOrchestrator:
         """
         从旧 DecisionHub 的依赖中接线
 
@@ -129,6 +129,15 @@ class MiyaOrchestrator:
 
             state = await self.decision.process(request, state)
 
+            from memory.context_assembler import ContextAssembler
+            from memory.context_identity import ContextIdentity
+
+            identity = ContextIdentity.resolve(
+                request.user_id, request.group_id, request.platform, request.session_id,
+            )
+            state.context_snapshot = await ContextAssembler(self.memory.memory_net).build(
+                identity, query=request.content,
+            )
             state = await self.generation.process(request, state)
 
             state = await self.memory.store_output(request, state)
@@ -170,14 +179,22 @@ class MiyaOrchestrator:
         else:
             content = str(raw_content)
 
+        from memory.context_identity import ContextIdentity
+
+        identity = ContextIdentity.resolve(
+            perception.get("user_id", perception.get("sender_id", "")),
+            perception.get("group_id", 0),
+            source,
+            perception.get("session_id", ""),
+        )
         return ProcessRequest(
             content=content,
             raw_perception=perception,
             platform=source,
             sender_name=perception.get("sender_name", "用户"),
-            user_id=perception.get("user_id", perception.get("sender_id", "")),
-            group_id=perception.get("group_id", 0),
-            session_id=perception.get("session_id", perception.get("group_id", source)),
+            user_id=identity.user_id or perception.get("user_id", perception.get("sender_id", "")),
+            group_id=identity.group_id,
+            session_id=identity.session_id,
             message_type=perception.get("message_type", "text"),
         )
 

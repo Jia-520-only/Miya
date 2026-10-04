@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import threading
 import time
+import math
 from collections import deque
 from typing import Any
 
@@ -23,6 +24,13 @@ class VisionContextStore:
     def add(self, event: dict[str, Any]) -> dict[str, Any]:
         safe = dict(event)
         safe["timestamp"] = float(safe.get("timestamp") or time.time())
+        if not math.isfinite(safe["timestamp"]):
+            raise ValueError("Visual observation time must be finite")
+        safe["observed_at"] = safe["timestamp"]
+        safe["expires_at"] = float(safe.get("expires_at") or safe["timestamp"] + 180.0)
+        if not math.isfinite(safe["expires_at"]):
+            raise ValueError("Visual observation expiry must be finite")
+        safe["visibility"] = "owner"
         safe["source"] = str(safe.get("source") or "unknown")
         safe["summary"] = str(safe.get("summary") or "").strip()[:1000]
         safe["kind"] = str(safe.get("kind") or "observation")
@@ -34,7 +42,7 @@ class VisionContextStore:
                 previous
                 and previous.get("source") == safe.get("source")
                 and previous.get("summary") == safe.get("summary")
-                and safe["timestamp"] - float(previous.get("timestamp", 0)) < 2.0
+                and 0 <= safe["timestamp"] - float(previous.get("timestamp", 0)) < 2.0
             ):
                 return previous
             self._events.append(safe)
@@ -51,17 +59,28 @@ class VisionContextStore:
         events = self.recent(source=source, limit=1)
         return events[0] if events else None
 
-    def build_card(self, *, source: str | None = None, limit: int = 8) -> str:
+    def clear(self) -> None:
+        with self._lock:
+            self._events.clear()
+
+    def build_card(
+        self, *, source: str | None = None, limit: int = 8, max_age: float = 180.0, now: float | None = None
+    ) -> str:
         """Build a compact prompt card from derived observations only."""
         from datetime import datetime
 
         events = self.recent(source=source, limit=limit)
+        moment = time.time() if now is None else now
+        events = [event for event in events if (
+            0 <= moment - float(event["timestamp"]) <= max_age
+            and moment <= float(event.get("expires_at", event["timestamp"] + max_age))
+        )]
         if not events:
             return ""
         title = "[弥娅的摄像头感知]" if source == "camera" else "[弥娅的视觉上下文]"
         lines = [title]
         for event in events:
-            stamp = datetime.fromtimestamp(float(event["timestamp"])).strftime("%H:%M:%S")
+            stamp = datetime.fromtimestamp(float(event["timestamp"])).strftime("%m-%d %H:%M:%S")
             summary = event.get("summary") or "（没有可用摘要）"
             mode = event.get("mode")
             suffix = f" · {mode}" if mode else ""

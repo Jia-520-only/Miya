@@ -356,6 +356,7 @@ class CognitiveEngine:
         limit: int = 5,
         user_id: Optional[str] = None,
         group_id: Optional[str] = None,
+        platform: Optional[str] = None,
     ) -> List[MemoryItem]:
         """检索相关记忆
 
@@ -419,6 +420,11 @@ class CognitiveEngine:
                 limit=limit * 3,
             )
 
+        if group_id and platform:
+            from core.unified_platform.platform_type import MiyaPlatform
+            from memory.context_identity import platform_family
+
+            query.scope_platforms = sorted(MiyaPlatform.qq_family()) if platform_family(platform) == "qq" else [platform]
         all_memories = await self.memory_core.retrieve(query, user_id=user_id, group_id=group_id)
 
         # 2.5 【新增】专门搜索记忆锚点（优先级最高）
@@ -434,7 +440,7 @@ class CognitiveEngine:
         # 检查是否是询问个人信息的模式（从配置文件加载）
         is_personal_query = any(pattern in user_input_lower for pattern in self.personal_patterns)
 
-        if need_anchor_search or is_personal_query:
+        if (need_anchor_search or is_personal_query) and not group_id:
             logger.info("[认知引擎] 检测到个人信息查询，优先搜索记忆锚点")
 
             # 搜索记忆锚点（全局检索，从配置文件加载的标签）
@@ -445,7 +451,7 @@ class CognitiveEngine:
                         tags=[tag],
                         limit=limit * 2,
                     )
-                    anchor_results = await self.memory_core.retrieve(anchor_query)
+                    anchor_results = await self.memory_core.retrieve(anchor_query, user_id=user_id)
                     if anchor_results:
                         logger.info(f"[认知引擎] 找到 {len(anchor_results)} 条记忆锚点 (标签: {tag})")
                         return anchor_results[:limit]
@@ -500,6 +506,7 @@ class CognitiveEngine:
                     start_time=temporal_range.start if temporal_range else None,
                     end_time=temporal_range.end if temporal_range else None,
                 )
+                fallback_query.scope_platforms = query.scope_platforms
                 fallback_results = await self.memory_core.retrieve(fallback_query)
                 if fallback_results:
                     all_memories.extend(fallback_results)
@@ -698,6 +705,7 @@ class CognitiveEngine:
         limit: int = 5,
         user_id: Optional[str] = None,
         group_id: Optional[str] = None,
+        platform: Optional[str] = None,
     ) -> str:
         """构建记忆上下文文本
 
@@ -714,7 +722,7 @@ class CognitiveEngine:
         # 确保内存核心已初始化
         await self._ensure_memory_core_initialized()
 
-        memories = await self.retrieve(user_input, conversation_history, limit, user_id, group_id)
+        memories = await self.retrieve(user_input, conversation_history, limit, user_id, group_id, platform)
 
         if not memories:
             return ""

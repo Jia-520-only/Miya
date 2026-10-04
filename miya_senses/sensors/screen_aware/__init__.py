@@ -148,6 +148,7 @@ class ScreenAwareProactive:
         self._ocr_engine: Any = None
         self._ocr_enabled: bool = True
         self._ocr_loading: bool = False
+        self._ocr_error: str = ""
         self._ocr_inference_lock = threading.Lock()
         self._ocr_grace: float = max(0.0, float(ocr_startup_grace_seconds))
         self._init_time: float = time.time()
@@ -442,6 +443,7 @@ class ScreenAwareProactive:
                     logger.info("[ScreenAware] PaddleOCR 本地引擎后台初始化完成")
                 except Exception as exc:
                     global _OCR_INIT_WARNED
+                    self._ocr_error = f"{type(exc).__name__}: {exc}"[:300]
                     if not _OCR_INIT_WARNED:
                         logger.warning(f"[ScreenAware] PaddleOCR 后台初始化失败: {exc}")
                         _OCR_INIT_WARNED = True
@@ -454,6 +456,7 @@ class ScreenAwareProactive:
             return None
         except Exception as exc:
             global _OCR_INIT_WARNED
+            self._ocr_error = f"{type(exc).__name__}: {exc}"[:300]
             if not _OCR_INIT_WARNED:
                 logger.warning(f"[ScreenAware] PaddleOCR 初始化失败: {exc}")
                 _OCR_INIT_WARNED = True
@@ -959,12 +962,24 @@ class ScreenAwareProactive:
         return "\n".join(lines) if len(lines) > 1 else ""
 
     def get_stats(self) -> dict:
+        if self._ocr_engine is not None:
+            ocr_status = "ready"
+        elif self._ocr_loading:
+            ocr_status = "loading"
+        elif self._ocr_error:
+            ocr_status = "unavailable"
+        elif self._ocr_enabled:
+            ocr_status = "waiting"
+        else:
+            ocr_status = "disabled"
         return {
             "total_observations": len(self._observations),
             "vision_calls_today": self._vision_count_today,
             "vision_quota_remaining": max(0, self.vision_daily_quota - self._vision_count_today),
             "light_count_since_vision": self._light_count_since_vision,
             "ocr_available": self._ocr_enabled and self._ocr_engine is not None,
+            "ocr_status": ocr_status,
+            "ocr_error": self._ocr_error,
             "current_interval": self._current_interval,
             "tier_distribution": {
                 str(t): sum(1 for o in self._observations[-100:] if o.analysis_tier == t) for t in (0, 1, 15, 2, 3)
@@ -1027,8 +1042,27 @@ def get_screen_aware(**kwargs) -> ScreenAwareProactive:
     if _global_screen_aware is None:
         _global_screen_aware = ScreenAwareProactive(**kwargs)
     elif kwargs:
+        # The instance is often created by a context read before the daemon
+        # finishes injecting YAML configuration.  Update every configurable
+        # field here; previously only `enabled` and `vision_mode` changed, so
+        # the first caller's defaults silently won for interval/OCR settings.
         if "vision_mode" in kwargs:
             _global_screen_aware.set_vision_mode(kwargs["vision_mode"])
         if "enabled" in kwargs:
-            _global_screen_aware.enabled = kwargs["enabled"]
+            _global_screen_aware.enabled = bool(kwargs["enabled"])
+        if "min_interval_seconds" in kwargs:
+            _global_screen_aware.min_interval = max(5.0, float(kwargs["min_interval_seconds"]))
+            if not _global_screen_aware.adaptive_framerate:
+                _global_screen_aware._current_interval = _global_screen_aware.min_interval
+        if "adaptive_framerate" in kwargs:
+            _global_screen_aware.adaptive_framerate = bool(kwargs["adaptive_framerate"])
+        if "model_dir" in kwargs:
+            model_dir = str(kwargs["model_dir"] or "")
+            if model_dir != _global_screen_aware._model_dir:
+                _global_screen_aware._model_dir = model_dir
+                _global_screen_aware._ocr_engine = None
+                _global_screen_aware._ocr_error = ""
+                _global_screen_aware._ocr_enabled = True
+        if "ocr_startup_grace_seconds" in kwargs:
+            _global_screen_aware._ocr_grace = max(0.0, float(kwargs["ocr_startup_grace_seconds"]))
     return _global_screen_aware

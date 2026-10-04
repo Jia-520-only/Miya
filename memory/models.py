@@ -232,8 +232,14 @@ class MemoryQuery:
     # 多身份等价过滤（跨平台别名展开后使用，优先级高于 user_id）
     user_ids: Optional[List[str]] = None
     session_id: Optional[str] = None
+    session_ids: Optional[List[str]] = None
     group_id: Optional[str] = None
     platform: Optional[str] = None
+    platforms: Optional[List[str]] = None
+    private_only: bool = False
+    scope_user_ids: Optional[List[str]] = None
+    scope_group_id: Optional[str] = None
+    scope_platforms: Optional[List[str]] = None
 
     # 层级过滤
     level: Optional[MemoryLevel] = None

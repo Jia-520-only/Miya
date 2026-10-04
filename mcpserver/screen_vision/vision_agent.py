@@ -951,7 +951,7 @@ class VisionAgent:
                     logger.debug("[VisionAgent] 记录摄像头读数失败", exc_info=True)
             return True
 
-        async def observe_once(index: int) -> None:
+        async def observe_once(index: int) -> bool:
             """Open one camera, read one frame, release it before the next.
 
             This is the only way to reach a camera the bus is shared with: while
@@ -977,9 +977,20 @@ class VisionAgent:
                     index, luminance=None, usable=False, openable=opened, reason=detail,
                 )
                 failures.append({"index": index, "message": text})
-                return
+                if policy == "single" and source_selection_locked:
+                    logger.warning(
+                        "[VisionAgent] single 模式未切换摄像头: index=%s name=%s source_id=%s reason=%s",
+                        index,
+                        manager.name_for(index),
+                        (manager.sources().get(index).to_dict().get("source_id")
+                         if manager.sources().get(index) is not None else "(unknown)"),
+                        detail,
+                    )
+                return False
             if await analyze(index, captured["image_data"], str(captured.get("thumbnail") or ""), "backend"):
                 looked.append(index)
+                return True
+            return False
 
         handled: set[Any] = set()
         # The browser owns whatever it is previewing; its frame is authoritative,
@@ -1005,6 +1016,7 @@ class VisionAgent:
                 browser_key = str(browser.get("browser_source_id") or f"browser:{index}")
                 handled.add(browser_key)
                 if index >= 0:
+                    handled.add(index)
                     pool.publish_browser_frame(
                         index,
                         browser["data_url"],
@@ -1061,12 +1073,37 @@ class VisionAgent:
                 ]
                 target = candidates[0] if candidates else None
             if target is not None and target not in handled:
+                success = False
                 cached = pool.latest_for_inference(target)
                 if cached is not None and cached.image_data:
-                    if await analyze(target, cached.image_data, cached.thumbnail, cached.owner):
+                    success = await analyze(target, cached.image_data, cached.thumbnail, cached.owner)
+                    if success:
                         looked.append(target)
                 else:
-                    await observe_once(int(target))
+                    success = await observe_once(int(target))
+
+                # In auto mode a virtual camera can open successfully while
+                # returning a black frame (for example, a phone camera with no
+                # active stream).  Do not wait for the next full sweep before
+                # trying a real camera that is already known or likely usable.
+                # Explicit single-camera selection remains strict above.
+                if not success and policy == "auto":
+                    sources = manager.sources()
+                    fallback_candidates = [
+                        index for index in manager.all_indices()
+                        if index != target
+                        and index in sources
+                        and (sources[index].usable or not sources[index].checked)
+                    ]
+                    for fallback in fallback_candidates:
+                        logger.info(
+                            "[VisionAgent] auto 模式摄像头 %s 不可用，尝试备用摄像头 %s (%s)",
+                            manager.name_for(int(target)),
+                            fallback,
+                            manager.name_for(fallback),
+                        )
+                        if await observe_once(int(fallback)):
+                            break
 
         # Hold exactly one camera open between rounds, so the pose sampler keeps
         # receiving the dense frames the temporal action reader needs. One: two

@@ -254,7 +254,12 @@ async def _conversation_context(limit: int = 4) -> str:
         owner = _owner_target_id()
         if not owner or manager is None:
             return ""
-        messages = await manager.get_history(str(owner), limit=int(limit))
+        from memory.context_assembler import ContextAssembler
+        from memory.context_identity import ContextIdentity
+
+        messages = await ContextAssembler(history_manager=manager).load_dialogue(
+            ContextIdentity.resolve(owner, platform="qq"), limit=int(limit),
+        )
     except Exception:
         logger.debug("[CameraProactive] 读取最近对话失败", exc_info=True)
         return ""

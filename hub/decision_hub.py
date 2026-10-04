@@ -551,74 +551,21 @@ class DecisionHub:
             async def _rich_context_provider(target_id: int) -> str:
                 """为主动聊天构建完整的记忆上下文"""
                 try:
-                    from datetime import datetime, timezone, timedelta
-                    from memory.cognitive_engine import get_cognitive_engine
-
-                    parts = []
                     target_str = str(target_id)
-                    session_id = f"user_{target_str}"
-                    now = datetime.now()
+                    from memory.context_assembler import ContextAssembler
+                    from memory.context_identity import ContextIdentity
 
-                    try:
-                        ce = get_cognitive_engine()
-                        cog_text = await ce.build_context(
-                            user_input="最近的对话",
-                            conversation_history=[],
-                            limit=3,
-                            user_id=target_str,
-                        )
-                        if cog_text:
-                            parts.append(cog_text)
-                    except Exception:
-                        pass
-
-                    try:
-                        conv = await self.conversation_context_manager.get_conversation_context(
-                            session_id, user_id=target_str, current_input=""
-                        )
-                        if conv:
-                            cutoff = now - timedelta(hours=4)
-                            recent = []
-                            for msg in conv:
-                                ts = msg.get("timestamp", "")
-                                try:
-                                    if ts:
-                                        msg_time = datetime.fromisoformat(str(ts))
-                                        if msg_time < cutoff:
-                                            continue
-                                except (ValueError, TypeError):
-                                    pass
-                                recent.append(msg)
-
-                            if recent:
-                                lines = []
-                                for msg in recent[-8:]:
-                                    role = msg.get("role", "user")
-                                    content = str(msg.get("content", ""))[:80]
-                                    name = "弥娅" if role == "assistant" else "用户"
-                                    ts = msg.get("timestamp", "")
-                                    time_label = ""
-                                    try:
-                                        if ts:
-                                            msg_time = datetime.fromisoformat(str(ts))
-                                            elapsed = (now - msg_time).total_seconds()
-                                            if elapsed < 3600:
-                                                time_label = f"[{int(elapsed // 60)}分钟前]"
-                                            elif elapsed < 86400:
-                                                time_label = f"[{msg_time.strftime('%H:%M')}]"
-                                            else:
-                                                time_label = f"[{msg_time.strftime('%m-%d %H:%M')}]"
-                                    except (ValueError, TypeError):
-                                        pass
-                                    lines.append(f"{time_label} {name}: {content}")
-                                if lines:
-                                    parts.append("【近期对话】\n" + "\n".join(lines))
-                            else:
-                                parts.append("【近期对话】\n（最近4小时内无对话记录）")
-                    except Exception:
-                        pass
-
-                    return "\n".join(parts) if parts else ""
+                    chat = self.proactive_chat._context_cache.get(target_id)
+                    is_group = bool(chat and chat.chat_type == "group")
+                    identity = ContextIdentity.resolve(
+                        "global" if is_group else target_str,
+                        target_str if is_group else "",
+                        chat.platform if chat else "qq",
+                    )
+                    snapshot = await ContextAssembler(self.memory_net).build(
+                        identity, query="最近的对话", limit=12,
+                    )
+                    return snapshot.prompt_text(max_chars=6000)
                 except Exception:
                     return ""
 
@@ -691,6 +638,21 @@ class DecisionHub:
                     config=self.proactive_chat._config.get("coordination", {}),
                     default_target_id=owner_target_id,
                 )
+
+                async def _event_context_provider(target_id, chat_type, platform, event):
+                    from memory.context_assembler import ContextAssembler
+                    from memory.context_identity import ContextIdentity
+
+                    identity = ContextIdentity.resolve(
+                        "global" if chat_type == "group" else target_id,
+                        target_id if chat_type == "group" else "",
+                        platform,
+                    )
+                    query = str(event.get("summary") or event.get("candidate_message") or "最近的对话")[:500]
+                    snapshot = await ContextAssembler(self.memory_net).build(identity, query=query, limit=12)
+                    return snapshot.prompt_text()
+
+                self.proactive_coordinator.set_context_provider(_event_context_provider)
                 logger.info("[决策层] 统一主动性协调器已接入")
             except Exception as exc:
                 logger.warning(f"[决策层] 统一主动性协调器接入失败: {exc}")
@@ -1098,7 +1060,7 @@ class DecisionHub:
             try:
                 perception = {
                     "platform": platform or "terminal",
-                    "user_id": str(target_id),
+                    "user_id": "global" if chat_type == "group" else str(target_id),
                     "group_id": str(target_id) if chat_type == "group" else "0",
                     "message_type": chat_type,
                     "response": message,
@@ -2414,11 +2376,11 @@ class DecisionHub:
             # ============================================================
             msg_type = context.get("message_type", "")
             ctx_group_id = str(context.get("group_id", "")) if context.get("group_id") else ""
-            if msg_type == "group" and ctx_group_id:
-                session_id = f"group_{ctx_group_id}_{user_id}"
-            else:
-                session_id = f"user_{user_id}"
             user_id_str = str(user_id)
+            from memory.context_identity import ContextIdentity
+
+            identity = ContextIdentity.resolve(user_id_str, ctx_group_id, platform, perception.get("session_id", ""))
+            session_id = identity.session_id
 
             _needs_recall = self.conversation_context_manager.check_needs_recall(content)
             _is_deep = self.conversation_context_manager._is_deep_discussion(content)
@@ -2438,6 +2400,8 @@ class DecisionHub:
                 allocation = await self.context_builder.build(
                     session_id=session_id,
                     user_id=user_id_str,
+                    group_id=ctx_group_id if msg_type == "group" else "",
+                    platform=platform,
                     current_input=content,
                     consumers=[
                         ConsumerRequest("main_prompt", max_messages=main_msgs, max_tokens=max_tokens, priority=1),
@@ -2709,6 +2673,7 @@ class DecisionHub:
                         limit=self._calc_cognitive_limit(conversation_context, _needs_recall),
                         user_id=query_user_id,
                         group_id=query_group_id,
+                        platform=platform,
                     )
                     if cmc:
                         logger.info(f"[决策层] 智能记忆检索到相关记忆 (user_id={query_user_id})")
@@ -3072,6 +3037,19 @@ class DecisionHub:
             except Exception:
                 pass
 
+            from memory.context_assembler import ContextAssembler, ContextMessage
+
+            context_snapshot = await ContextAssembler(self.memory_net).build(
+                identity,
+                messages=[ContextMessage(
+                    message.get("role", "user"), message.get("content", ""),
+                    str(message.get("timestamp", "")), message.get("metadata", {}),
+                ) for message in conversation_context],
+                recall=False,
+            )
+            screen_context = screen_context if ContextAssembler.can_read_senses(identity) else ""
+            vision_context = context_snapshot.vision_context
+
             at_list = perception.get("at_list", [])
             at_content_hint = content
             if at_list:
@@ -3145,6 +3123,11 @@ class DecisionHub:
             # 注入 MemoryBus 系统前缀 (identity + user_profile hooks)
             if bus_identity_context:
                 prompt_info["system"] = bus_identity_context + "\n" + prompt_info["system"]
+            continuity = "\n".join(part for part in (
+                context_snapshot.working_context, context_snapshot.pending_context,
+            ) if part)
+            if continuity:
+                prompt_info["system"] += "\n" + continuity
 
             logger.debug(f"[决策层-跨平台] 系统提示词前200字符: {prompt_info['system'][:200]}")
 

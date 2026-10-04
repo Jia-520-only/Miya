@@ -78,15 +78,27 @@ def vision_context_card(*, now: float | None = None) -> str:
     except Exception:
         logger.debug("[VisionContext] 读取观察过程失败", exc_info=True)
 
+    browser_card = ""
+    try:
+        from core.vision_context import get_vision_context
+
+        browser_card = get_vision_context().build_card(source="camera", limit=4, max_age=FRESH_SECONDS, now=moment)
+    except Exception:
+        logger.debug("[VisionContext] 读取浏览器摄像头上下文失败", exc_info=True)
+
     interpreted = bool(latest.get("interpreted"))
     latest_at = float(latest.get("at") or 0)
     age = moment - latest_at if latest_at else float("inf")
 
     # Nothing observed at all: stay silent rather than assert a camera exists.
-    if not presence_text and not activity_text and not latest_at:
+    if not presence_text and not activity_text and not latest_at and not browser_card:
         return ""
 
     lines.append("[弥娅的摄像头所见]")
+    if browser_card:
+        browser_lines = browser_card.splitlines()[1:]
+        if browser_lines:
+            lines.append("- 浏览器摄像头：" + "；".join(browser_lines[:3]))
     if presence_text:
         lines.append(f"- 在场：{presence_text}")
     if activity_text:
@@ -125,7 +137,9 @@ def vision_context_card(*, now: float | None = None) -> str:
 
     # The honest part. Without this she said the camera was not connected while
     # holding a reading of Jia's face.
-    if not latest_at:
+    if browser_card:
+        lines.append("- 注意：上面的摄像头记录是近期观察，并非连续实时画面；不要猜测记录之后的变化。")
+    elif not latest_at:
         lines.append("- 注意：摄像头还没有给出任何一次观察结果，现在看不到佳。")
     elif age > FRESH_SECONDS:
         lines.append(f"- 注意：上一次能看清是{_human_age(age)}，那之后没有新的观察——"

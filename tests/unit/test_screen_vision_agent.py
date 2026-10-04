@@ -461,6 +461,8 @@ def test_browser_frame_is_reused_so_the_backend_does_not_fight_for_the_device(mo
     """A live preview owns the camera; the backend must see through its frame."""
     from mcpserver.screen_vision import camera_manager, local_camera
 
+    monkeypatch.setattr("core.camera_control.read_state", lambda: {"camera_policy": "auto"})
+
     manager = camera_manager.get_camera_manager()
     manager._sources = {}
     manager.remember_browser_frame(index=0, data_url="data:image/jpeg;base64,ZmFrZQ==")
@@ -479,6 +481,7 @@ def test_browser_frame_is_reused_so_the_backend_does_not_fight_for_the_device(mo
     monkeypatch.setattr(manager, "usable_indices", lambda: [0])
     # Never touch real hardware from a unit test.
     monkeypatch.setattr(manager, "scan", lambda **_kwargs: {})
+    monkeypatch.setattr(manager, "refresh_names", lambda: None)
 
     def fake_analyze(_data, **_kwargs):
         return local_camera.mark_vision_result(

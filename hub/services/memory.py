@@ -84,7 +84,7 @@ class MemoryService:
                 bus = await get_memory_bus()
                 await bus.store_dialogue(
                     content=state.response,
-                    user_id="miya",
+                    user_id=str(request.user_id),
                     session_id=request.session_id or request.target_id,
                     platform=request.platform,
                     role="assistant",
@@ -112,29 +112,45 @@ class MemoryService:
         return state
 
     async def get_context(self, request: ProcessRequest, max_tokens: int = 2000) -> list[dict[str, Any]]:
-        """获取对话上下文（统一跨平台检索，user_id 为主键）"""
+        """获取与主回复管线相同的会话上下文。"""
         try:
-            from memory import get_memory_bus
-            bus = await get_memory_bus()
+            from memory.context_assembler import ContextAssembler
+            from memory.context_identity import ContextIdentity
 
-            user_id = str(request.user_id) if request.user_id else ""
-            session_id = request.session_id or request.target_id
+            identity = ContextIdentity.resolve(
+                request.user_id,
+                request.group_id,
+                request.platform,
+                request.session_id,
+            )
+            snapshot = await ContextAssembler(self.memory_net).build(
+                identity,
+                query=request.content,
+                limit=20,
+            )
+            history = snapshot.messages
 
-            if user_id:
-                history = await bus.get_user_dialogue(user_id=user_id, limit=20)
-            else:
-                history = await bus.get_dialogue_history(session_id=session_id, limit=20)
-
-            if not history and session_id:
-                history = await bus.get_dialogue_history(session_id=session_id, limit=20)
-
-            return [
+            result = [
                 {
                     "role": h.role if hasattr(h, "role") else "user",
                     "content": h.content if hasattr(h, "content") else str(h),
+                    "timestamp": getattr(h, "timestamp", ""),
+                    "metadata": getattr(h, "metadata", {}) or {},
                 }
                 for h in history
             ]
+            total_tokens = 0
+            bounded: list[dict[str, Any]] = []
+            from core.token_utils import count_message_tokens
+
+            for item in reversed(result):
+                token_count = count_message_tokens(item["content"])
+                if total_tokens + token_count > max_tokens:
+                    break
+                bounded.append(item)
+                total_tokens += token_count
+            bounded.reverse()
+            return bounded
         except Exception as e:
             logger.warning(f"[记忆] 获取上下文失败: {e}")
             return []

@@ -910,6 +910,9 @@ class ProactiveChatSystem:
 
         persona = self._build_persona_context()
         memory_context = self._build_memory_context(target_id) if target_id else ""
+        rich_context = await self._build_rich_context(target_id) if target_id else ""
+        if rich_context:
+            memory_context = "\n".join(part for part in (memory_context, rich_context) if part)
 
         context_with_persona = dict(context)
         context_with_persona["persona"] = persona
@@ -1489,58 +1492,19 @@ class ProactiveChatSystem:
 
         parts.append(f"上次互动: {context.last_active or '未知'}")
 
-        # Screen-Aware 视觉上下文 — 弥娅的「眼睛」
-        screen_ctx = self._build_screen_context()
-        if screen_ctx:
-            parts.append(screen_ctx)
-
-        # Camera observations arrive from the desktop browser through the
-        # image-free context bridge. Keep them beside the screen timeline so
-        # the proactive judge can reason about both senses together.
         try:
-            from core.vision_context import get_vision_context
+            from memory.context_assembler import ContextAssembler
+            from memory.context_identity import ContextIdentity
 
-            camera_ctx = get_vision_context().build_card(source="camera", limit=6)
-            if camera_ctx:
-                parts.append(camera_ctx)
+            identity = ContextIdentity.resolve(
+                "global" if context.chat_type == "group" else context.target_id,
+                context.target_id if context.chat_type == "group" else "",
+                platform,
+            )
+            screen_ctx, camera_ctx = ContextAssembler.senses(identity)
+            parts.extend(part for part in (screen_ctx, camera_ctx) if part)
         except Exception:
-            logger.debug("[主动聊天] 读取摄像头视觉上下文失败", exc_info=True)
-
-        # Presence answers "is Jia at the computer right now", which is a
-        # different question from "what did the camera see recently".
-        try:
-            from mcpserver.screen_vision.presence import presence_card
-
-            presence_ctx = presence_card()
-            if presence_ctx:
-                parts.append(presence_ctx)
-        except Exception:
-            logger.debug("[主动聊天] 读取在场状态失败", exc_info=True)
-
-        # What Jia has actually been doing, accumulated over minutes rather than
-        # read off a single frame.
-        try:
-            from mcpserver.screen_vision.activity import activity_card
-
-            activity_ctx = activity_card()
-            if activity_ctx:
-                parts.append(activity_ctx)
-        except Exception:
-            logger.debug("[主动聊天] 读取活动状态失败", exc_info=True)
-
-        # Her own watching notes: the impressions she wrote while looking, in her
-        # own words, over the last few minutes. The tracker above says "typing";
-        # this says what she made of it. Without it she judges the present from a
-        # single sensor line, which is the difference between a dashboard and
-        # someone who has been sitting with you.
-        try:
-            from mcpserver.screen_vision.vision_agent import get_vision_agency
-
-            watch_ctx = get_vision_agency().memory_card(limit=6)
-            if watch_ctx:
-                parts.append(watch_ctx)
-        except Exception:
-            logger.debug("[主动聊天] 读取弥娅的观察印象失败", exc_info=True)
+            logger.debug("[主动聊天] 统一视觉上下文不可用", exc_info=True)
 
         return "\n".join(parts)
 

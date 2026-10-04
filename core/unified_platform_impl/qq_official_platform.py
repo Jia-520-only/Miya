@@ -201,7 +201,13 @@ class QQOfficialPlatform(MessageMixin, BasePlatform):
 
             async def _do_handle(msg, msg_type):
                 try:
+                    if msg is None:
+                        logger.warning("[qqofficial] 收到空的 %s 事件，已跳过", msg_type)
+                        return
                     author = msg.author
+                    if author is None:
+                        logger.warning("[qqofficial] %s 事件缺少 author，已跳过", msg_type)
+                        return
                     user_id = str(
                         getattr(author, "user_openid", None)
                         or getattr(author, "member_openid", None)
@@ -251,7 +257,15 @@ class QQOfficialPlatform(MessageMixin, BasePlatform):
 
             async def _do_handle_group(msg):
                 try:
-                    user_id = str(msg.author.member_openid)
+                    if msg is None or getattr(msg, "author", None) is None:
+                        logger.warning("[qqofficial] 收到空的群消息事件，已跳过")
+                        return
+                    user_id = str(
+                        getattr(msg.author, "member_openid", None)
+                        or getattr(msg.author, "user_openid", None)
+                        or getattr(msg.author, "id", None)
+                        or ""
+                    )
                     user_name = getattr(msg.author, "username", "") or getattr(msg.author, "nick", "") or user_id
                     content = msg.content.strip() if msg.content else ""
                     group_id = msg.group_openid
@@ -299,18 +313,39 @@ class QQOfficialPlatform(MessageMixin, BasePlatform):
                 except Exception as e:
                     logger.error(f"[qqofficial] 群消息处理异常: {e}")
 
-            self._bot_client = _MiyaBotClient(intents=intents, is_sandbox=self.sandbox)
+            http_timeout = max(10, int(self.config.get("http_timeout", 30)))
+            self._bot_client = _MiyaBotClient(
+                intents=intents,
+                is_sandbox=self.sandbox,
+                timeout=http_timeout,
+            )
 
             async def run_bot():
                 params = {"appid": self.appid, "secret": self.secret}
-                if self.sandbox:
-                    params["sandbox"] = True
                 try:
                     await self._bot_client.start(**params)
                 except asyncio.CancelledError:
                     pass
                 except Exception as e:
-                    logger.error(f"[qqofficial] Bot 运行异常: {e}")
+                    if isinstance(e, AttributeError) and "NoneType" in str(e) and ".get" in str(e):
+                        logger.error(
+                            "[qqofficial] Bot 登录/初始化失败：QQ API 没有返回有效 JSON；"
+                            "通常是网络超时、代理或 appid/secret 无效。"
+                            "已将该连接标记为失败，等待统一重连。异常=%s",
+                            e,
+                            exc_info=True,
+                        )
+                    else:
+                        logger.error("[qqofficial] Bot 运行异常: %s", e, exc_info=True)
+                finally:
+                    # botpy owns an aiohttp session. A failed login also creates
+                    # that session, so reconnecting without closing it produces
+                    # an unclosed-client-session warning during boot.
+                    client = self._bot_client
+                    close = getattr(client, "close", None) if client is not None else None
+                    if close is not None:
+                        with contextlib.suppress(Exception):
+                            await close()
 
             self._bot_task = asyncio.create_task(run_bot())
             await asyncio.sleep(0.5)
@@ -328,6 +363,11 @@ class QQOfficialPlatform(MessageMixin, BasePlatform):
             self._bot_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._bot_task
+        if self._bot_client is not None:
+            close = getattr(self._bot_client, "close", None)
+            if close is not None:
+                with contextlib.suppress(Exception):
+                    await close()
         self._bot_client = None
         self._bot_task = None
 

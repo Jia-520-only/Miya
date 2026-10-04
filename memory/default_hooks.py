@@ -67,7 +67,7 @@ class UserProfileHook(InjectionHook):
         super().__init__("user_profile_hook")
 
     async def build(self, ctx: HookContext) -> str:
-        if not ctx.user_id:
+        if not ctx.user_id or ctx.group_id:
             return ""
 
         lines = [f"【关于 {ctx.user_id} 的事情】"]
@@ -157,6 +157,7 @@ class MemoryContextHook(InjectionHook):
                 limit=self.limit,
                 user_id=ctx.user_id or None,
                 group_id=ctx.group_id or None,
+                platform=ctx.platform,
             )
             return context_text
         except Exception as e:

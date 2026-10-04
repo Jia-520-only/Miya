@@ -332,11 +332,10 @@ class OneBotPlatform(MessageMixin, BasePlatform):
 
             # 如果已有后台任务在运行，不重复创建
             if self._tasks:
-                self._connected = True
-                return True
+                return bool(self._connected and self._ws is not None)
 
             self._ws = None
-            self._connected = True  # 乐观标记，实际连接由后台任务管理
+            self._connected = False
 
             async def listen_loop():
                 retry_delay = 1
@@ -383,10 +382,22 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                 self._connected = False
                 self._ws = None
 
-            self._tasks.append(asyncio.create_task(listen_loop()))
+            listen_task = asyncio.create_task(listen_loop())
+            self._tasks.append(listen_task)
             await asyncio.sleep(0.5)
-            return True
+            if self._connected and self._ws is not None:
+                return True
+            listen_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await listen_task
+            self._tasks = [task for task in self._tasks if task is not listen_task]
+            raise ConnectionError(f"OneBot WebSocket 尚未连接: {self._ws_url}")
 
+        except ConnectionError:
+            # Let BasePlatform's reconnect policy own the retry loop. Returning
+            # False here would make the daemon report a plain connect failure
+            # while the listener quietly retried in the background.
+            raise
         except ImportError:
             logger.error(f"[{self.platform_id}] 请安装 aiohttp")
             return False

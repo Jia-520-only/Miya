@@ -41,11 +41,14 @@ import tempfile
 import threading
 import time
 from collections import defaultdict
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
 
 import aiofiles
+
+from memory.context_identity import effective_group_id, matches_context_scope
 
 from memory.models import (
     Encoding,
@@ -278,9 +281,30 @@ class JsonBackend(MemoryBackend):
 
     def _get_cache_key(self, query: MemoryQuery) -> str:
         """生成缓存键"""
-        user_key = ",".join(query.user_ids) if query.user_ids else (query.user_id or "")
-        tag_key = ",".join(query.tags) if query.tags else ""
-        return f"{user_key}:{query.level}:{query.query}:{tag_key}:{query.limit}"
+        def _value(value):
+            if isinstance(value, (datetime, timedelta)):
+                return value.isoformat()
+            if isinstance(value, (MemoryLevel, MemorySource)):
+                return value.value
+            if isinstance(value, (list, tuple, set)):
+                return [_value(item) for item in value]
+            return value
+
+        payload = {
+            field_name: _value(getattr(query, field_name))
+            for field_name in (
+                "query", "user_id", "user_ids", "session_id", "session_ids",
+                "group_id", "platform", "platforms", "private_only",
+                "scope_user_ids", "scope_group_id", "scope_platforms",
+                "level", "levels", "tags", "any_tag", "priority",
+                "min_priority", "max_priority", "source", "start_time", "end_time",
+                "include_archived", "include_expired", "is_pinned", "event_type",
+                "location", "conversation_partner", "emotional_tone",
+                "min_significance", "max_significance", "limit", "offset",
+                "sort_by", "sort_order",
+            )
+        }
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
 
     def get_from_cache(self, query: MemoryQuery) -> Optional[List[MemoryItem]]:
         """从缓存获取"""
@@ -362,10 +386,6 @@ class JsonBackend(MemoryBackend):
         elif query.user_id:
             user_candidates = self._get_candidates_by_user(query.user_id)
             candidate_ids = user_candidates if candidate_ids is None else candidate_ids & user_candidates
-
-        if query.group_id:
-            group_candidates = self._get_candidates_by_group(query.group_id)
-            candidate_ids = group_candidates if candidate_ids is None else candidate_ids & group_candidates
 
         if query.session_id:
             session_candidates = self._get_candidates_by_session(query.session_id)
@@ -462,7 +482,17 @@ class JsonBackend(MemoryBackend):
             return False
 
         # 群组过滤
-        if query.group_id and memory.group_id != query.group_id:
+        if query.group_id and effective_group_id(memory) != query.group_id:
+            return False
+        if query.session_ids and memory.session_id not in query.session_ids:
+            return False
+        if query.platform and memory.platform != query.platform:
+            return False
+        if query.platforms and memory.platform not in query.platforms:
+            return False
+        if query.private_only and effective_group_id(memory):
+            return False
+        if not matches_context_scope(memory, query):
             return False
 
         # 标签过滤
@@ -1429,9 +1459,8 @@ class MiyaMemoryCore:
         """
         检索记忆 - 全局检索 + 上下文加权
 
-        弥娅的记忆是全局的，不按群/用户隔离。
-        user_id 用于身份范围过滤（跨平台别名展开）与加权排序；
-        group_id 仅用于加权排序（不硬过滤），避免群聊间记忆分裂。
+        用户身份跨平台展开；群聊仅召回对应群及公开记忆。
+        私密用户记忆和所有者视觉不会作为群聊上下文。
         """
         # 【V4.1.12】身份别名展开：同一人的各平台 ID 全部命中
         effective_user_id = user_id
@@ -1455,7 +1484,7 @@ class MiyaMemoryCore:
                 max_significance=max_significance,
             )
         else:
-            q = query
+            q = replace(query)
             # MemoryQuery 查询：最终上限取 q.limit 与 limit 参数较大者
             # （修复历史上被函数参数默认值 20 截断的问题：
             #   search_by_user(limit=500) / get_dialogue(limit=50) 等全部受影响）
@@ -1497,7 +1526,14 @@ class MiyaMemoryCore:
                     alias_ids = expanded
             except Exception as e:
                 logger.debug(f"[MiyaMemoryCore] 身份别名展开失败: {e}")
-        if alias_ids:
+        if group_id:
+            q.scope_group_id = str(group_id)
+            q.scope_user_ids = alias_ids or ([effective_user_id] if effective_user_id else [])
+            q.user_ids = None
+            q.user_id = None
+        elif effective_user_id and q.level != MemoryLevel.DIALOGUE:
+            q.scope_user_ids = alias_ids or [effective_user_id]
+        elif alias_ids:
             q.user_ids = alias_ids
         elif effective_user_id:
             q.user_id = effective_user_id
@@ -1506,47 +1542,48 @@ class MiyaMemoryCore:
         results = self._search_from_cache(q)
 
         # 从后端搜索（优先 SQLite，回退 JSON）
-        if len(results) < q.limit:
-            backend_results = []
-            if self.sqlite_backend:
-                try:
-                    backend_results = await self.sqlite_backend.query(q)
-                except Exception as e:
-                    logger.debug(f"[MiyaMemoryCore] SQLite 查询失败，回退 JSON: {e}")
-                    backend_results = await self.backend.query(q)
-            else:
+        backend_results = []
+        if self.sqlite_backend:
+            try:
+                backend_results = await self.sqlite_backend.query(q)
+            except Exception as e:
+                logger.debug(f"[MiyaMemoryCore] SQLite 查询失败，回退 JSON: {e}")
                 backend_results = await self.backend.query(q)
+        else:
+            backend_results = await self.backend.query(q)
 
-            # 合并去重
-            existing_ids = {r.id for r in results if r}
-            for r in backend_results:
-                if r and r.id not in existing_ids:
-                    results.append(r)
+        backend_results = [item for item in backend_results if item and self._match_query(item, q)]
+        existing_ids = {r.id for r in results if r}
+        for r in backend_results:
+            if r.id not in existing_ids:
+                results.append(r)
 
         # 【RRF 混合搜索融合】
         # 用 RRF 替代简单权重叠加，科学融合关键词+向量+上下文三维度
-        if len(results) > 0:
+        if results and not q.query and q.sort_by != "priority":
+            results = self._sort_results(results, q.sort_by, q.sort_order)[:final_limit]
+        elif len(results) > 0:
             try:
                 from memory.rrf_fusion import get_rrf_fusion
 
                 rrf = get_rrf_fusion()
 
                 query_vector = None
-                if query.query and self.embedding_client:
+                if q.query and self.embedding_client:
                     try:
-                        query_vector = await self.embedding_client.get_embedding(query.query)
+                        query_vector = await self.embedding_client.get_embedding(q.query)
                     except Exception:
                         pass
 
                 context = {
                     "user_id": effective_user_id or "",
                     "group_id": group_id or "",
-                    "tags": tags or query.tags or [],
+                    "tags": tags or q.tags or [],
                 }
 
                 fused = rrf.hybrid_search(
                     memories=results,
-                    query_text=query.query,
+                    query_text=q.query,
                     query_vector=query_vector,
                     context_weights=context,
                 )
@@ -1665,7 +1702,17 @@ class MiyaMemoryCore:
             return False
         if query.session_id and memory.session_id != query.session_id:
             return False
-        if query.group_id and memory.group_id != query.group_id:
+        if query.session_ids and memory.session_id not in query.session_ids:
+            return False
+        if query.group_id and effective_group_id(memory) != query.group_id:
+            return False
+        if query.platform and memory.platform != query.platform:
+            return False
+        if query.platforms and memory.platform not in query.platforms:
+            return False
+        if query.private_only and effective_group_id(memory):
+            return False
+        if not matches_context_scope(memory, query):
             return False
         if query.level and memory.level != query.level:
             return False
@@ -1840,50 +1887,48 @@ class MiyaMemoryCore:
         limit: int = 50,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
+        session_ids: Optional[List[str]] = None,
+        group_id: Optional[str] = None,
+        platforms: Optional[List[str]] = None,
+        private_only: bool = False,
     ) -> List[MemoryItem]:
-        """获取对话历史（统一检索）
-
-        优先按 user_id 跨平台检索；session_id 保留向后兼容。
-        platform 仅作可选的元数据过滤，不是主检索键。
-
-        Args:
-            session_id: 会话ID（向后兼容，user_id 优先）
-            user_id: 用户ID（推荐，跨平台统一检索）
-            platform: 平台过滤（None=不过滤，跨平台检索）
-            limit: 返回数量限制
-            start_time: 开始时间
-            end_time: 结束时间
-        """
-        if user_id:
-            q = MemoryQuery(
-                user_id=user_id,
-                level=MemoryLevel.DIALOGUE,
-                limit=limit,
-                sort_by="created_at",
-                sort_order="asc",
-                start_time=start_time,
-                end_time=end_time,
-            )
-            results = await self.retrieve(q)
-        elif session_id:
-            q = MemoryQuery(
-                session_id=session_id,
-                level=MemoryLevel.DIALOGUE,
-                limit=limit,
-                sort_by="created_at",
-                sort_order="asc",
-                start_time=start_time,
-                end_time=end_time,
-            )
-            results = await self.retrieve(q)
-        else:
+        """Read the latest scoped dialogue without relevance reranking, then return chronological order."""
+        if limit <= 0 or not (session_id or session_ids or user_id or group_id):
             return []
-
-        # platform 仅作可选的元数据过滤标签
-        if platform and results:
-            results = [r for r in results if r.platform == platform]
-
-        return results[:limit]
+        aliases = None
+        if user_id and not (session_id or session_ids or group_id):
+            aliases = self._identity_resolver.expand(user_id) if self._identity_resolver else [user_id]
+        query = MemoryQuery(
+            user_ids=aliases,
+            session_id=session_id or None,
+            session_ids=session_ids,
+            group_id=group_id,
+            platform=platform,
+            platforms=platforms,
+            private_only=private_only,
+            level=MemoryLevel.DIALOGUE,
+            limit=limit,
+            sort_by="created_at",
+            sort_order="desc",
+            start_time=start_time,
+            end_time=end_time,
+        )
+        results = self._search_from_cache(query)
+        sqlite_ok = False
+        if self.sqlite_backend:
+            try:
+                results.extend(await self.sqlite_backend.query(query))
+                sqlite_ok = True
+            except Exception as exc:
+                logger.warning("[MiyaMemoryCore] 对话 SQLite 读取失败: %s", exc)
+        if not sqlite_ok or len({item.id for item in results}) < limit:
+            results.extend(await self.backend.query(query))
+        unique = {item.id: item for item in results if self._match_query(item, query)}
+        ordered = sorted(unique.values(), key=lambda item: item.created_at, reverse=True)[:limit]
+        for item in ordered:
+            item.update_access()
+        self._stats["total_retrieved"] += len(ordered)
+        return list(reversed(ordered))
 
     # ==================== 更新删除 ====================
 

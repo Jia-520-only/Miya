@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 from config.config_utils import get_text
 from core.token_utils import count_message_tokens
 from memory import MemoryLevel, get_memory_bus, load_memory_config
+from memory.context_identity import ContextIdentity
 from memory.historian import get_historian
 
 logger = logging.getLogger(__name__)
@@ -65,9 +66,11 @@ class MemoryManager:
     @staticmethod
     def _build_session_id(platform: str, user_id: str, group_id: str, message_type: str) -> str:
         """构建统一会话ID（不含平台前缀，platform 仅作元数据标签）"""
-        if message_type == "group" and group_id:
-            return f"group_{group_id}_{user_id}"
-        return f"user_{user_id}"
+        return ContextIdentity.resolve(
+            user_id=user_id,
+            group_id=group_id if message_type == "group" else "",
+            platform=platform,
+        ).session_id
 
     async def store_user_message(self, perception: Dict) -> None:
         """
@@ -97,7 +100,10 @@ class MemoryManager:
             platform = perception.get("platform", "qq")
             sender_name = perception.get("sender_name", "用户")
             message_type = perception.get("message_type", "")
-            session_id = self._build_session_id(platform, user_id, group_id, message_type)
+            identity = ContextIdentity.from_perception(perception)
+            user_id = identity.user_id or user_id
+            group_id = identity.group_id
+            session_id = identity.session_id
 
             logger.info(f"[记忆管理器] 收到消息: {content[:50]}...")
 
@@ -126,6 +132,7 @@ class MemoryManager:
             # 存储到 MemoryNet 对话历史
             if self.memory_net and self.memory_net.conversation_history:
                 metadata = {
+                    **identity.metadata(),
                     "user_id": user_id,
                     "group_id": group_id,
                     "message_type": message_type,
@@ -156,7 +163,9 @@ class MemoryManager:
                 user_id=user_id,
                 session_id=session_id,
                 platform=platform,
+                group_id=group_id,
                 metadata={
+                    **identity.metadata(),
                     "sender_name": sender_name,
                     "message_type": message_type,
                     "group_id": group_id,
@@ -182,6 +191,7 @@ class MemoryManager:
                         tags=[detected_info_type],
                         priority=detected_importance,
                         metadata={
+                            **identity.metadata(),
                             "source": "auto_extract",
                             "info_type": detected_info_type,
                         },
@@ -211,7 +221,10 @@ class MemoryManager:
             group_id = str(perception.get("group_id", ""))
             message_type = perception.get("message_type", "")
             platform = perception.get("platform", "qq")
-            session_id = self._build_session_id(platform, user_id, group_id, message_type)
+            identity = ContextIdentity.from_perception(perception)
+            user_id = identity.user_id or user_id
+            group_id = identity.group_id
+            session_id = identity.session_id
 
             if self.time_tracker:
                 try:
@@ -235,7 +248,9 @@ class MemoryManager:
                 user_id=user_id,
                 session_id=session_id,
                 platform=platform,
+                group_id=group_id,
                 metadata={
+                    **identity.metadata(),
                     "sender_name": "弥娅",
                     "message_type": message_type,
                     "group_id": group_id,
@@ -260,6 +275,7 @@ class MemoryManager:
             if self.memory_net and self.memory_net.conversation_history:
                 try:
                     metadata = {
+                        **identity.metadata(),
                         "user_id": user_id,
                         "group_id": group_id,
                         "message_type": message_type,
@@ -471,7 +487,10 @@ class MemoryManager:
                 content = perception.get("response", "")
                 sender_name = "弥娅"
 
-            session_id = self._build_session_id(platform, user_id, group_id, message_type)
+            identity = ContextIdentity.from_perception(perception)
+            user_id = identity.user_id or user_id
+            group_id = identity.group_id
+            session_id = identity.session_id
 
             extra_meta = perception.get("_meta", {}) if isinstance(perception.get("_meta"), dict) else {}
 
@@ -482,9 +501,11 @@ class MemoryManager:
                 user_id=user_id,
                 session_id=session_id,
                 platform=platform,
+                group_id=group_id,
                 metadata={
+                    **identity.metadata(),
                     "sender_name": sender_name,
-                    "group_id": perception.get("group_id", ""),
+                    "group_id": group_id,
                     "message_type": perception.get("message_type", ""),
                     **extra_meta,
                 },
@@ -497,6 +518,7 @@ class MemoryManager:
                     role=role,
                     content=content,
                     metadata={
+                        **identity.metadata(),
                         "platform": platform,
                         "user_id": user_id,
                         "sender_name": sender_name,
@@ -507,7 +529,9 @@ class MemoryManager:
             # 【星璇增强】弥娅回复时，自动分析并升级重要自记忆
             if role == "assistant" and content and len(content.strip()) >= 5:
                 user_input = perception.get("content", "") or perception.get("input", "")
-                group_id = perception.get("group_id", "")
+                group_id = ContextIdentity.resolve(
+                    user_id, perception.get("group_id", ""), platform
+                ).group_id
                 message_type = perception.get("message_type", "")
                 try:
                     await self._analyze_and_upgrade_assistant_memory(

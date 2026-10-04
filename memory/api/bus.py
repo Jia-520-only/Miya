@@ -306,6 +306,7 @@ class MemoryBus:
             user_id=req.user_id or None,
             group_id=req.group_id or None,
             session_id=req.session_id or None,
+            platform=req.platform if req.platform and req.platform != "unknown" else None,
             tags=req.tags,
             level=req.level,
             levels=req.levels,
@@ -368,10 +369,17 @@ class MemoryBus:
         user_id: Optional[str] = None,
         platform: Optional[str] = None,
         limit: int = 50,
+        session_ids: Optional[List[str]] = None,
+        group_id: Optional[str] = None,
+        platforms: Optional[List[str]] = None,
+        private_only: bool = False,
     ) -> List[MemoryItem]:
-        """获取对话历史 (优先按 user_id)"""
+        """获取对话历史；提供 session_id 时严格限定当前会话。"""
         core = await self._ensure_core()
-        return await core.get_dialogue(session_id=session_id, user_id=user_id, platform=platform, limit=limit)
+        return await core.get_dialogue(
+            session_id=session_id, user_id=user_id, platform=platform, limit=limit,
+            session_ids=session_ids, group_id=group_id, platforms=platforms, private_only=private_only,
+        )
 
     # ==================== 会话上下文 ====================
 

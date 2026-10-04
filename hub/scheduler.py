@@ -583,9 +583,11 @@ class Scheduler:
                 platform = "aiocqhttp"
             created_by = data.get("created_by", "")
             # Strip "user_" prefix if present
-            raw_owner = created_by if created_by else target_id
+            raw_owner = created_by if created_by else ("global" if target_type == "group" else target_id)
             owner_id = raw_owner.replace("user_", "") if str(raw_owner).startswith("user_") else str(raw_owner)
-            session_id = f"user_{owner_id}"
+            from memory.context_identity import ContextIdentity
+
+            session_id = ContextIdentity.resolve(owner_id, group_id, platform).session_id
 
             perception = {
                 "content": message,
