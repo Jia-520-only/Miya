@@ -333,6 +333,32 @@ def test_stopping_a_reader_that_does_not_exist_is_harmless(pool: CameraFramePool
     assert pool.describe()["readers_running"] == []
 
 
+@pytest.mark.parametrize("stop_all", [False, True])
+def test_a_stopping_reader_keeps_ownership_until_it_exits(pool: CameraFramePool, stop_all, monkeypatch):
+    import threading
+    from types import SimpleNamespace
+
+    from mcpserver.screen_vision import camera_stream
+
+    reader = SimpleNamespace(alive=True, _stop=threading.Event())
+    reader.stop = lambda: reader._stop.set()
+    pool._readers[0] = reader
+    if stop_all:
+        pool.stop_all()
+    else:
+        pool.stop_reader(0)
+
+    assert pool.reader(0) is reader
+    assert pool.start_reader(0) is False
+
+    replacement = SimpleNamespace(alive=True, start=lambda: True)
+    monkeypatch.setattr(camera_stream, "_PersistentReader", lambda *_args: replacement)
+    reader.alive = False
+
+    assert pool.start_reader(0) is True
+    assert pool.reader(0) is replacement
+
+
 def test_reader_ready_unblocks_even_when_it_fails(pool: CameraFramePool):
     """A caller waiting on a reader must not hang forever if it cannot open."""
     from mcpserver.screen_vision.camera_stream import _PersistentReader

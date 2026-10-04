@@ -441,7 +441,7 @@ class CameraFramePool:
         with self._lock:
             existing = self._readers.get(int(index))
             if existing is not None and existing.alive:
-                return True
+                return not existing._stop.is_set()
             reader = _PersistentReader(self, int(index), width, height)
             self._readers[int(index)] = reader
         reader.start()
@@ -449,13 +449,14 @@ class CameraFramePool:
         return True
 
     def _signal_reader_stop_locked(self, index: int) -> _PersistentReader | None:
-        """Pull a reader out of the table and tell it to stop.
+        """Tell a reader to stop while retaining its hardware ownership.
 
         Deliberately does not join: the reader needs this same lock to publish
         frames, so joining while holding it would deadlock. Callers join after
-        releasing the lock.
+        releasing the lock. A timed-out join must not hide a thread that still
+        holds the device; keep it registered until it exits.
         """
-        reader = self._readers.pop(int(index), None)
+        reader = self._readers.get(int(index))
         if reader is not None:
             reader._stop.set()
         return reader

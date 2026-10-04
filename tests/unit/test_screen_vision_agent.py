@@ -505,6 +505,107 @@ def test_browser_frame_is_reused_so_the_backend_does_not_fight_for_the_device(mo
     manager._sources = {}
 
 
+@pytest.fixture()
+def single_camera_observer(monkeypatch):
+    from mcpserver.screen_vision import camera_capture, camera_manager, camera_stream, local_camera
+
+    manager = camera_manager.CameraManager()
+    manager._sources = {
+        0: camera_manager.CameraSource(index=0, usable=True, checked=True),
+        2: camera_manager.CameraSource(index=2, checked=True, failure_count=1, next_retry_at=1.0),
+    }
+    pool = camera_stream.CameraFramePool()
+    calls = []
+    monkeypatch.setattr(camera_manager, "get_camera_manager", lambda: manager)
+    monkeypatch.setattr(camera_stream, "get_camera_pool", lambda: pool)
+    monkeypatch.setattr(pool, "start_reader", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(manager, "refresh_names", lambda: None)
+    monkeypatch.setattr("core.camera_control.read_state", lambda: {"identity_recognition": False})
+    agent = vision_agent.VisionAgent()
+    agent._preferred_index = 0
+    monkeypatch.setattr(agent, "_camera_selection", lambda _manager: ("single", {0}, 0, set(), None, True))
+
+    def capture(index, **_kwargs):
+        calls.append(("capture", index))
+        return {"image_data": "data:image/jpeg;base64,ZmFrZQ=="}
+
+    monkeypatch.setattr(camera_capture, "capture_camera_frame", capture)
+    monkeypatch.setattr(local_camera, "analyze_local_frame", lambda *_args, **_kwargs: {
+        "status": "success", "faces": 1, "luminance": 90.0, "observations": [],
+    })
+    return agent, manager, pool, calls
+
+
+@pytest.mark.parametrize("failed_other_camera", [False, True])
+def test_single_camera_keeps_a_fresh_reader_across_sweeps(single_camera_observer, monkeypatch, failed_other_camera):
+    agent, manager, pool, calls = single_camera_observer
+    if not failed_other_camera:
+        manager._sources.pop(2)
+    buffer = pool.buffer(0)
+    buffer.image_data = "data:image/jpeg;base64,ZmFrZQ=="
+    buffer.at = time.time()
+    monkeypatch.setattr(pool, "stop_all", lambda: calls.append(("stop_all",)))
+    agent._last_sweep = time.monotonic() - vision_agent.SWEEP_INTERVAL_SECONDS - 1
+
+    result = asyncio.run(agent._look())
+
+    assert result["faces"] == 1
+    assert result["sources_used"] == [0]
+    assert calls == []
+
+
+def test_single_camera_ignores_a_cached_unselected_device(single_camera_observer):
+    agent, _manager, pool, calls = single_camera_observer
+    pool.buffer(2).image_data = "data:image/jpeg;base64,ZmFrZQ=="
+    pool.buffer(2).at = time.time()
+
+    result = asyncio.run(agent._look())
+
+    assert result["sources_used"] == [0]
+    assert calls == [("capture", 0)]
+
+
+def test_single_camera_retries_its_selected_failed_device(single_camera_observer, monkeypatch):
+    agent, manager, pool, calls = single_camera_observer
+    manager._sources[0].usable = False
+    manager._sources[0].failure_count = 1
+    manager._sources[0].next_retry_at = 1.0
+    monkeypatch.setattr(pool, "stop_all", lambda: calls.append(("stop_all",)))
+
+    result = asyncio.run(agent._look())
+
+    assert result["faces"] == 1
+    assert calls == [("stop_all",), ("capture", 0)]
+    assert manager._sources[0].failure_count == 0
+
+
+@pytest.mark.parametrize("reader_releases", [False, True])
+def test_single_camera_never_opens_behind_a_stalled_reader(single_camera_observer, monkeypatch, reader_releases):
+    from types import SimpleNamespace
+
+    agent, _manager, pool, calls = single_camera_observer
+    reader = SimpleNamespace(alive=True)
+    pool._readers[0] = reader
+    pool.buffer(0).image_data = "data:image/jpeg;base64,ZmFrZQ=="
+    pool.buffer(0).at = time.time() - 300
+
+    def stop_reader(index):
+        calls.append(("stop_reader", index))
+        reader.alive = not reader_releases
+
+    monkeypatch.setattr(pool, "stop_reader", stop_reader)
+    result = asyncio.run(agent._look())
+
+    if reader_releases:
+        assert result["faces"] == 1
+        assert calls == [("stop_reader", 0), ("capture", 0)]
+    else:
+        assert result["status"] == "unavailable"
+        assert calls == [("stop_reader", 0)]
+        assert "旧读帧线程" in result["failures"][0]["message"]
+        assert "黑帧" not in _manager.sources()[0].reason
+
+
 def test_camera_event_accepts_a_browser_frame_without_persisting_it():
     service = ScreenVisionService()
     from mcpserver.screen_vision.camera_manager import get_camera_manager

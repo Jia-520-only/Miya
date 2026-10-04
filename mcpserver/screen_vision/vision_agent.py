@@ -806,19 +806,12 @@ class VisionAgent:
         return policy, selected, preferred_index, selected_browser, preferred_browser, source_selection_locked
 
     async def _look(self) -> dict[str, Any]:
-        """Read every camera the machine has, one at a time, and fuse the result.
+        """Read selected cameras and fuse their current observations.
 
-        Sequential on purpose. Several of these cameras share one USB controller,
-        so opening the second while the first is streaming makes it fail to start
-        its DirectShow pins - the camera is healthy and simply cannot be reached
-        while another one holds the bus. Each round therefore releases every held
-        device, re-reads the inventory honestly, and then opens the cameras in
-        turn, releasing each before the next.
-
-        The price is the device-warmup cost per camera per round (roughly a
-        second each) instead of reusing one held-open reader. That is the right
-        trade: an observation that can only ever see one camera is not an
-        observation of the room.
+        Single-camera mode reuses fresh reader frames and retries only its
+        selected device. Auto mode periodically sweeps the inventory; multi mode
+        visits every device on each round. Sweeps release held readers before
+        capturing sequentially so cameras sharing a USB controller do not compete.
         """
         from .camera_capture import capture_camera_frame
         from .camera_manager import fuse_observations, get_camera_manager, narrative_for_fused
@@ -852,8 +845,15 @@ class VisionAgent:
         # every few minutes frees the bus and visits all of them.
         # Explicit multi-camera mode means every round is a fused round. Auto
         # keeps the warm-reader optimization and performs periodic sweeps.
-        sweep_due = policy == "multi" or (started - self._last_sweep) >= SWEEP_INTERVAL_SECONDS
+        sweep_due = policy == "multi" or (
+            policy == "auto" and (started - self._last_sweep) >= SWEEP_INTERVAL_SECONDS
+        )
         retry_due = manager.retry_due_indices()
+        if policy == "single":
+            allowed = selected_indices or ({configured_preferred} if configured_preferred is not None else set())
+            if not allowed and not source_selection_locked:
+                allowed = set(manager.all_indices()[:1])
+            retry_due = [index for index in retry_due if index in allowed]
         if sweep_due or retry_due:
             try:
                 await asyncio.to_thread(pool.stop_all)
@@ -958,6 +958,13 @@ class VisionAgent:
             another device is streaming, its DirectShow pins refuse to start.
             """
             try:
+                if pool.browser_owns(index):
+                    raise RuntimeError("浏览器仍占用摄像头，等待预览端提供新画面，不重复打开设备。")
+                reader = pool.reader(index)
+                if reader is not None and reader.alive:
+                    await asyncio.to_thread(pool.stop_reader, index)
+                    if reader.alive:
+                        raise RuntimeError("旧读帧线程尚未释放摄像头，等待释放后重试，不重复打开设备。")
                 captured = await asyncio.to_thread(
                     capture_camera_frame, index, width=1280, height=720,
                 )
@@ -970,7 +977,7 @@ class VisionAgent:
                 try:
                     from .camera_devices import blank_reason
 
-                    detail = blank_reason(manager.name_for(index), text)
+                    detail = blank_reason(manager.name_for(index), text) if "全黑" in text else text
                 except Exception:  # noqa: BLE001 - the raw text is still a reason
                     detail = text
                 manager.note_result(
@@ -1032,10 +1039,7 @@ class VisionAgent:
             # Full sweeps visit every camera; between them, retry only devices
             # whose bounded backoff elapsed. Captures stay serialized.
             if policy == "single":
-                allowed = selected_indices or ({configured_preferred} if configured_preferred is not None else set())
-                indices = [index for index in manager.all_indices() if index in allowed]
-                if not indices and not source_selection_locked:
-                    indices = manager.all_indices()[:1]
+                indices = retry_due
             elif policy == "multi":
                 indices = manager.all_indices() if sweep_due else retry_due
             else:
@@ -1049,6 +1053,8 @@ class VisionAgent:
             # the device stays warm and the round costs almost nothing. Cameras
             # nobody holds are left to the next sweep, which visits all of them.
             target = self._held_camera(manager, pool)
+            if policy == "single" and target not in allowed:
+                target = None
             if target is None:
                 # No reader is delivering. That happens routinely and for a good
                 # reason: a reader releases a device whose picture has stopped
