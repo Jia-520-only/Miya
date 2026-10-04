@@ -1047,7 +1047,10 @@ class ScreenVisionService:
                     index,
                     browser_source_id=call.get("browser_source_id") or event.get("browser_source_id"),
                 )
-            get_camera_pool().release_browser(index)
+            # When the browser reports source ids it may be holding several
+            # cameras at once. Releasing only the selected primary index leaves
+            # the other frame buffers owned by the stopped preview.
+            get_camera_pool().release_browser(None if source_ids else index)
             return json.dumps({"status": "success", "released": index}, ensure_ascii=False)
 
         from core.vision_context import get_vision_context

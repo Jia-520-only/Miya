@@ -519,10 +519,7 @@ class CameraManager:
                     continue
                 self._browser_frames.pop(source_id, None)
                 removed = True
-                if current_index is not None:
-                    source = self._sources.get(int(current_index))
-                else:
-                    source = None
+                source = self._sources.get(int(current_index)) if current_index is not None else None
                 if source is not None and source.owner == "browser":
                     source.owner = "idle"
                     source.usable = False

@@ -244,11 +244,14 @@ async function open(modeToUse: Exclude<CameraMode, 'off'>) {
   publishState()
   try {
     await listDevices()
+    const existingSources = activeBrowserSources.value
+    const existingStreams = streams.value
+    const existingDeviceIds = new Set(existingSources.map(item => String(item.deviceId || '')))
     const candidates = cameraPolicy.value === 'multi'
-      ? devices.value
+      ? devices.value.filter(device => !existingDeviceIds.has(String(device.deviceId || '')))
       : [devices.value.find(device => device.deviceId === selectedDeviceId.value) || devices.value[0]].filter(Boolean)
-    const opened: Record<string, MediaStream> = {}
-    const sources: Array<Record<string, any>> = []
+    const opened: Record<string, MediaStream> = { ...existingStreams }
+    const sources: Array<Record<string, any>> = [...existingSources]
     for (let index = 0; index < candidates.length; index += 1) {
       const device = candidates[index]
       const sourceId = browserSourceId(device?.deviceId || '', index)
@@ -269,8 +272,9 @@ async function open(modeToUse: Exclude<CameraMode, 'off'>) {
     }
     if (!Object.keys(opened).length) throw new Error('没有可用的浏览器摄像头')
     streams.value = opened
-    const primarySource = activeBrowserSources.value.find(item => item.deviceId === selectedDeviceId.value)
-    stream.value = (primarySource ? opened[primarySource.sourceId] : undefined) || Object.values(opened)[0] || null
+    const primarySource = sources.find(item => item.deviceId === selectedDeviceId.value)
+    const primaryStream = (primarySource ? opened[primarySource.sourceId] : undefined) || Object.values(opened)[0]
+    stream.value = primaryStream || null
     activeBrowserSources.value = sources
     if (!deviceChangeHandler && navigator.mediaDevices.addEventListener) {
       deviceChangeHandler = () => { void listDevices() }
@@ -278,7 +282,9 @@ async function open(modeToUse: Exclude<CameraMode, 'off'>) {
     }
     mode.value = modeToUse
     status.value = modeToUse === 'companion' ? '陪伴视觉运行中' : '准备看你'
-    await attachStreamToVideos(stream.value, activeBrowserSources.value.find(item => item.deviceId === selectedDeviceId.value)?.sourceId || 'primary')
+    if (primaryStream) {
+      await attachStreamToVideos(primaryStream, activeBrowserSources.value.find(item => item.deviceId === selectedDeviceId.value)?.sourceId || 'primary')
+    }
     publishState()
   } catch (err: any) {
     mode.value = 'off'
@@ -296,6 +302,7 @@ function stop(reason = '') {
   companionStartVersion += 1
   lastFrameSharedAt = 0
   const releaseIndex = selectedDeviceId.value && backendDeviceMapping.value === 'matched' ? backendDeviceIndex.value : null
+  const releasedBrowserSourceIds = activeBrowserSources.value.map(item => item.sourceId).filter(Boolean)
   if (timer) {
     clearTimeout(timer)
     timer = null
@@ -315,7 +322,7 @@ function stop(reason = '') {
   void API.mcpCall('screen_vision', 'camera_event', {
     event: { kind: 'preview_released', ...(releaseIndex === null ? {} : { camera_index: releaseIndex }) },
     ...(releaseIndex === null ? {} : { camera_index: releaseIndex }),
-    browser_source_ids: activeBrowserSources.value.map(item => item.sourceId),
+    ...(releasedBrowserSourceIds.length ? { browser_source_ids: releasedBrowserSourceIds } : {}),
   }).catch(() => {})
   mode.value = 'off'
   status.value = reason || '摄像头关闭'

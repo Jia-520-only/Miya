@@ -80,6 +80,18 @@ def test_camera_control_persists_stable_source_identity():
     assert "preferred_source_id?: string" in api
 
 
+def test_frontend_preserves_browser_source_ids_before_clearing_preview_state():
+    """Stopping preview must release every browser-owned source on the backend."""
+    source = CAMERA_VISION.read_text(encoding="utf-8")
+    source_ids = "const releasedBrowserSourceIds = activeBrowserSources.value.map(item => item.sourceId)"
+    clear_sources = "activeBrowserSources.value = []"
+    release_payload = "browser_source_ids: releasedBrowserSourceIds"
+
+    assert source_ids in source
+    assert release_payload in source
+    assert source.index(source_ids) < source.index(clear_sources) < source.index(release_payload)
+
+
 def test_legacy_single_camera_index_is_migrated_to_stable_source(monkeypatch):
     """The first post-upgrade observation binds the already-selected named device."""
     from mcpserver.screen_vision.vision_agent import VisionAgent

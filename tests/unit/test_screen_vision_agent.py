@@ -557,6 +557,40 @@ def test_preview_release_clears_backend_browser_ownership():
     assert not pool.browser_owns(0)
 
 
+def test_preview_release_with_source_ids_clears_all_browser_owned_frames():
+    service = ScreenVisionService()
+    from mcpserver.screen_vision.camera_manager import get_camera_manager
+    from mcpserver.screen_vision.camera_stream import get_camera_pool
+
+    manager = get_camera_manager()
+    pool = get_camera_pool()
+    manager._browser_frame = None
+    manager._browser_frames = {}
+    manager._sources = {}
+    pool.stop_all()
+    pool._buffers = {}
+    pool._browser_touched = {}
+
+    frame = "data:image/jpeg;base64,ZmFrZQ=="
+    manager.remember_browser_frame(index=0, data_url=frame, browser_source_id="browser:one")
+    manager.remember_browser_frame(index=1, data_url=frame, browser_source_id="browser:two")
+    pool.publish_browser_frame(0, frame)
+    pool.publish_browser_frame(1, frame)
+    assert pool.browser_owns(0)
+    assert pool.browser_owns(1)
+
+    payload = json.loads(service._camera_event({
+        "event": {"kind": "preview_released"},
+        "camera_index": 0,
+        "browser_source_ids": ["browser:one", "browser:two"],
+    }))
+
+    assert payload == {"status": "success", "released": 0}
+    assert manager.browser_frames() == []
+    assert not pool.browser_owns(0)
+    assert not pool.browser_owns(1)
+
+
 # --- her queue of things to say --------------------------------------------
 
 
