@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 
 import pytest
 
@@ -17,6 +16,51 @@ from mcpserver.screen_vision.service import (
     _note_image_model_result,
     _vision_health_snapshot,
 )
+
+
+@pytest.fixture(autouse=True)
+def vision_model_config(monkeypatch, tmp_path):
+    configuration = {
+        "vision_preferences": {
+            "active_vision": "kimi_k2_vision",
+            "model_preferences": {
+                "primary": "kimi_k2_vision",
+                "secondary": "deepseek_v4_flash_official",
+                "fallback": "glm_4_5v_vision",
+            },
+        },
+        "models": {
+            "kimi_k2_vision": {
+                "name": "primary-vision",
+                "base_url": "https://primary.example/v1",
+                "env_key": "TEST_PRIMARY_VISION_KEY",
+                "type": "vision",
+            },
+            "deepseek_v4_flash_official": {
+                "name": "secondary-multimodal",
+                "base_url": "https://secondary.example/v1",
+                "env_key": "TEST_SECONDARY_VISION_KEY",
+                "capabilities": ["multimodal", "simple_chat"],
+            },
+            "glm_4_5v_vision": {
+                "name": "fallback-vision",
+                "base_url": "https://fallback.example/v1",
+                "env_key": "TEST_FALLBACK_VISION_KEY",
+                "capabilities": ["vision_understanding"],
+            },
+        },
+    }
+    config_directory = tmp_path / "config"
+    config_directory.mkdir()
+    (config_directory / "multi_model_config.json").write_text(
+        json.dumps(configuration), encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        vision_service, "__file__", str(tmp_path / "mcpserver" / "screen_vision" / "service.py")
+    )
+    credentials = {model["env_key"]: f"key-test-{key}" for key, model in configuration["models"].items()}
+    monkeypatch.setattr("config.config_utils.get_api_key", lambda name: credentials.get(name, ""))
+    return configuration
 
 
 @pytest.fixture(autouse=True)
@@ -50,27 +94,29 @@ def test_a_model_labelled_multimodal_counts_as_able_to_see():
 # --- candidate chain -------------------------------------------------------
 
 
-def test_candidate_chain_follows_configured_priority():
+def test_candidate_chain_follows_configured_priority(vision_model_config):
     service = ScreenVisionService()
     candidates = service._vision_candidates()
     keys = [item[0] for item in candidates]
     assert keys, "至少应该有一个候选视觉模型"
     # The configured active vision model must come first.
-    repo_root = Path(__file__).resolve().parents[2]
-    cfg = json.loads((repo_root / "config" / "multi_model_config.json").read_text(encoding="utf-8"))
-    assert keys[0] == cfg["vision_preferences"]["active_vision"]
+    assert keys[0] == vision_model_config["vision_preferences"]["active_vision"]
     # A "@pointer" in the preferences must not leak in as a model name.
     assert all(not key.startswith("@") for key in keys)
 
 
-def test_candidate_chain_honours_the_configured_fallback_order(monkeypatch, tmp_path):
+def test_candidate_chain_honours_the_configured_fallback_order(monkeypatch):
     service = ScreenVisionService()
     monkeypatch.setattr(vision_service, "_healthy_vision_models", lambda: None)
     monkeypatch.setattr(vision_service, "_image_failed_models", lambda: {})
-    monkeypatch.setattr(service, "_resolve_vision_model", service._resolve_vision_model)
     keys = [item[0] for item in service._vision_candidates()]
-    assert keys[0] == "kimi_k2_vision"
-    assert "deepseek_v4_flash_official" in keys, "跨供应商兜底必须进入候选链"
+    assert keys == ["kimi_k2_vision", "deepseek_v4_flash_official", "glm_4_5v_vision"]
+
+
+def test_candidate_chain_rejects_missing_credentials(monkeypatch):
+    monkeypatch.setattr("config.config_utils.get_api_key", lambda name: "")
+    with pytest.raises(RuntimeError, match="未找到可用的视觉模型"):
+        ScreenVisionService()._vision_candidates()
 
 
 def test_a_model_that_failed_is_rotated_out(monkeypatch):

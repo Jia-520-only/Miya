@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import ntpath
+import posixpath
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -47,6 +50,7 @@ def test_run_resolves_windows_bare_executables(monkeypatch: pytest.MonkeyPatch, 
 
         return Completed()
 
+    monkeypatch.setattr(build, "os", SimpleNamespace(name="nt", path=ntpath))
     monkeypatch.setattr(build.subprocess, "run", fake_run)
     monkeypatch.setattr(build.shutil, "which", lambda name: r"C:\Program Files\nodejs\npm.cmd" if name == "npm" else None)
 
@@ -54,6 +58,13 @@ def test_run_resolves_windows_bare_executables(monkeypatch: pytest.MonkeyPatch, 
 
     assert captured["cmd"][0] == r"C:\Program Files\nodejs\npm.cmd"
     assert captured["cmd"][1:] == ["ci"]
+
+
+def test_posix_keeps_bare_executables(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(build, "os", SimpleNamespace(name="posix", path=posixpath))
+    monkeypatch.setattr(build.shutil, "which", lambda name: "/usr/bin/npm")
+
+    assert build.resolve_command(["npm", "ci"]) == ["npm", "ci"]
 
 
 def test_dsh_toolchain_versions_are_pinned() -> None:
