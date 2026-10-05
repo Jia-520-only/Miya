@@ -19,7 +19,16 @@ def delivery_accepted(result) -> bool:
     return bool(result) if isinstance(result, DeliveryResult) else result is True
 
 
-def enqueue_delivery(pending: dict, target: str, message: str, delivery_id: str) -> None:
+def enqueue_delivery(
+    pending: dict,
+    target: str,
+    message: str,
+    delivery_id: str,
+    *,
+    platform: str = "terminal",
+    chat_type: str = "private",
+    store_memory: bool = True,
+) -> None:
     now = time.time()
     for key, messages in list(pending.items()):
         pending[key] = [item for item in messages if now - item.get("_queued_at", now) < 600]
@@ -32,6 +41,9 @@ def enqueue_delivery(pending: dict, target: str, message: str, delivery_id: str)
         "message": message,
         "timestamp": datetime.now(UTC).isoformat(),
         "delivery_id": delivery_id,
+        "platform": platform,
+        "chat_type": chat_type,
+        "store_memory": store_memory,
         "_queued_at": now,
     })
     del bucket[:-100]

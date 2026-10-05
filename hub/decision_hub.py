@@ -920,13 +920,49 @@ class DecisionHub:
             logger.warning("[主动分发] 平台发送失败: %s", exc)
             return False
 
-    def take_pending_proactive_messages(self, user_id: str) -> list:
+    async def take_pending_proactive_messages(self, user_id: str) -> list:
         from core.proactive_delivery import take_pending_deliveries
 
         if user_id == "default":
             coordinator = getattr(self, "proactive_coordinator", None)
             user_id = getattr(coordinator, "_default_target_id", "default")
-        return take_pending_deliveries(getattr(self, "_mobile_pending", {}), str(user_id))
+        messages = take_pending_deliveries(getattr(self, "_mobile_pending", {}), str(user_id))
+        for item in messages:
+            if item.get("store_memory", True):
+                await self._store_proactive_message_memory(
+                    message=str(item.get("message", "")),
+                    target_id=str(user_id),
+                    chat_type=str(item.get("chat_type", "private")),
+                    platform=str(item.get("platform", "terminal")),
+                    delivery_id=str(item.get("delivery_id", "")),
+                    delivery_status="delivered_from_queue",
+                )
+        return messages
+
+    async def _store_proactive_message_memory(
+        self,
+        *,
+        message: str,
+        target_id: str,
+        chat_type: str,
+        platform: str,
+        delivery_id: str,
+        delivery_status: str,
+    ) -> None:
+        if not message:
+            return
+        perception = {
+            "platform": platform or "terminal",
+            "user_id": "global" if chat_type == "group" else str(target_id),
+            "group_id": str(target_id) if chat_type == "group" else "0",
+            "message_type": chat_type,
+            "response": message,
+            "_meta": {"delivery_id": delivery_id, "delivery_status": delivery_status},
+        }
+        try:
+            await self.memory_manager.store_unified_memory(perception, role="assistant")
+        except Exception as exc:
+            logger.debug(f"[主动分发] 记忆存储失败: {exc}")
 
     async def _dispatch_proactive_message_once(
         self,
@@ -1045,7 +1081,15 @@ class DecisionHub:
             if not sent:
                 if not hasattr(self, "_mobile_pending"):
                     self._mobile_pending = {}
-                enqueue_delivery(self._mobile_pending, _key, message, delivery_id)
+                enqueue_delivery(
+                    self._mobile_pending,
+                    _key,
+                    message,
+                    delivery_id,
+                    platform=platform or "terminal",
+                    chat_type=chat_type,
+                    store_memory=store_memory,
+                )
                 queued = True
 
         result = DeliveryResult("sent" if sent else "queued" if queued else "failed", delivery_id)
@@ -1055,39 +1099,36 @@ class DecisionHub:
         self._proactive_delivery_results[delivery_id] = (time.time(), result)
         logger.info("[主动分发] status=%s delivery_id=%s platform=%s", result.status, delivery_id, platform)
 
-        # 5) 记入记忆 + WS 广播到桌面前端
-        if store_memory:
-            try:
-                perception = {
-                    "platform": platform or "terminal",
-                    "user_id": "global" if chat_type == "group" else str(target_id),
-                    "group_id": str(target_id) if chat_type == "group" else "0",
-                    "message_type": chat_type,
-                    "response": message,
-                    "_meta": {"delivery_id": delivery_id, "delivery_status": result.status},
-                }
-                await self.memory_manager.store_unified_memory(perception, role="assistant")
-                # WS 广播——让桌面前端实时显示主动聊天内容
-                try:
-                    from core.management_api import get_management_api
+        # 5) 只有即时发送成功才立即记忆；排队消息在客户端领取时记忆。
+        if store_memory and result.status == "sent":
+            await self._store_proactive_message_memory(
+                message=message,
+                target_id=str(target_id),
+                chat_type=chat_type,
+                platform=platform,
+                delivery_id=delivery_id,
+                delivery_status=result.status,
+            )
 
-                    mgmt = get_management_api()
-                    if mgmt and sent and not broadcasted:
-                        await mgmt.broadcast_message(
-                            content=message[:2000],
-                            platform=platform,
-                            sender_name="弥娅",
-                            sender_id="miya",
-                            user_id=str(target_id),
-                            direction="out",
-                            message_id=delivery_id,
-                            group_id=str(target_id) if chat_type == "group" else None,
-                            delivery_id=delivery_id,
-                        )
-                except Exception:
-                    pass
-            except Exception as e:
-                logger.debug(f"[主动分发] 记忆存储失败: {e}")
+        # WS 广播——让桌面前端实时显示主动聊天内容
+        try:
+            from core.management_api import get_management_api
+
+            mgmt = get_management_api()
+            if mgmt and sent and not broadcasted:
+                await mgmt.broadcast_message(
+                    content=message[:2000],
+                    platform=platform,
+                    sender_name="弥娅",
+                    sender_id="miya",
+                    user_id=str(target_id),
+                    direction="out",
+                    message_id=delivery_id,
+                    group_id=str(target_id) if chat_type == "group" else None,
+                    delivery_id=delivery_id,
+                )
+        except Exception:
+            pass
 
         return result
 
@@ -1496,12 +1537,7 @@ class DecisionHub:
         await self.start_camera_proactive_background()
 
     async def start_camera_proactive_background(self):
-        """把摄像头的所见接入统一主动链路（记忆/形态/情绪/上下文一起带上）。
-
-        和观察循环刻意分开：看见和开口是两种节奏，而之前缺的正是中间那一步。
-        它自己也不判断"该不该说"——那是统一协调器的事，这里只负责把事实带上
-        上下文提交上去。
-        """
+        """Start the structured camera-facts bridge for the unified proactive path."""
         if getattr(self, "_camera_bridge_task", None) is not None:
             return
         try:
@@ -1509,7 +1545,7 @@ class DecisionHub:
 
             bridge = get_camera_bridge()
             if bridge.start():
-                logger.info("[决策层] 摄像头已接入统一主动链路")
+                logger.info("[决策层] 摄像头事实已接入统一主动链路")
         except Exception as exc:
             logger.warning(f"[决策层] 摄像头接入主动链路失败: {exc}")
 

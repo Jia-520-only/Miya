@@ -322,6 +322,31 @@ def test_the_vision_voice_trigger_executes_without_raising(chat_system, monkeypa
     agent.clear_messages()
 
 
+def test_stale_vision_voice_is_dropped_after_newer_camera_state(chat_system, monkeypatch):
+    from mcpserver.screen_vision.vision_agent import get_vision_agent
+
+    agent = get_vision_agent()
+    stamp = time.time()
+    agent._pending = [{
+        "at": stamp,
+        "message": "这会儿没看到人，可能离开电脑前了。",
+        "summary": "画面里没看到人",
+        "faces": 0,
+    }]
+    monkeypatch.setattr(
+        "mcpserver.screen_vision.vision_stream.get_vision_stream",
+        lambda: type("Stream", (), {"latest": lambda self: {
+            "at": stamp + 1,
+            "reading": {"faces": 1},
+        }})(),
+    )
+    result = asyncio.run(chat_system._check_miya_vision_trigger(
+        1523878699, _context()
+    ))
+    assert result is None
+    assert agent.peek_messages() == []
+
+
 def test_a_line_she_already_decided_is_delivered_exactly_once(chat_system, monkeypatch):
     """The trigger delivers it itself, so both senders must skip it.
 

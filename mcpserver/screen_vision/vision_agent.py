@@ -125,6 +125,7 @@ class Impression:
     intent_ids: list[str] = field(default_factory=list)
     source: str = "miya"
     model: str = ""
+    faces: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -138,6 +139,7 @@ class Impression:
             "intent_ids": list(self.intent_ids),
             "source": self.source,
             "model": self.model,
+            "faces": self.faces,
         }
 
 
@@ -193,6 +195,7 @@ class VisionAgency:
                     intent_ids=[str(x) for x in (item.get("intent_ids") or [])],
                     source=str(item.get("source") or "miya"),
                     model=str(item.get("model") or ""),
+                    faces=(int(item["faces"]) if item.get("faces") is not None else None),
                 ))
             self._impressions = self._impressions[-MAX_IMPRESSIONS:]
 
@@ -1270,6 +1273,7 @@ class VisionAgent:
             summary=str(fused.get("message") or "看了一眼，但没有得到明确线索。"),
             activity=str((fused.get("action") or {}).get("label") or ""),
             source="local",
+            faces=int(fused.get("faces") or 0),
         )
         interpretation: dict[str, Any] | None = None
         interpreter_name = ""
@@ -1291,6 +1295,7 @@ class VisionAgent:
                     intent_ids=[item.id for item in agency.intents(active_only=True)],
                     source="miya",
                     model=interpreter_name,
+                    faces=int(fused.get("faces") or 0),
                 )
             else:
                 with self._lock:
@@ -1563,6 +1568,13 @@ class VisionAgent:
                 item for item in self._pending
                 if (impression.at - float(item.get("at") or 0)) <= QUEUE_MAX_AGE_SECONDS
             ]
+            if impression.faces is not None:
+                current_has_face = bool(impression.faces)
+                self._pending = [
+                    item for item in self._pending
+                    if item.get("faces") is None
+                    or bool(item.get("faces")) == current_has_face
+                ]
             normalized = _normalize_message(message)
             for item in self._pending:
                 if _normalize_message(str(item.get("message") or "")) == normalized:
@@ -1575,6 +1587,7 @@ class VisionAgent:
                 "message": message,
                 "summary": impression.summary,
                 "model": impression.model,
+                "faces": impression.faces,
             })
             if len(self._pending) > QUEUE_MAX_MESSAGES:
                 self._pending = self._pending[-QUEUE_MAX_MESSAGES:]

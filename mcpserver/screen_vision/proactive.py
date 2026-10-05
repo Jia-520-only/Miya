@@ -80,18 +80,6 @@ _TONE_BY_ACTIVITY = {
 
 _LOCATION_TEXT = "电脑前"
 
-# Plain sentences for the changes worth speaking about, keyed by the tracker's
-# own transition names.
-_PRESENCE_CHANGE_TEXT = {
-    # Presence tracking is not identity recognition. Until a frame has an
-    # explicit identity match, camera-derived facts must not address the person
-    # as the owner merely because the message is routed to the owner.
-    "returned": "画面里的人刚回到电脑前",
-    "left": "画面里的人离开了电脑前",
-    "away": "画面里的人可能离开了座位",
-}
-
-
 def _owner_target_id() -> str:
     """The person Miya would speak to, in the identity system's canonical form."""
     try:
@@ -274,24 +262,6 @@ async def _conversation_context(limit: int = 4) -> str:
     return "\n".join(lines)
 
 
-def _presence_event_text(snapshot) -> str:
-    """One plain sentence for the change that just happened.
-
-    The change lives in ``transition``: the tracker keeps ``state`` as
-    "at_desk"/"present" and only marks the single evaluation where something
-    really changed.  Reading ``state`` here produced "刚回来（returned）", i.e. a
-    raw enum leaking into the sentence she may end up saying when no model is
-    configured to rewrite the facts.
-    """
-    transition = str(getattr(snapshot, "transition", "") or "")
-    if transition in _PRESENCE_CHANGE_TEXT:
-        return _PRESENCE_CHANGE_TEXT[transition]
-    label = str(getattr(snapshot, "label", "") or "")
-    if label:
-        return label
-    return str(getattr(snapshot, "describe", lambda: "")() or "")
-
-
 async def build_presence_event(snapshot, *, changed_at: float = 0.0) -> dict[str, Any]:
     """A structured fact for the coordinator: Jia came back or went away.
 
@@ -301,9 +271,8 @@ async def build_presence_event(snapshot, *, changed_at: float = 0.0) -> dict[str
     arrival of an evening was discarded as a repeat of the first. The comment on
     the caller claimed the facts carried this timestamp; they did not.
     """
-    text = _presence_event_text(snapshot)
     mood = current_mood()
-    recalled = await recall_relevant(text or "佳 电脑前 离开 回来")
+    recalled = await recall_relevant("佳 电脑前 离开 回来")
     context_tail = await _conversation_context()
     platform = active_platform()
     facts: dict[str, Any] = {
@@ -320,12 +289,9 @@ async def build_presence_event(snapshot, *, changed_at: float = 0.0) -> dict[str
         "source": "camera",
         "event": "presence_change",
         "urgency": "normal",
-        "candidate_message": text,
         "facts": facts,
     }
     if platform:
-        # This is only the delivery route. It says where Miya can send a
-        # message, never where the person physically went.
         event["facts"]["消息发送平台（不是物理位置）"] = platform
         event["facts"]["物理位置"] = "摄像头无法判断"
     if _mood_text(mood):
@@ -333,48 +299,25 @@ async def build_presence_event(snapshot, *, changed_at: float = 0.0) -> dict[str
     if context_tail:
         event["facts"]["最近对话"] = context_tail
     if recalled:
-        # Labelled on purpose. This recall is keyed on the event itself, so it
-        # returns *previous arrivals* - observations she made, not notifications
-        # she sent. Handed over unlabelled, the coordinator's judge read it as
-        # evidence of repetition and answered SKIP with its own reasoning:
-        # "记忆里有多次类似事件，说明这种刚回来的通知已经发过很多次了".
-        # Seeing him come back before is not the same as having already spoken
-        # about this arrival.
         event["facts"]["她记得的旧事（以前看到过，不代表这次已经说过）"] = recalled
     return event
 
 
 def active_platform() -> str:
-    """Where Jia is actually reachable right now.
-
-    The camera's proactive messages used to leave without a platform, so they
-    fell back to the default and were handed to a desktop WebSocket that nobody
-    was reading - she spoke into an empty room while Jia sat in WeChat.
-
-    ``get_current_platform`` is described in its own docstring as the single
-    authority for routing every proactive message, so this defers to it rather
-    than guessing.
-    """
+    """Return the current delivery platform for structured proactive events."""
     try:
         from core.platform_awareness import get_platform_awareness
 
         owner = _owner_target_id()
         if owner:
-            platform = str(get_platform_awareness().get_current_platform(owner) or "")
-            if platform:
-                return platform
+            return str(get_platform_awareness().get_current_platform(owner) or "")
     except Exception:
         logger.debug("[CameraProactive] 查询活跃平台失败", exc_info=True)
     return ""
 
 
 def _register_owner_target() -> None:
-    """Make the owner an active proactive target without requiring a message.
-
-    The camera triggers used to be reachable only for targets that had chatted
-    recently, so an evening of silence made her blind to Jia walking back in.
-    Registering the owner is what lets a greeting happen on its own terms.
-    """
+    """Make the configured owner eligible for the unified proactive poll."""
     try:
         from core.proactive_chat import ChatContext, get_proactive_chat_system
 
@@ -382,18 +325,13 @@ def _register_owner_target() -> None:
         owner = _owner_target_id()
         if chat is None or not owner:
             return
+        target_id: Any
         try:
-            target_id: Any = int(owner)
+            target_id = int(owner)
         except (TypeError, ValueError):
             target_id = owner
-        if target_id in getattr(chat, "_context_cache", {}):
-            return
-        # Register on whichever platform he is actually reachable on. Hard-coding
-        # "desktop" here would route her queued observations to a socket nobody is
-        # reading - the same mistake the bridge made before it asked awareness.
-        platform = active_platform() or "desktop"
-        chat.update_context(target_id, ChatContext(chat_type="private", target_id=target_id), platform)
-        logger.info("[CameraProactive] 已把所有者登记为主动目标（平台 %s，不依赖他先说话）", platform)
+        if target_id not in getattr(chat, "_context_cache", {}):
+            chat.update_context(target_id, ChatContext(chat_type="private", target_id=target_id), active_platform() or "desktop")
     except Exception:
         logger.debug("[CameraProactive] 登记所有者目标失败", exc_info=True)
 
@@ -455,7 +393,7 @@ class CameraProactiveBridge:
             return False
         _register_owner_target()
         self._task = asyncio.create_task(self._run())
-        logger.info("[CameraProactive] 摄像头→主动链路已启动")
+        logger.info("[CameraProactive] 摄像头事实已接入统一主动链路")
         return True
 
     async def stop(self) -> None:
@@ -475,6 +413,7 @@ class CameraProactiveBridge:
     def stats(self) -> dict[str, Any]:
         return {
             "running": self.running,
+            "speech_owner": "miya_proactive",
             "submitted": self._submitted,
             "last_presence_state": self._last_presence_state,
         }
@@ -530,20 +469,11 @@ class CameraProactiveBridge:
                 # about him, not about whether she managed to speak. The memory
                 # write carries its own, much longer throttle.
                 result["remembered"] = await self._remember_presence(presence, now)
-                submitted = False
                 if speak_enabled:
                     event = await build_presence_event(presence, changed_at=stamp)
-                    # The key names the *kind* of event, kept stable per transition
-                    # on purpose: it is what the coordinator uses to refuse the same
-                    # arrival twice, and two consumers can see the same transition
-                    # (the bridge here, and the proactive poll's own presence
-                    # trigger). The instance is identified by the tracker's timestamp
-                    # inside the event facts, which the coordinator's fingerprint
-                    # compares.
                     submitted = await self._submit(event, key=f"camera:presence:{transition}:{stamp}")
                     result["presence"] = submitted
                 if submitted or not speak_enabled:
-                    # Nothing left to try when speaking about presence is off.
                     self._last_presence_state = transition
                     self._last_presence_stamp = stamp
                     self._last_presence_at = now
@@ -563,39 +493,32 @@ class CameraProactiveBridge:
     # -- helpers -----------------------------------------------------------
 
     async def _submit(self, event: dict[str, Any], *, key: str) -> bool:
-        """Hand a fact to the one coordinator that throttles and delivers."""
+        """Submit structured camera facts; the coordinator owns wording and delivery."""
         try:
             from core.proactive_coordinator import get_proactive_coordinator
 
             coordinator = get_proactive_coordinator()
             if coordinator is None:
                 return False
-            target = _owner_target_id() or "default"
-            # Route to wherever Jia actually is. Without this the message went to
-            # the default platform and ended up on a desktop socket he was not
-            # watching.
-            platform = active_platform()
             sent = await coordinator.submit_event(
-                event, key=key, target_id=target, trigger_type="camera_aware",
-                platform=platform or "terminal",
+                event, key=key, target_id=_owner_target_id() or "default",
+                trigger_type="camera_aware", platform=active_platform() or "terminal",
             )
             if sent:
                 self._submitted += 1
-                logger.info("[CameraProactive] 已提交主动事件 key=%s platform=%s",
-                            key, platform or "(未知，用兜底)")
             return bool(sent)
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("[CameraProactive] 提交事件失败: %s", exc)
+        except Exception:  # noqa: BLE001
+            logger.debug("[CameraProactive] 提交结构化事件失败", exc_info=True)
             return False
 
     async def _remember_presence(self, presence, now: float) -> bool:
         if now - self._remembered_at < MEMORY_MIN_INTERVAL_SECONDS:
             return False
-        text = _presence_event_text(presence)
-        if not text:
+        transition = str(getattr(presence, 'transition', '') or '').strip()
+        if not transition:
             return False
         stored = await remember_observation(
-            summary=text,
+            summary=f'摄像头在场变化：{transition}',
             significance=0.7,
             tags=["在场变化"],
             now=now,

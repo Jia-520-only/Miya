@@ -32,7 +32,7 @@ const voice = computed<Record<string, any> | null>(() => camera.agentVoice.value
 const pendingVoice = computed<Array<Record<string, any>>>(() => camera.agentVoiceQueue.value || [])
 const intents = computed<Array<Record<string, any>>>(() => camera.agentAgency.value?.intents || [])
 const bridge = computed<Record<string, any> | null>(() => camera.visionBridge.value)
-/** null = not yet known; true/false = whether her seeing can reach her voice. */
+/** null = not yet known; true = Miya's own proactive path is available. */
 const bridgeReady = computed<boolean | null>(() => {
   const value = bridge.value
   if (!value || typeof value.running !== 'boolean') return null
@@ -184,11 +184,11 @@ onBeforeUnmount(() => {
       <span class="cap-label">能不能开口</span>
       <span v-if="bridgeReady === null" class="cap-bridge-text">状态未知</span>
       <span v-else-if="bridgeReady" class="cap-bridge-text">
-        已接入统一主动链路 · 已提交 {{ bridge?.submitted || 0 }} 次
+        由弥娅主动链路决定是否开口
         <em v-if="bridge?.owner_target_id"> · 对象 {{ bridge.owner_target_id }}</em>
       </span>
       <span v-else class="cap-bridge-text">
-        未接入——她看得见你，但说出来到不了你这里
+        主动链路状态不可用
       </span>
     </div>
 

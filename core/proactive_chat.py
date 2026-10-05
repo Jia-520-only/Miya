@@ -597,8 +597,6 @@ class ProactiveChatSystem:
         # Screen-Aware 实例（延迟注入）
         self._screen_aware: Optional[Any] = None
         self._last_screen_intent: Optional[Any] = None
-        self._last_camera_event_key: str = ""
-        self._last_camera_event_time: float = 0.0
         self._last_presence_key: str = ""
         self._last_presence_time: float = 0.0
         self._last_activity_time: float = 0.0
@@ -1643,29 +1641,11 @@ class ProactiveChatSystem:
             if result:
                 return result
 
-        # 6. 摄像头事件触发
-        if self.is_trigger_enabled("camera_aware"):
-            result = await self._check_camera_aware_trigger(target_id, context)
-            if result:
-                return result
-
-        # 6.5 在场变化触发（回来 / 离开）
-        if self.is_trigger_enabled("camera_aware"):
-            result = await self._check_presence_trigger(target_id, context)
-            if result:
-                return result
-
-        # 6.6 弥娅自己在观察中已经决定要说的话。
+        # 6. 摄像头只消费弥娅在自主观察中已经决定要说的话。
         # 放在"再问一次该不该说"前面：她已经想过一遍的句子，优先于现场重新判断；
         # 否则每一次活动变化都会把它挤到下一轮，而它是有寿命的。
         if self.is_trigger_enabled("camera_aware"):
             result = await self._check_miya_vision_trigger(target_id, context)
-            if result:
-                return result
-
-        # 6.7 活动变化触发（开始敲键盘 / 看手机 / 起身走动…）：由她自己判断要不要开口
-        if self.is_trigger_enabled("camera_aware"):
-            result = await self._check_activity_trigger(target_id, context)
             if result:
                 return result
 
@@ -1678,92 +1658,6 @@ class ProactiveChatSystem:
         # AI 判断本轮不需要主动发言，记录检查时间避免短时间重复评估
         self._last_trigger_time[target_id] = datetime.now()
         return None
-
-    async def _check_camera_aware_trigger(self, target_id: int, context: ChatContext) -> Optional[ProactiveResult]:
-        """Turn a fresh, meaningful camera event into an optional message."""
-        import time
-
-        try:
-            from core.vision_context import get_vision_context
-            from core.camera_control import read_state
-
-            event = get_vision_context().latest(source="camera")
-            camera_state = read_state()
-        except Exception:
-            return None
-        # Camera events are eligible for proactive messaging only while the
-        # user has explicitly enabled autonomous observation.
-        if not camera_state.get("autonomous") or camera_state.get("mode") == "off":
-            return None
-        if not event or event.get("status") not in {None, "success"}:
-            return None
-        now = time.time()
-        if now - float(event.get("timestamp", 0)) > 180:
-            return None
-        kind = str(event.get("kind") or "")
-        summary = str(event.get("summary") or "")
-        event_key = f"{kind}:{event.get('timestamp')}:{summary[:120]}"
-        if event_key == self._last_camera_event_key:
-            return None
-        if now - self._last_camera_event_time < float(self._camera_aware_config.get("min_interval", 90)):
-            return None
-        allowed = self._camera_aware_config.get("events", [])
-        event_text = f"{kind} {summary}".lower()
-        event_map = {
-            "wave": ("挥手", "挥手", "好奇"),
-            "sit_down": ("坐下", "坐下", "温柔"),
-            "stand_up": ("起身", "起身", "关心"),
-            "walk": ("走动", "走动", "好奇"),
-            "scene_change": ("画面突变", "画面发生变化", "关心"),
-            "long_still": ("静止", "安静了一会儿", "关心"),
-        }
-        matched_key = next((key for key, value in event_map.items() if key in event_text or value[0] in summary), None)
-        matched = event_map.get(matched_key) if matched_key else None
-        if not matched:
-            return None
-        label, topic, mood = matched
-        if matched_key not in allowed and label not in allowed:
-            return None
-        confidence = float(event.get("confidence", 1.0))
-        if confidence < float(self._camera_aware_config.get("min_confidence", 0.62)):
-            return None
-        if not self._check_trigger_type_cooldown(target_id, "camera_aware"):
-            return None
-        prompt = (
-            f"你是弥娅。摄像头刚刚观察到：{summary}\n"
-            f"请用{mood}的语气，对佳说一句自然的话，围绕{topic}，不超过25字。"
-        )
-        try:
-            response = await self.ai_client.chat(
-                messages=[AIMessage(role="user", content=self._camera_persona_prompt(prompt))],
-                tools=[], tool_choice="none",
-            )
-            message = str(response or "").strip()
-        except Exception:
-            return None
-        if len(message) < 2 or self._check_message_content_duplicate(target_id, message) or self._is_duplicate(target_id, message):
-            return None
-        self._last_camera_event_key = event_key
-        self._last_camera_event_time = now
-        self._record_trigger(target_id)
-        self._record_trigger_by_type(target_id, "camera_aware")
-        self._record_sent_message(target_id, message)
-        return ProactiveResult(
-            True, message, "camera_aware", context,
-            rollback=lambda: self._forget_camera_event_proposal(target_id, message, event_key),
-        )
-
-    def _forget_camera_event_proposal(self, target_id: int, message: str, event_key: str) -> None:
-        """Undo a camera-event proposal that never went out.
-
-        ``_last_camera_event_key`` has no time window, so writing it for a
-        rejected message used to mean that same kind of event (a "坐下", say)
-        could never trigger again for the life of the process.
-        """
-        if self._last_camera_event_key == event_key:
-            self._last_camera_event_key = ""
-            self._last_camera_event_time = 0.0
-        self._forget_camera_proposal(target_id, message)
 
     def _camera_persona_prompt(self, module_prompt: str) -> str:
         """Attach Miya's live form and mood to a camera-generated instruction.
@@ -2028,6 +1922,45 @@ class ProactiveChatSystem:
             # Stale by the time she could say it; drop rather than blurt it out.
             agent.take_message()
             return None
+        pending_faces = earliest.get("faces")
+        if pending_faces is not None:
+            pending_at = float(earliest.get("at") or 0.0)
+            newer_presence: tuple[float, bool] | None = None
+            try:
+                from mcpserver.screen_vision.vision_stream import get_vision_stream
+
+                latest = get_vision_stream().latest() or {}
+                latest_at = float(latest.get("at") or 0.0)
+                latest_faces = (latest.get("reading") or {}).get("faces")
+                if latest_at > pending_at and latest_faces is not None:
+                    newer_presence = (latest_at, bool(latest_faces))
+            except Exception:
+                logger.debug("[主动聊天] 复核视觉话术新鲜度失败", exc_info=True)
+            try:
+                from mcpserver.screen_vision.presence import get_presence_tracker
+
+                snapshot = get_presence_tracker().snapshot()
+                snapshot_at = float(getattr(snapshot, "updated_at", 0.0) or 0.0)
+                state = str(getattr(snapshot, "state", "") or "")
+                if snapshot_at > pending_at:
+                    if state in {"present", "at_desk"}:
+                        candidate = (snapshot_at, True)
+                    elif state in {"away", "left"}:
+                        candidate = (snapshot_at, False)
+                    else:
+                        candidate = None
+                    if candidate and (newer_presence is None or candidate[0] >= newer_presence[0]):
+                        newer_presence = candidate
+            except Exception:
+                logger.debug("[主动聊天] 读取在场状态失败", exc_info=True)
+            if newer_presence is not None and newer_presence[1] != bool(pending_faces):
+                agent.take_message()
+                logger.info(
+                    "[主动聊天] 丢弃过期视觉话术: faces=%s -> faces=%s",
+                    pending_faces,
+                    int(newer_presence[1]),
+                )
+                return None
         message = str(earliest.get("message") or "").strip()
         if len(message) < 2:
             agent.take_message()

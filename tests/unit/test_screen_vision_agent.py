@@ -695,8 +695,16 @@ def test_preview_release_with_source_ids_clears_all_browser_owned_frames():
 # --- her queue of things to say --------------------------------------------
 
 
-def _agent_with_message(agent, at: float, message: str, summary: str = "看到佳了"):
-    agent._queue_message(vision_agent.Impression(at=at, summary=summary, say=message))
+def _agent_with_message(
+    agent,
+    at: float,
+    message: str,
+    summary: str = "看到佳了",
+    faces: int | None = None,
+):
+    agent._queue_message(
+        vision_agent.Impression(at=at, summary=summary, say=message, faces=faces)
+    )
 
 
 def test_saying_the_same_thing_twice_refreshes_instead_of_repeating():
@@ -717,6 +725,21 @@ def test_different_messages_are_all_kept():
     _agent_with_message(agent, now, "终于看到你了")
     _agent_with_message(agent, now + 10.0, "你在忙什么？")
     assert len(agent.peek_messages()) == 2
+
+
+def test_new_presence_state_drops_old_opposite_presence_message():
+    agent = vision_agent.VisionAgent()
+    now = time.time()
+    _agent_with_message(agent, now, "这会儿没看到人", summary="画面里没人", faces=0)
+    _agent_with_message(
+        agent,
+        now + 10.0,
+        "看到你回来了",
+        summary="看到佳了",
+        faces=1,
+    )
+    pending = agent.peek_messages()
+    assert [item["message"] for item in pending] == ["看到你回来了"]
 
 
 def test_a_message_that_went_stale_is_dropped_rather_than_delivered_late():

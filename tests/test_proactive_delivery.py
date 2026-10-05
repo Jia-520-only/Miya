@@ -324,8 +324,13 @@ def test_desktop_uses_push_or_queue_but_not_both(hub, monkeypatch, connected):
     assert result.status == ("sent" if connected else "queued")
     assert bool(hub._mobile_pending) is not connected
     assert management.broadcast_message.await_count == 1
-    assert hub.memory_manager.store_unified_memory.await_count == 1
-    assert hub.memory_manager.store_unified_memory.call_args.args[0]["_meta"]["delivery_status"] == result.status
+    assert hub.memory_manager.store_unified_memory.await_count == int(connected)
+    if not connected:
+        asyncio.run(hub.take_pending_proactive_messages("owner"))
+        assert hub.memory_manager.store_unified_memory.await_count == 1
+        assert hub.memory_manager.store_unified_memory.call_args.args[0]["_meta"]["delivery_status"] == "delivered_from_queue"
+    else:
+        assert hub.memory_manager.store_unified_memory.call_args.args[0]["_meta"]["delivery_status"] == result.status
 
 
 def test_group_without_group_sender_never_falls_back_to_private(hub):
@@ -367,12 +372,15 @@ def test_concurrent_dispatch_of_same_id_has_one_send_and_one_memory(hub):
 
 
 def test_owner_alias_does_not_mirror_or_leak_queue(hub):
-    result = asyncio.run(hub._dispatch_proactive_message("hello", "owner", platform="desktop", delivery_id="one"))
-    assert result.status == "queued"
-    assert list(hub._mobile_pending) == ["owner"]
-    assert hub.take_pending_proactive_messages("stranger") == []
-    assert len(hub.take_pending_proactive_messages("default")) == 1
-    assert hub.take_pending_proactive_messages("owner") == []
+    async def run():
+        result = await hub._dispatch_proactive_message("hello", "owner", platform="desktop", delivery_id="one")
+        assert result.status == "queued"
+        assert list(hub._mobile_pending) == ["owner"]
+        assert await hub.take_pending_proactive_messages("stranger") == []
+        assert len(await hub.take_pending_proactive_messages("default")) == 1
+        assert await hub.take_pending_proactive_messages("owner") == []
+
+    asyncio.run(run())
 
 
 def test_failed_dispatch_can_be_retried_with_same_id(hub):

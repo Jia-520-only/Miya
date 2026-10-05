@@ -1270,7 +1270,7 @@ class WebAPI:
         async def get_pending_messages(user_id: str):
             """领取目标的待发送主动消息；default 是所有者队列的别名。"""
             try:
-                msgs = self.decision_hub.take_pending_proactive_messages(str(user_id))
+                msgs = await self.decision_hub.take_pending_proactive_messages(str(user_id))
                 return {"messages": msgs}
             except Exception:
                 return {"messages": []}

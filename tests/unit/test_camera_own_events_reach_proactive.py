@@ -72,19 +72,16 @@ def test_a_reading_from_her_own_loop_is_readable_by_the_trigger():
     assert event["camera_indices"] == [0]
 
 
-def test_the_camera_trigger_fires_on_an_event_her_own_loop_wrote(chat_system):
-    """The end-to-end gap: her eyes -> the store -> the proactive trigger."""
-    from core.proactive_chat import ChatContext
+def test_a_raw_camera_event_does_not_bypass_miyas_own_voice_decision(chat_system):
+    """A stored sensor event is context, not an automatic message proposal."""
     from core.vision_context import record_camera_event
 
     _clear_camera_events()
     record_camera_event(kind="wave", summary="像是在跟你挥手。", confidence=0.9)
 
-    context = ChatContext(chat_type="private", target_id=1523878699, platform="weixin_ilink")
-    result = asyncio.run(chat_system._check_camera_aware_trigger(context.target_id, context))
+    result = asyncio.run(chat_system._check_and_respond_once(1523878699))
 
-    assert result is not None and result.should_respond, \
-        "她自己看到的手势必须能变成一句话，而不是只有浏览器推帧时才可以"
+    assert result is None or not result.should_respond
     _clear_camera_events()
 
 

@@ -287,10 +287,7 @@ export class CoreApiClient extends ApiClient {
   }
 
   /**
-   * Whether what she sees can reach her voice.
-   *
-   * Exists because this failure is invisible: the observation loop and trackers
-   * all look healthy while nothing is ever submitted to the proactive chain.
+   * Whether Miya's own proactive path is available for camera observations.
    */
   async getVisionBridge(): Promise<{ success: boolean, bridge: Record<string, any> | null }> {
     return this.instance.get('/api/vision/bridge')
