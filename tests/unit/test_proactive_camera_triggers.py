@@ -108,6 +108,19 @@ def test_the_presence_trigger_executes_without_raising(chat_system, monkeypatch)
     assert result is None or result.should_respond
 
 
+def test_running_bridge_owns_presence_speech(chat_system, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr("mcpserver.screen_vision.proactive.get_camera_bridge", lambda: SimpleNamespace(running=True))
+    generate = AsyncMock()
+    monkeypatch.setattr(chat_system.ai_client, "chat", generate)
+    _presence(monkeypatch, _PresenceSnapshot())
+    context = _context()
+    assert asyncio.run(chat_system._check_presence_trigger(context.target_id, context)) is None
+    generate.assert_not_awaited()
+
+
 def _reset_presence_bookkeeping(system) -> None:
     system._last_presence_key = ""
     system._sent_messages_history.clear()

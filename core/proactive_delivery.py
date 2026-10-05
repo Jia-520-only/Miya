@@ -28,6 +28,7 @@ def enqueue_delivery(
     platform: str = "terminal",
     chat_type: str = "private",
     store_memory: bool = True,
+    trigger_type: str = "",
 ) -> None:
     now = time.time()
     for key, messages in list(pending.items()):
@@ -44,6 +45,7 @@ def enqueue_delivery(
         "platform": platform,
         "chat_type": chat_type,
         "store_memory": store_memory,
+        "trigger_type": trigger_type,
         "_queued_at": now,
     })
     del bucket[:-100]

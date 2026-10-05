@@ -293,6 +293,8 @@ class ProactiveCoordinator:
                 "不得补造 JSON 之外的事实；必须保留异常、失败、未恢复和资源数值。"
                 "摄像头在场事件只能说明检测到或没检测到人脸，不能据此推断去了厕所、微信、喝水或其它地点。"
                 "JSON 中的消息发送平台只是投递路线，不是人的现实位置；没有物理位置证据就不要写具体去向。"
+                "memory_context 和 JSON 中标明的旧事、近期对话都只是背景，不能当成当前摄像头画面；"
+                "当前事实没有提到的杯子、食物、姿势、地点、时间长度或动作，不得写进消息。"
                 "可以参考 candidate_message，但必须按当前人格重新表达。不要输出标题、分析、JSON、模块名或动作描述。",
                 personality=self._personality,
                 ai_client=self._ai_client,

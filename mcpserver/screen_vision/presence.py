@@ -237,6 +237,13 @@ class PresenceTracker:
             snapshot.at_computer = at_desk
             snapshot.in_room = True
             self._left_at = None
+        elif body_visible:
+            snapshot.state = PRESENT
+            snapshot.label = LABELS[PRESENT]
+            snapshot.confidence = 0.5
+            snapshot.reasons = ["检测到可信骨架，但没有人脸"]
+            snapshot.in_room = True
+            self._left_at = None
         elif face_age is not None and face_age > AWAY_AFTER_SECONDS:
             departed = left_at is None
             if departed:
@@ -257,12 +264,6 @@ class PresenceTracker:
             snapshot.reasons = [f"{face_age:.0f} 秒没有检测到人脸，但还没到确认离开的时长"]
             snapshot.at_computer = False
             snapshot.in_room = body_visible or movement
-        elif body_visible:
-            snapshot.state = PRESENT
-            snapshot.label = LABELS[PRESENT]
-            snapshot.confidence = 0.5
-            snapshot.reasons = ["检测到可信骨架，但没有人脸"]
-            snapshot.in_room = True
         else:
             snapshot.state = UNKNOWN
             snapshot.label = LABELS[UNKNOWN]

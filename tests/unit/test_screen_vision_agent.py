@@ -127,6 +127,110 @@ def test_parse_interpretation_accepts_plain_json():
     assert parsed["say"] == "还在忙呀"
 
 
+def test_interpreter_context_is_background_and_cannot_supply_objects():
+    prompt = build_interpreter_prompt(
+        local_reading={"faces": 0, "pose_quality": {"usable": True}, "observed_at": "2026-10-05 14:13:00"},
+        intent_card="留意佳有没有休息", memory_card="以前猜测佳困了",
+        cadence_seconds=30, conversation_context="assistant: 那杯水凉了",
+        long_term_context="佳买过零食",
+    )
+    assert "近期对话背景（不是当前画面证据）" in prompt
+    assert "长期记忆背景（不是当前画面证据）" in prompt
+    assert "历史观察印象（过去的推测，不是当前画面证据）" in prompt
+    assert "不能据此确定杯子、食物、手机等物体" in prompt
+    assert "那杯水凉了" in prompt and "佳买过零食" in prompt
+    assert '"检测到可信人体骨架": true' in prompt
+    assert "2026-10-05 14:13:00" in prompt
+
+
+def test_interpretation_receives_the_unified_dialogue_and_memory(monkeypatch, agency):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    snapshot = SimpleNamespace(
+        messages=[SimpleNamespace(role="user", content="刚买了零食", timestamp="2026-10-05")],
+        memory_context="佳喜欢聊游戏",
+    )
+    provider = AsyncMock(return_value=snapshot)
+    monkeypatch.setattr(vision_agent, "_context_provider", provider)
+    monkeypatch.setattr(vision_agent, "_context_provider_loop", None)
+    agent = vision_agent.VisionAgent()
+    call_model = AsyncMock(return_value=('{"summary":"有人坐着","notable":false}', "test"))
+    monkeypatch.setattr(agent, "_call_model", call_model)
+
+    result = asyncio.run(agent._interpret({"faces": 1}, agency))
+
+    assert result["summary"] == "有人坐着"
+    provider.assert_awaited_once()
+    prompt = call_model.call_args.args[1]
+    assert "user: 刚买了零食" in prompt
+    assert "佳喜欢聊游戏" in prompt
+
+
+def test_unified_context_provider_runs_on_its_own_loop(monkeypatch):
+    import threading
+    from types import SimpleNamespace
+
+    provider_loop = asyncio.new_event_loop()
+    ready = threading.Event()
+    called_threads = []
+
+    def run_provider_loop():
+        asyncio.set_event_loop(provider_loop)
+        provider_loop.call_soon(ready.set)
+        provider_loop.run_forever()
+
+    async def provider():
+        called_threads.append(threading.current_thread().name)
+        assert asyncio.get_running_loop() is provider_loop
+        return SimpleNamespace(messages=[], memory_context="统一记忆")
+
+    thread = threading.Thread(target=run_provider_loop, name="test-camera-context", daemon=True)
+    thread.start()
+    try:
+        assert ready.wait(timeout=5)
+        monkeypatch.setattr(vision_agent, "_context_provider", provider)
+        monkeypatch.setattr(vision_agent, "_context_provider_loop", provider_loop)
+        assert asyncio.run(vision_agent.VisionAgent._miya_context_for_interpretation()) == ("", "统一记忆")
+        assert called_threads == ["test-camera-context"]
+    finally:
+        provider_loop.call_soon_threadsafe(provider_loop.stop)
+        thread.join(timeout=5)
+        provider_loop.close()
+
+
+def test_unified_context_timeout_keeps_the_observer_available(monkeypatch):
+    async def provider():
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(vision_agent, "_context_provider", provider)
+    monkeypatch.setattr(vision_agent, "_context_provider_loop", None)
+    monkeypatch.setattr(vision_agent, "get_qq_config", lambda *args, **kwargs: 0.01)
+    assert asyncio.run(vision_agent.VisionAgent._miya_context_for_interpretation()) == ("", "")
+
+
+def test_no_face_or_body_cannot_queue_a_hallucinated_greeting(monkeypatch, agency):
+    from unittest.mock import AsyncMock
+
+    agent = vision_agent.VisionAgent()
+    monkeypatch.setattr(vision_agent, "get_vision_agency", lambda: agency)
+    monkeypatch.setattr(agent, "_look", AsyncMock(return_value={
+        "status": "success", "faces": 0, "pose_quality": {"usable": False},
+        "message": "没有可靠的人体线索",
+    }))
+    monkeypatch.setattr(agent, "_interpret", AsyncMock(return_value={
+        "summary": "猜测有人", "activity": "", "mood": "", "attention": "",
+        "notable": True, "say": "你回来啦",
+    }))
+    monkeypatch.setattr(agent, "_remember_notable", AsyncMock(return_value=False))
+
+    result = asyncio.run(agent.tick())
+
+    assert result["impression"]["notable"] is False
+    assert result["impression"]["say"] == ""
+    assert agent.peek_messages() == []
+
+
 def test_parse_interpretation_survives_a_fenced_reply():
     parsed = parse_interpretation('Sure.\n```json\n{"summary":"他在看手机","notable":false,"say":"SKIP"}\n```')
     assert parsed is not None

@@ -1702,6 +1702,13 @@ class ProactiveChatSystem:
         The tracker raises ``transition`` exactly once per real state change, so
         this path never repeats itself for a single arrival or departure.
         """
+        try:
+            from mcpserver.screen_vision.proactive import get_camera_bridge
+
+            if get_camera_bridge().running:
+                return None
+        except Exception:
+            pass
         config = self._camera_aware_config.get("presence") or {}
         if not config.get("enabled", True):
             return None
@@ -1756,7 +1763,7 @@ class ProactiveChatSystem:
             from mcpserver.screen_vision.proactive import recall_relevant
 
             memory_note = await recall_relevant(
-                f"佳 {'回到' if transition == 'returned' else '离开'}电脑前 休息 作息"
+                f"佳 {'回到' if transition == 'returned' else '离开'}电脑前 最近对话 兴趣 话题"
             )
             if memory_note:
                 prompt = f"{prompt}\n\n{memory_note}"
@@ -1835,13 +1842,15 @@ class ProactiveChatSystem:
         except Exception:  # noqa: BLE001
             logger.debug("[主动聊天] 活动事件召回记忆失败", exc_info=True)
         prompt = (
-            "你是弥娅，正陪在佳身边。下面这些是你此刻真正感知到的：\n"
+            "你是弥娅，正陪在佳身边。下面是近期背景，旧对话和记忆不是当前画面证据：\n"
             f"{deep_context}\n\n"
             f"{card}\n"
             "他刚刚的这个变化，你要不要开口？像一个人那样判断，而不是像告警器："
-            "他在专心、他刚被打断、他已经很久没歇、或者这句话现在说出来只是打扰——"
+            "他在专心、他刚被打断、他明确说过累了或想休息、或者这句话现在说出来只是打扰——"
             "那就不说，只回复 SKIP。什么时候开口、说什么都由你定。"
             "要开口就用一句不超过 25 字的自然口语，语气贴合你当下的形态；"
+            "不要把静坐、歪头、张嘴或看起来没动当成困倦、缺水或需要纠正坐姿；"
+            "没有佳明确表达时，不要自动安排喝水、睡觉、吃饭或其他生活指导。"
             "不要说摄像头、识别、置信度这类字眼，也不要报流水账。"
         )
         try:

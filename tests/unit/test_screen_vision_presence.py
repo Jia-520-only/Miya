@@ -89,6 +89,16 @@ def test_body_without_face_still_counts_as_in_the_room():
     assert snapshot.at_computer is False
 
 
+def test_fresh_body_prevents_departure_after_a_long_face_gap():
+    tracker = _fresh_tracker()
+    tracker.observe(at=1000.0, faces=1, face_ratio=0.05, face_score=0.9, centered=True)
+    snapshot = tracker.observe(at=1000.0 + presence.AWAY_AFTER_SECONDS + 30,
+                               faces=0, pose_usable=True, posture="sitting")
+    assert snapshot.state == presence.PRESENT
+    assert snapshot.in_room is True
+    assert snapshot.transition != "left"
+
+
 def test_presence_from_local_result_reads_nested_signals():
     tracker = _fresh_tracker()
     result = {

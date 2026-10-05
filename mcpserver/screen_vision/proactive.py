@@ -246,7 +246,7 @@ async def _conversation_context(limit: int = 4) -> str:
         from memory.context_identity import ContextIdentity
 
         messages = await ContextAssembler(history_manager=manager).load_dialogue(
-            ContextIdentity.resolve(owner, platform="qq"), limit=int(limit),
+            ContextIdentity.resolve(owner, platform=active_platform() or "unknown"), limit=int(limit),
         )
     except Exception:
         logger.debug("[CameraProactive] 读取最近对话失败", exc_info=True)
@@ -262,7 +262,7 @@ async def _conversation_context(limit: int = 4) -> str:
     return "\n".join(lines)
 
 
-async def build_presence_event(snapshot, *, changed_at: float = 0.0) -> dict[str, Any]:
+async def build_presence_event(snapshot, *, changed_at: float = 0.0, transition: str = "") -> dict[str, Any]:
     """A structured fact for the coordinator: Jia came back or went away.
 
     ``changed_at`` is the moment the tracker recorded the change. It goes into
@@ -280,7 +280,7 @@ async def build_presence_event(snapshot, *, changed_at: float = 0.0) -> dict[str
         "依据": list(getattr(snapshot, "reasons", []) or []),
         "置信度": round(float(getattr(snapshot, "confidence", 0.0) or 0.0), 2),
     }
-    transition = str(getattr(snapshot, "transition", "") or "")
+    transition = str(transition or getattr(snapshot, "transition", "") or "")
     if transition:
         facts["变化"] = transition
     if changed_at:
@@ -468,9 +468,10 @@ class CameraProactiveBridge:
                 # Worth remembering either way - a return or a departure is a fact
                 # about him, not about whether she managed to speak. The memory
                 # write carries its own, much longer throttle.
-                result["remembered"] = await self._remember_presence(presence, now)
+                result["remembered"] = await self._remember_presence(presence, now, transition=transition)
+                submitted = False
                 if speak_enabled:
-                    event = await build_presence_event(presence, changed_at=stamp)
+                    event = await build_presence_event(presence, changed_at=stamp, transition=transition)
                     submitted = await self._submit(event, key=f"camera:presence:{transition}:{stamp}")
                     result["presence"] = submitted
                 if submitted or not speak_enabled:
@@ -511,10 +512,10 @@ class CameraProactiveBridge:
             logger.debug("[CameraProactive] 提交结构化事件失败", exc_info=True)
             return False
 
-    async def _remember_presence(self, presence, now: float) -> bool:
+    async def _remember_presence(self, presence, now: float, *, transition: str = "") -> bool:
         if now - self._remembered_at < MEMORY_MIN_INTERVAL_SECONDS:
             return False
-        transition = str(getattr(presence, 'transition', '') or '').strip()
+        transition = str(transition or getattr(presence, 'transition', '') or '').strip()
         if not transition:
             return False
         stored = await remember_observation(

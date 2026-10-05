@@ -341,6 +341,24 @@ def test_group_without_group_sender_never_falls_back_to_private(hub):
     platform.send_private_message.assert_not_called()
 
 
+@pytest.mark.parametrize("connected", [False, True])
+def test_camera_message_keeps_its_source_in_unified_memory(hub, monkeypatch, connected):
+    management = SimpleNamespace(broadcast_message=AsyncMock(return_value=int(connected)))
+    monkeypatch.setattr("core.management_api.get_management_api", lambda: management)
+    result = asyncio.run(hub._dispatch_proactive_message(
+        "看到有人回来了", "owner", platform="desktop", delivery_id="camera-one", trigger_type="camera_aware",
+    ))
+    assert result.status == ("sent" if connected else "queued")
+    if not connected:
+        assert hub.memory_manager.store_unified_memory.await_count == 0
+        asyncio.run(hub.take_pending_proactive_messages("owner"))
+    hub.memory_manager.store_unified_memory.assert_awaited_once()
+    perception = hub.memory_manager.store_unified_memory.call_args.args[0]
+    assert perception["response"] == "看到有人回来了"
+    assert perception["_meta"]["source"] == "camera"
+    assert perception["_meta"]["trigger_type"] == "camera_aware"
+
+
 def test_group_send_failure_has_no_private_fallback_or_fake_memory(hub):
     platform = SimpleNamespace(is_online=True, send_group_message=AsyncMock(return_value=False))
     hub.platform_registry = SimpleNamespace(get=lambda name: platform)

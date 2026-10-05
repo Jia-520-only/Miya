@@ -95,6 +95,8 @@ def vision_context_card(*, now: float | None = None) -> str:
         return ""
 
     lines.append("[弥娅的摄像头所见]")
+    lines.append("- 事实边界：下面的解读是推测，观察意图和旧对话不是当前画面证据；"
+                 "头歪、张嘴或静坐不能证明困倦。没有直接线索就不能确定杯子、水温、食物或喝水进度。")
     if browser_card:
         browser_lines = browser_card.splitlines()[1:]
         if browser_lines:
@@ -107,7 +109,7 @@ def vision_context_card(*, now: float | None = None) -> str:
         lines.append("- 最近的迹象：" + " → ".join(reversed(recent_activity)))
 
     if latest_at and interpreted:
-        lines.append(f"- 最近一次观察（{_human_age(age)}）：{latest.get('summary') or ''}")
+        lines.append(f"- 最近一次观察的解读（推测，{_human_age(age)}）：{latest.get('summary') or ''}")
         expression = str(latest.get("expression_text") or "").strip()
         if expression:
             lines.append(f"- 脸上的样子：{expression}")

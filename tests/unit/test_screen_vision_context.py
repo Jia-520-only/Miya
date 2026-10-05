@@ -92,6 +92,14 @@ def test_the_card_carries_her_reading_face_and_intents():
     assert "在不在电脑前" in card, "她自己在留意什么也要在里面"
 
 
+def test_reply_context_marks_interpretation_as_inference():
+    _record_observation()
+    card = vision_context.vision_context_card()
+    assert "最近一次观察的解读（推测" in card
+    assert "观察意图和旧对话不是当前画面证据" in card
+    assert "头歪、张嘴或静坐不能证明困倦" in card
+
+
 def test_the_card_never_contains_image_data():
     """The long-standing promise: derived text only, never a frame."""
     stream = get_vision_stream()

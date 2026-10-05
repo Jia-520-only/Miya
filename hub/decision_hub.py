@@ -936,6 +936,7 @@ class DecisionHub:
                     platform=str(item.get("platform", "terminal")),
                     delivery_id=str(item.get("delivery_id", "")),
                     delivery_status="delivered_from_queue",
+                    trigger_type=str(item.get("trigger_type", "")),
                 )
         return messages
 
@@ -948,6 +949,7 @@ class DecisionHub:
         platform: str,
         delivery_id: str,
         delivery_status: str,
+        trigger_type: str = "",
     ) -> None:
         if not message:
             return
@@ -957,7 +959,12 @@ class DecisionHub:
             "group_id": str(target_id) if chat_type == "group" else "0",
             "message_type": chat_type,
             "response": message,
-            "_meta": {"delivery_id": delivery_id, "delivery_status": delivery_status},
+            "_meta": {
+                "delivery_id": delivery_id,
+                "delivery_status": delivery_status,
+                "source": "camera" if trigger_type == "camera_aware" else "proactive",
+                "trigger_type": trigger_type,
+            },
         }
         try:
             await self.memory_manager.store_unified_memory(perception, role="assistant")
@@ -1089,6 +1096,7 @@ class DecisionHub:
                     platform=platform or "terminal",
                     chat_type=chat_type,
                     store_memory=store_memory,
+                    trigger_type=trigger_type,
                 )
                 queued = True
 
@@ -1108,6 +1116,7 @@ class DecisionHub:
                 platform=platform,
                 delivery_id=delivery_id,
                 delivery_status=result.status,
+                trigger_type=trigger_type,
             )
 
         # WS 广播——让桌面前端实时显示主动聊天内容
@@ -1541,7 +1550,19 @@ class DecisionHub:
         if getattr(self, "_camera_bridge_task", None) is not None:
             return
         try:
-            from mcpserver.screen_vision.proactive import get_camera_bridge
+            from mcpserver.screen_vision.proactive import active_platform, get_camera_bridge, _owner_target_id
+            from mcpserver.screen_vision.vision_agent import set_context_provider
+
+            async def camera_context_provider():
+                from memory.context_assembler import ContextAssembler
+                from memory.context_identity import ContextIdentity
+
+                identity = ContextIdentity.resolve(_owner_target_id(), platform=active_platform() or "unknown")
+                return await ContextAssembler(self.memory_net).build(
+                    identity, query="最近的对话", limit=8,
+                )
+
+            set_context_provider(camera_context_provider, loop=asyncio.get_running_loop())
 
             bridge = get_camera_bridge()
             if bridge.start():

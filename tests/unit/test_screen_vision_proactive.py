@@ -320,6 +320,45 @@ def test_memory_writes_are_rate_limited(monkeypatch, bridge_and_coordinator):
     assert len(calls) == 2
 
 
+def test_settled_presence_still_records_the_original_transition(monkeypatch, bridge_and_coordinator):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    bridge, coordinator = bridge_and_coordinator
+    snapshot = _Snapshot(state="at_desk", transition="")
+    tracker = SimpleNamespace(snapshot=lambda: snapshot, last_transition=lambda: ("returned", snapshot.updated_at))
+    monkeypatch.setattr("mcpserver.screen_vision.presence.get_presence_tracker", lambda: tracker)
+    monkeypatch.setattr(proactive, "recall_relevant", _async_empty)
+    remember = AsyncMock(return_value=True)
+    monkeypatch.setattr(proactive, "remember_observation", remember)
+    _activity(monkeypatch, None)
+
+    result = asyncio.run(bridge.tick())
+
+    assert result["remembered"] is True
+    assert result["presence"] is True
+    assert coordinator.events[0]["event"]["facts"]["变化"] == "returned"
+    assert remember.call_args.kwargs["summary"] == "摄像头在场变化：returned"
+
+
+def test_disabled_presence_speech_still_remembers_without_raising(monkeypatch, bridge_and_coordinator):
+    from unittest.mock import AsyncMock
+
+    bridge, coordinator = bridge_and_coordinator
+    monkeypatch.setattr(proactive, "camera_aware_config", lambda: {"presence": {"enabled": False}})
+    remember = AsyncMock(return_value=True)
+    monkeypatch.setattr(proactive, "remember_observation", remember)
+    _presence(monkeypatch, state="returned", transition="returned")
+    _activity(monkeypatch, None)
+
+    result = asyncio.run(bridge.tick())
+
+    assert result["remembered"] is True
+    assert result["presence"] is None
+    assert coordinator.events == []
+    assert bridge._last_presence_state == "returned"
+
+
 def test_a_sustained_activity_is_remembered_even_without_a_remark(monkeypatch, bridge_and_coordinator):
     """"He typed for three hours" is exactly what she should be able to recall."""
     bridge, _coordinator = bridge_and_coordinator
@@ -549,4 +588,3 @@ def test_the_shipped_yaml_survives_normalization():
     assert camera["presence"]["notify_on"] == ["returned"]
     assert camera["activity"]["enabled"] is True
     assert camera["agency"] == {"enabled": True, "max_age_seconds": 600}
-

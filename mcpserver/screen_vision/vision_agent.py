@@ -23,6 +23,7 @@ claiming understanding and keeps only the local facts, labelled as such.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -32,6 +33,8 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from config.config_utils import get_qq_config
 
 logger = logging.getLogger("screen_vision.agent")
 
@@ -356,16 +359,12 @@ def get_vision_agency() -> VisionAgency:
 # --- the interpreter -------------------------------------------------------
 
 
-INTERPRETER_SYSTEM_PROMPT = (
-    "你是弥娅，正在通过摄像头观察画面里的人。"
-    "你看到的是本机本地模型给出的线索，以及你自己的观察意图和先前印象。"
-    "请像一个人那样去理解，而不是像仪表盘那样读数：结合线索、你先前看到的、和你正在留意的事，"
-    "形成对画面中人物此刻状态的整体印象。"
-    "严禁编造画面里没有的东西。看不清就直说看不清。"
-    "只有身份字段明确确认了佳，才可以称呼画面里的人为佳；身份未登记或未知时，"
-    "只能说画面里的人、有人，不能把猜测当成身份。"
-    "不要提及摄像头、模型、识别、置信度、关键点这类字眼。"
-    "只输出一个 JSON 对象，不要输出其它任何内容。"
+INTERPRETER_SYSTEM_PROMPT = get_qq_config(
+    "tools", "qq_image_analyzer", "camera_agency", "interpreter_system_prompt", default="",
+) or (
+    "你是弥娅，只收到本地测量线索，没有原始图像。只描述当前线索能支持的事实，"
+    "旧对话、记忆和观察意图不能补全画面；身份未知时不能称作佳。"
+    "不要提及摄像头、模型、识别、置信度、关键点。只输出 JSON 对象。"
 )
 
 
@@ -375,6 +374,8 @@ def build_interpreter_prompt(
     intent_card: str,
     memory_card: str,
     cadence_seconds: float,
+    conversation_context: str = "",
+    long_term_context: str = "",
 ) -> str:
     """Assemble the prompt that lets Miya interpret one moment herself."""
     emotion = local_reading.get("emotion") or {}
@@ -385,7 +386,10 @@ def build_interpreter_prompt(
     hand_shapes = [hand.get("shape") or {} for hand in (hands.get("hands") or [])]
     facts = {
         "本地线索（可能不完整或不准）": {
-            "画面里看到人": bool(local_reading.get("faces")),
+            "检测到人脸": bool(local_reading.get("faces")),
+            "检测到可信人体骨架": bool((local_reading.get("pose_quality") or {}).get("usable")),
+            "在场时序判断": local_reading.get("presence") or {},
+            "观察时刻": local_reading.get("observed_at") or time.strftime("%Y-%m-%d %H:%M:%S"),
             "本地读出的活动": (local_reading.get("action") or {}).get("label") or "没读出来",
             "活动是否可信": bool((local_reading.get("pose_quality") or {}).get("usable")),
             "表情模型给出的标签": emotion_label,
@@ -413,11 +417,24 @@ def build_interpreter_prompt(
     if intent_card:
         sections.append(intent_card)
     if memory_card:
-        sections.append(memory_card)
+        sections.append("【历史观察印象（过去的推测，不是当前画面证据）】\n" + memory_card)
+    sections.append(str(get_qq_config(
+        "tools", "qq_image_analyzer", "camera_agency", "evidence_policy", default="",
+    ) or "【事实边界】历史对话和记忆不是当前画面证据。旧助手说法不是用户确认的事实；没有新证据就不重复提醒。"))
+    if conversation_context:
+        sections.append(
+            "【近期对话背景（不是当前画面证据）】\n"
+            + str(conversation_context).strip()[:3000]
+        )
+    if long_term_context:
+        sections.append(
+            "【长期记忆背景（不是当前画面证据）】\n"
+            + str(long_term_context).strip()[:3000]
+        )
     sections.append(
         f"你大约每 {int(cadence_seconds)} 秒看一次。\n"
-        "手部模型看不到物体，只量得到手的形状——「握着什么东西」要由你自己结合手上的形状、"
-        "手相对脸的位置和这些读数判断，判断不了就留空，不要凭常识硬猜。\n"
+        "手部模型看不到物体，只量得到手的形状和位置；不能据此确定杯子、食物、手机等物体，"
+        "也不能确定喝水、进食或水温，无法确定的活动留空。\n"
         "请只输出这样的 JSON：\n"
         '{"summary":"一句话描述你看到的（不超过40字）",'
         '"activity":"你判断画面里的人在做什么（不超过15字，判断不了就留空）",'
@@ -1199,6 +1216,7 @@ class VisionAgent:
         # the event should record - not the moment the model finished replying.
         reading_at = time.time()
         reading: dict[str, Any] = {
+            "observed_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(reading_at)),
             "faces": fused.get("faces"),
             "action": fused.get("action"),
             "pose_quality": fused.get("pose_quality"),
@@ -1221,13 +1239,15 @@ class VisionAgent:
         # with his phone" was wiped out by the next failed grab, and she reported
         # no activity at all while classifying one every round.
         saw_something = bool(fused.get("observations"))
+        captures = fused.get("captures") or []
         if saw_something:
             try:
-                presence_from_local_result({"observations": [{
+                snapshot = presence_from_local_result({"observations": [{
                     "face_signals": fused.get("face_signals"),
                     "pose_quality": fused.get("pose_quality"),
                     "action": fused.get("action"),
-                }], "faces": fused.get("faces")})
+                }], "faces": fused.get("faces"), "luminance": fused.get("luminance")})
+                reading["presence"] = snapshot.to_dict()
             except Exception:
                 logger.debug("[VisionAgent] 在场状态更新失败", exc_info=True)
             # Her autonomous loop is the main observer, so it must feed the
@@ -1283,6 +1303,9 @@ class VisionAgent:
         if interpret and mode != "local" and not unreadable:
             interpretation = await self._interpret(reading, agency)
             if interpretation:
+                if not reading.get("faces") and not (reading.get("pose_quality") or {}).get("usable"):
+                    interpretation["notable"] = False
+                    interpretation["say"] = ""
                 interpreter_name = str(interpretation.pop("_interpreter", "") or "")
                 impression = Impression(
                     at=time.time(),
@@ -1336,7 +1359,6 @@ class VisionAgent:
                 self._last_error = ""
             cadence = self._next_interval_locked()
 
-        captures = fused.get("captures") or []
         # Capture is what the pixels cost; local analysis is the rest of the
         # looking. Reported separately so both numbers mean something.
         capture_seconds = float(fused.get("capture_seconds") or 0.0)
@@ -1435,11 +1457,14 @@ class VisionAgent:
             from .service import ScreenVisionService
 
             service = ScreenVisionService()
+            conversation_context, long_term_context = await self._miya_context_for_interpretation()
             prompt = build_interpreter_prompt(
                 local_reading=reading,
                 intent_card=agency.intent_card(),
                 memory_card=agency.memory_card(),
                 cadence_seconds=self._interval,
+                conversation_context=conversation_context,
+                long_term_context=long_term_context,
             )
             raw = await self._call_model(service, prompt)
             if raw is None:
@@ -1462,6 +1487,42 @@ class VisionAgent:
             with self._lock:
                 self._last_error = str(exc)[:200]
             return None
+
+    @staticmethod
+    async def _miya_context_for_interpretation() -> tuple[str, str]:
+        """Read owner dialogue and recall on the memory provider's event loop."""
+        with _chat_client_lock:
+            provider, provider_loop = _context_provider, _context_provider_loop
+        if provider is None:
+            return "", ""
+        try:
+            timeout = float(get_qq_config(
+                "tools", "qq_image_analyzer", "camera_agency", "context_timeout_seconds", default=8,
+            ))
+
+            async def read_context():
+                result = provider()
+                return await result if inspect.isawaitable(result) else result
+
+            if provider_loop is not None and provider_loop is not asyncio.get_running_loop():
+                if not provider_loop.is_running():
+                    return "", ""
+                future = asyncio.run_coroutine_threadsafe(read_context(), provider_loop)
+                snapshot = await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout)
+            else:
+                snapshot = await asyncio.wait_for(read_context(), timeout=timeout)
+            dialogue = "\n".join(
+                f"- [{message.timestamp}] {message.role}: {str(message.content or '').strip()[:300]}"
+                for message in snapshot.messages[-8:]
+                if str(message.content or "").strip()
+            )
+            memory_context = str(snapshot.memory_context or "").strip()[:3000]
+            logger.info("[VisionAgent] 统一上下文已接入：近期对话 %d 条，记忆背景 %d 字",
+                        len(snapshot.messages[-8:]), len(memory_context))
+            return dialogue, memory_context
+        except Exception:
+            logger.warning("[VisionAgent] 读取弥娅统一上下文失败", exc_info=True)
+            return "", ""
 
     @staticmethod
     async def _call_model(service, prompt: str) -> tuple[str, str] | None:
@@ -1637,6 +1698,8 @@ class VisionAgent:
 
 _agent = VisionAgent()
 _chat_client: Any = None
+_context_provider: Any = None
+_context_provider_loop: asyncio.AbstractEventLoop | None = None
 _chat_client_lock = threading.Lock()
 _seed_lock = threading.Lock()
 
@@ -1780,3 +1843,11 @@ def set_chat_client(client: Any) -> None:
 def get_chat_client() -> Any:
     with _chat_client_lock:
         return _chat_client
+
+
+def set_context_provider(provider: Any, *, loop: asyncio.AbstractEventLoop | None = None) -> None:
+    """Connect camera interpretation to the daemon's unified memory view."""
+    global _context_provider, _context_provider_loop
+    with _chat_client_lock:
+        _context_provider = provider
+        _context_provider_loop = loop
