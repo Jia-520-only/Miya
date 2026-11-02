@@ -171,11 +171,22 @@ def test_the_observation_loop_reads_one_camera_at_a_time():
 
 def test_autonomous_vision_checks_identity_before_calling_someone_jia():
     """Unenrolled or unknown faces must not be promoted to the user."""
-    source = VISION_AGENT.read_text(encoding="utf-8")
+    from mcpserver.screen_vision.vision_agent import (
+        INTERPRETER_SYSTEM_PROMPT,
+        build_interpreter_prompt,
+    )
 
-    assert "identity=True" in source
-    assert "身份未登记或未知时" in source
-    assert "只能说画面里的人、有人" in source
+    # The interpreter policy lives in qq_config.yaml. Inspect the prompt used
+    # by the model, rather than obsolete wording in the Python source.
+    assert "只有身份字段明确确认了佳" in INTERPRETER_SYSTEM_PROMPT
+    prompt = build_interpreter_prompt(
+        local_reading={"faces": 1},
+        intent_card="想知道佳有没有离开座位",
+        memory_card="佳刚才在电脑前",
+        cadence_seconds=30,
+    )
+    assert '"身份": "未知"' in prompt
+    assert '"activity":"你判断画面里的人在做什么' in prompt
 
 
 def test_the_sweep_does_not_probe_before_it_walks():

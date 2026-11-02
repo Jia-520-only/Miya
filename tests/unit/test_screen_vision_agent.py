@@ -640,6 +640,26 @@ def single_camera_observer(monkeypatch):
     return agent, manager, pool, calls
 
 
+@pytest.mark.parametrize("identity_enabled", [False, True])
+def test_observation_passes_identity_setting_to_local_analysis(single_camera_observer, monkeypatch, identity_enabled):
+    from mcpserver.screen_vision import local_camera
+
+    agent, _manager, _pool, _calls = single_camera_observer
+    monkeypatch.setattr("core.camera_control.read_state", lambda: {"identity_recognition": identity_enabled})
+    received = []
+
+    def analyze(_data, **kwargs):
+        received.append(kwargs["identity"])
+        return {"status": "success", "faces": 1, "luminance": 90.0, "observations": []}
+
+    monkeypatch.setattr(local_camera, "analyze_local_frame", analyze)
+
+    result = asyncio.run(agent._look())
+
+    assert result["faces"] == 1
+    assert received == [identity_enabled]
+
+
 @pytest.mark.parametrize("failed_other_camera", [False, True])
 def test_single_camera_keeps_a_fresh_reader_across_sweeps(single_camera_observer, monkeypatch, failed_other_camera):
     agent, manager, pool, calls = single_camera_observer
