@@ -13,16 +13,29 @@ MIYA 统一模型池管理器 v7.0
 import json
 import logging
 import os
+import subprocess
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 
 from config.config_utils import get_api_key
 
 logger = logging.getLogger("model_pool_manager")
+
+# 本地端点可用性探测缓存：{base_url: (时间戳, 是否可用)}
+_LOCAL_PROBE_CACHE: Dict[str, Tuple[float, bool]] = {}
+_LOCAL_PROBE_TTL = 10.0
+_LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1", "0.0.0.0")
+
+# 本地模型按需拉起（像云端 API 一样随叫随用）：{base_url: 上次尝试时间}
+_LOCAL_AUTOSTART_ATTEMPT: Dict[str, float] = {}
+_LOCAL_AUTOSTART_COOLDOWN = 120.0
 
 PROJECT_ROOT = Path(__file__).parent.parent
 CONFIG_DIR = PROJECT_ROOT / "config"
@@ -261,11 +274,20 @@ class ModelPoolManager:
                 max_tokens = model_conf["model_defaults"].get("max_tokens", 4096)
 
             disabled = model_conf.get("disabled", False)
+            provider = model_conf.get("provider", "openai")
+            base_url = model_conf.get("base_url", "")
+            # Local OpenAI-compatible servers often do not require a real API key.
+            local_without_key = str(provider or "").lower() in {"local_llama", "ollama", "local"}
+            if not local_without_key:
+                try:
+                    local_without_key = (urlparse(str(base_url).strip()).hostname or "").lower() in _LOCAL_HOSTS
+                except Exception:
+                    local_without_key = False
             model = Model(
                 id=model_id,
                 name=model_conf.get("name", ""),
-                provider=model_conf.get("provider", "openai"),
-                base_url=model_conf.get("base_url", ""),
+                provider=provider,
+                base_url=base_url,
                 env_key=env_key,
                 api_key=api_key,
                 type=model_conf.get("type", "chat"),
@@ -279,7 +301,7 @@ class ModelPoolManager:
                 max_tokens=max_tokens,
                 description=model_conf.get("description", ""),
                 temperature=model_conf.get("temperature"),
-                enabled=bool(api_key) and not disabled,
+                enabled=(bool(api_key) or local_without_key) and not disabled,
             )
             self._models[model_id] = model
 
@@ -329,14 +351,29 @@ class ModelPoolManager:
         model = self._models.get(model_id)
         if model:
             if model.env_key:
-                return os.getenv(model.env_key, "")
+                value = os.getenv(model.env_key, "")
+                if value:
+                    return value
             # 尝试从原始配置获取
             if model_id in self._config.get("models", {}):
-                return self._config["models"][model_id].get("api_key", "")
+                configured = self._config["models"][model_id].get("api_key", "")
+                if configured:
+                    return configured
+            if model.api_key:
+                return model.api_key
         return ""
 
     def get_route(self, task_type: str) -> Optional[ModelRoute]:
         return self._routes.get(task_type)
+
+    @staticmethod
+    def _is_local_model(model: Model) -> bool:
+        if str(model.provider or "").lower() in {"local_llama", "ollama", "local"}:
+            return True
+        try:
+            return (urlparse((model.base_url or "").strip()).hostname or "").lower() in _LOCAL_HOSTS
+        except Exception:
+            return False
 
     def _model_dict(self) -> Dict[str, Model]:
         return self._models
@@ -352,15 +389,140 @@ class ModelPoolManager:
 
     def select_model(self, task_type: str = "simple_chat") -> Optional[Model]:
         candidates = self._routes.get(task_type, ModelRoute())
-        for model_id in [candidates.primary, candidates.secondary, candidates.fallback]:
+        for model_id in [candidates.primary, candidates.secondary, candidates.third, candidates.fallback]:
             if model_id:
                 model = self._models.get(model_id)
-                if model and model.enabled:
+                if model and model.enabled and self._probe_local_endpoint(model):
                     return model
         # 避免无限递归：如果已经是 simple_chat 则直接返回 None
         if task_type == "simple_chat":
             return None
         return self.select_model("simple_chat")
+
+    def _probe_local_endpoint(self, model: Model) -> bool:
+        """验证本地 OpenAI 兼容端点已就绪；未就绪时由路由选择云端候选。
+
+        通过 /models HTTP 接口确认服务可用，而不是仅判断端口正在监听。
+        云端模型一律返回 True。探测结果缓存 10 秒，避免每个请求都建连。
+        """
+        base_url = (model.base_url or "").strip()
+        if not self._is_local_model(model):
+            return True
+        if not base_url:
+            return False
+
+        now = time.time()
+        cached = _LOCAL_PROBE_CACHE.get(base_url)
+        if cached and (now - cached[0]) < _LOCAL_PROBE_TTL:
+            return cached[1]
+
+        ok = False
+        try:
+            parsed = urlparse(base_url)
+            if not parsed.scheme or not parsed.hostname:
+                raise ValueError("本地模型 base_url 无效")
+            if parsed.path.rstrip("/").endswith("/models"):
+                probe_url = base_url
+            elif parsed.path.rstrip("/").endswith("/v1"):
+                probe_url = base_url.rstrip("/") + "/models"
+            else:
+                probe_url = base_url.rstrip("/") + "/v1/models"
+            request = Request(probe_url, headers={"Authorization": f"Bearer {model.api_key}"})
+            with urlopen(request, timeout=0.5) as response:
+                ok = 200 <= response.status < 300
+        except Exception:
+            ok = False
+
+        _LOCAL_PROBE_CACHE[base_url] = (now, ok)
+        if not ok:
+            try:
+                host = (urlparse(base_url).hostname or "").lower()
+            except Exception:
+                host = ""
+            if host in _LOCAL_HOSTS:
+                self._maybe_autostart_local(base_url)
+            logger.warning("[ModelPoolManager] 本地端点不可用，自动回退: %s (%s)", model.id, base_url)
+        return ok
+
+    def _select_cloud_fallback(self, unavailable_model_id: str) -> Optional[Model]:
+        """显式请求本地模型但它不可用时，优先取同路由云端候选。"""
+        candidate_ids: List[str] = []
+        for route in self._routes.values():
+            route_ids = [route.primary, route.secondary, route.third, route.fallback]
+            if unavailable_model_id in route_ids:
+                candidate_ids.extend(
+                    model_id for model_id in route_ids if model_id and model_id != unavailable_model_id
+                )
+
+        candidate_ids.extend(
+            model.id
+            for model in sorted(self._models.values(), key=lambda item: item.priority, reverse=True)
+            if model.id != unavailable_model_id
+        )
+        seen = set()
+        for model_id in candidate_ids:
+            if model_id in seen:
+                continue
+            seen.add(model_id)
+            model = self._models.get(model_id)
+            if (
+                model
+                and model.enabled
+                and not self._is_local_model(model)
+                and self._probe_local_endpoint(model)
+            ):
+                logger.warning(
+                    "[ModelPoolManager] 显式本地模型不可用，改用云端候选: %s -> %s",
+                    unavailable_model_id,
+                    model.id,
+                )
+                return model
+        return None
+
+    def _maybe_autostart_local(self, base_url: str) -> None:
+        """本地服务没起时按需拉起（像接入云端 API 一样随叫随用）。
+
+        配置（config/.env）：
+          MIYA_LOCAL_LLM_AUTOSTART=false           是否自动拉起（默认关闭）
+          MIYA_LOCAL_LLM_START_SCRIPT=...          启动脚本路径（默认 E:\\model\\start-llm.ps1）
+          MIYA_LOCAL_LLM_IDLE_MINUTES=15           空闲多久自动卸载（0=不卸载）
+
+        拉起是异步的：本次请求仍会回退云端，模型加载完后续请求就走本地。
+        """
+        if str(os.getenv("MIYA_LOCAL_LLM_AUTOSTART", "false")).strip().lower() not in ("1", "true", "yes", "on"):
+            return
+
+        now = time.time()
+        last = _LOCAL_AUTOSTART_ATTEMPT.get(base_url, 0.0)
+        if now - last < _LOCAL_AUTOSTART_COOLDOWN:
+            return
+        _LOCAL_AUTOSTART_ATTEMPT[base_url] = now
+
+        script = os.getenv("MIYA_LOCAL_LLM_START_SCRIPT", "").strip()
+        if not script:
+            script = str(Path("E:/model/start-llm.ps1"))
+        if not os.path.exists(script):
+            logger.warning("[ModelPoolManager] 本地启动脚本不存在，无法自动拉起: %s", script)
+            return
+
+        idle = os.getenv("MIYA_LOCAL_LLM_IDLE_MINUTES", "15").strip() or "15"
+        try:
+            creationflags = 0
+            if os.name == "nt":
+                creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            subprocess.Popen(
+                [
+                    "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                    "-File", script, "-IdleMinutes", idle,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=creationflags,
+            )
+            logger.info("[ModelPoolManager] 正在后台拉起本地模型服务（首次约 20~60 秒）: %s", script)
+        except Exception as e:
+            logger.warning("[ModelPoolManager] 自动拉起本地模型失败: %s", e)
+
 
     def select_model_for_task(
         self, task_type: str, endpoint: str = None, priority: str = "balanced"
@@ -374,7 +536,7 @@ class ModelPoolManager:
             if not model_id:
                 continue
             model = self._models.get(model_id)
-            if model and model.enabled:
+            if model and model.enabled and self._probe_local_endpoint(model):
                 weight = self._calculate_weight(model, priority)
                 candidates.append((model_id, weight))
 
@@ -401,6 +563,8 @@ class ModelPoolManager:
             model_config = None
             if model_id:
                 model_config = self.get_model(model_id)
+                if model_config and self._is_local_model(model_config) and not self._probe_local_endpoint(model_config):
+                    model_config = self._select_cloud_fallback(model_id)
             elif task_type:
                 model_config = self.select_model_for_task(task_type, endpoint)
             else:
@@ -410,7 +574,10 @@ class ModelPoolManager:
                 return None
 
             api_key = self.get_api_key(model_config.id)
-            if not api_key or not model_config.base_url:
+            if not api_key and self._is_local_model(model_config):
+                # llama.cpp/Ollama commonly run without authentication.
+                api_key = "sk-local-no-auth"
+            if not model_config.base_url or (not api_key and not self._is_local_model(model_config)):
                 return None
 
             from core.ai_client import AIClientFactory

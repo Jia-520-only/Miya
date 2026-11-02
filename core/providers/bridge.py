@@ -225,6 +225,11 @@ PROVIDER_TYPE_MAP = {
         "base_url": "http://localhost:11434/v1",
         "type": ProviderType.CHAT_COMPLETION,
     },
+    "local_llama_chat_completion": {
+        "name": "本地千问 (llama.cpp)",
+        "base_url": "http://127.0.0.1:8080/v1",
+        "type": ProviderType.CHAT_COMPLETION,
+    },
     # TTS
     "openai_tts_api": {
         "name": "OpenAI TTS",

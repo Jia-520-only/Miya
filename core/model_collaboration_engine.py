@@ -1263,11 +1263,13 @@ class ModelCollaborationEngine:
                     user_message=user_prompt,
                     tools=tools,
                     tool_choice="auto",
+                    local_reply=True,
                 )
             else:
                 response = await client.chat_with_system_prompt(
                     system_prompt=system_prompt,
                     user_message=user_prompt,
+                    local_reply=True,
                 )
 
             # 处理可能的非字符串返回值

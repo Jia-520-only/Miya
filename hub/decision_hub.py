@@ -3640,6 +3640,7 @@ class DecisionHub:
                 user_message=user_msg,
                 tools=tools_schema if tools_schema else None,
                 tool_choice=tool_choice,
+                local_reply=True,
             )
 
             # 【新增】存储情绪记忆 - 无论_soul_result是否有效都存储

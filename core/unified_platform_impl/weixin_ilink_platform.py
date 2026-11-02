@@ -513,7 +513,9 @@ class WeixinIlinkPlatform(MessageMixin, BasePlatform):
 
         fallback = store_dir / "credentials_fallback.json"
         if not fallback.exists():
-            return
+            # 无兜底文件是正常状态（未登录），返回空元组而非 None，
+            # 否则调用处解包会抛 TypeError，把"未登录"误报成连接异常。
+            return None, None, None, None
         try:
             data = json.loads(fallback.read_text())
             accounts = data.get("accounts", {})

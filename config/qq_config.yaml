@@ -274,9 +274,12 @@ tools:
 
   qq_image_analyzer:
     enabled: true
-    # 视觉路线：屏幕与摄像头共用的唯一开关（local / cloud / hybrid）；
-    # 聊天图片始终走云端，不受这里影响。
-    vision_mode: "local"
+    # 视觉路线：屏幕与摄像头共用的唯一开关（local / cloud / hybrid）
+    #   local  = 只跑本地 OCR（最省，但只认字）
+    #   cloud  = 视觉模型链：本地千问优先 → 云端 kimi/glm；全挂时自动退回 OCR
+    #   hybrid = 先 OCR，识别不出再上视觉模型
+    # 聊天图片走同一套视觉模型链（vision_preferences，本地千问优先）。
+    vision_mode: "cloud"
     # 下面两项是按来源覆盖 vision_mode 的兼容配置。
     # **留空即"不覆盖"**，不要写 "local"——那会让统一开关看起来生效、实际被这里压住。
     screen_analysis_mode: ""              # 看屏幕覆盖；留空跟随 vision_mode
@@ -387,10 +390,10 @@ compatibility:
       auto_detect: true                   # 自动检测
     # 图片传输方式：base64 适合 Docker NapCat（默认），file 适合同机 NapCat
     # 也可用环境变量 QQ_ONEBOT_IMAGE_TRANSPORT=file/base64 临时覆盖
-    image_transport: "base64"
+    image_transport: "file"
     # 文件传输方式：base64 适合 Docker NapCat（默认），file 适合同机 NapCat
     # 也可用环境变量 QQ_ONEBOT_FILE_TRANSPORT=file/base64 临时覆盖
-    file_transport: "base64"
+    file_transport: "file"
   legacy:
     old_qq_py: false                      # 兼容旧的 qq.py
     import_aliases: true                  # 导入别名

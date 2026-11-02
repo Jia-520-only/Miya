@@ -16,13 +16,14 @@ screen_aware:
 
   # ── 感知模式 ──
   # ocr_only:  纯本地 OCR，零 API 调用，零 token
-  # api_only:  纯 API 视觉模型，跳过 OCR，结果更精准但费 token
-  # hybrid:    混合 — 先 OCR 识字，不确定时再 fallback 视觉模型（推荐，默认）
-  vision_mode: "ocr_only"
+  # api_only:  视觉模型（本地千问优先 → 云端），失败自动退回 OCR
+  # hybrid:    混合 — 先 OCR 识字，不确定时再 fallback 视觉模型
+  vision_mode: "api_only"
 
   # ── Token 预算（api_only / hybrid 模式生效）──
-  vision_cooldown_seconds: 300
-  vision_daily_quota: 24
+  # 本地千问视觉不花 token，所以配额放宽；只有回退云端时才真正消耗
+  vision_cooldown_seconds: 60
+  vision_daily_quota: 200
   vision_trigger_light_count: 10
 
   hash_similarity_threshold: 8

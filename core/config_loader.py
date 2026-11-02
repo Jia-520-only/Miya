@@ -86,7 +86,7 @@ class ConfigLoader:
         """加载平台配置"""
         self._cache["platform"] = {
             "qq": {
-                "onebot_ws_url": os.getenv("QQ_ONEBOT_WS_URL", "ws://localhost:3001"),
+                "onebot_ws_url": os.getenv("QQ_ONEBOT_WS_URL", "ws://127.0.0.1:3001"),
                 "onebot_token": os.getenv("QQ_ONEBOT_TOKEN", ""),
                 "bot_qq": os.getenv("QQ_BOT_QQ", ""),
                 "superadmin_qq": os.getenv("QQ_SUPERADMIN_QQ", ""),

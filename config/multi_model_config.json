@@ -1,7 +1,7 @@
 {
   "active": "deepseek_v4_flash_official",
   "vision_preferences": {
-    "active_vision": "kimi_k2_vision",
+    "active_vision": "qwen_local_vision",
     "timeout": 90,
     "http_client_timeout": 90,
     "model_defaults": {
@@ -18,11 +18,11 @@
       "priority": 1
     },
     "model_preferences": {
-      "primary": "kimi_k2_vision",
-      "secondary": "deepseek_v4_flash_official",
+      "primary": "qwen_local_vision",
+      "secondary": "kimi_k2_vision",
       "fallback": "glm_4_5v_vision",
       "disabled_models": [],
-      "note": "primary/secondary 都经过实测可读图，且分属不同供应商；glm 仅作最后兜底（当前额度耗尽）。"
+      "note": "primary=本地千问视觉，secondary=kimi，fallback=glm"
     }
   },
   "models": {
@@ -110,6 +110,31 @@
       },
       "latency": "medium",
       "quality": "excellent"
+    },
+    "qwen38_27b_local": {
+      "name": "miya-local",
+      "provider": "local_llama",
+      "base_url": "http://127.0.0.1:8080/v1",
+      "api_key": "sk-local-no-auth",
+      "description": "本地破限模型 (Qwen3.5-9B / Qwen3.8-27B abliterated, RTX2080Ti 22G) - 免审查角色扮演/亲密对话",
+      "capabilities": [
+        "simple_chat",
+        "chinese_understanding",
+        "creative_writing",
+        "complex_reasoning",
+        "tool_calling",
+        "multimodal"
+      ],
+      "type": "chat",
+      "cost_per_1k_tokens": {
+        "input": 0.0,
+        "output": 0.0
+      },
+      "latency": "fast",
+      "quality": "excellent",
+      "max_tokens": 4096,
+      "temperature": 0.85,
+      "extra_system_prompt_file": "E:\\model\\prompts\\miya-system.txt"
     },
     "proxy_model": {
       "name": "deepseek-ai/deepseek-v4-pro",
@@ -228,6 +253,27 @@
       "latency": "medium",
       "quality": "excellent",
       "temperature": 1.0
+    },
+    "qwen_local_vision": {
+      "name": "qwen-local-vision",
+      "provider": "openai",
+      "base_url": "http://127.0.0.1:8080/v1",
+      "api_key": "sk-local-no-auth",
+      "description": "本地千问视觉（Qwen3.8-27B-abliterated + mmproj，llama.cpp）",
+      "capabilities": [
+        "image_description",
+        "vision_understanding",
+        "multimodal"
+      ],
+      "type": "vision",
+      "cost_per_1k_tokens": {
+        "input": 0.0,
+        "output": 0.0
+      },
+      "latency": "fast",
+      "quality": "good",
+      "max_tokens": 240,
+      "priority": 9
     }
   },
   "embedding_config": {
@@ -244,7 +290,7 @@
   },
   "routing_strategy": {
     "simple_chat": {
-      "primary": "@active",
+      "primary": "qwen38_27b_local",
       "secondary": "deepseek_v4_flash_official",
       "fallback": "qwen_72b"
     },

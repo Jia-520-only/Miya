@@ -198,7 +198,7 @@ class Settings:
     def _get_default_qq_config(self) -> Dict:
         """获取默认QQ配置"""
         return {
-            "onebot_ws_url": "ws://localhost:3001",
+            "onebot_ws_url": "ws://127.0.0.1:3001",
             "onebot_token": "",
             "bot_qq": 0,
             "superadmin_qq": 0,

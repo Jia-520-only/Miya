@@ -323,6 +323,18 @@ class ScreenVisionService:
             logger.info(f"[ScreenVision] AI 分析: {t_llm:.2f}s")
         except Exception as exc:
             logger.error(f"[ScreenVision] AI 分析失败: {exc}")
+            # 视觉模型链全挂（本地千问 + 云端都不可用）时，退回本地 OCR
+            ocr_fallback = None
+            try:
+                if screenshot is not None:
+                    ocr_fallback = await asyncio.to_thread(analyze_local_screen, screenshot.data_url)
+            except Exception as ocr_exc:  # noqa: BLE001 - OCR 失败就保留原错误
+                logger.info("[ScreenVision] OCR 兜底失败: %s", ocr_exc)
+            if ocr_fallback and ocr_fallback.get("status") in {"success", "partial"}:
+                ocr_fallback.setdefault("source", "screen_local_ocr_fallback")
+                ocr_fallback["vision_error"] = str(exc)
+                self._record_screen_result(ocr_fallback, query=query, mode="ocr_fallback")
+                return json.dumps(ocr_fallback, ensure_ascii=False)
             return json.dumps(
                 {
                     "status": "partial",

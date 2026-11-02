@@ -601,6 +601,16 @@ class MultiVisionAnalyzer:
         if not api_key:
             raise ValueError(f"缺少 {model_config.name} 的API密钥")
 
+        # 本地视觉端点：没起就顺手拉起（本次仍会回退云端，下一次就走本地）
+        base_lower = (model_config.api_base or "").lower()
+        if "127.0.0.1:8080" in base_lower or "localhost:8080" in base_lower:
+            try:
+                from core.model_pool_manager import get_model_pool
+
+                get_model_pool()._maybe_autostart_local(model_config.api_base)
+            except Exception as exc:  # noqa: BLE001 - 拉不起来也不影响回退
+                logger.debug("[MultiVisionAnalyzer] 本地视觉自动拉起失败: %s", exc)
+
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",

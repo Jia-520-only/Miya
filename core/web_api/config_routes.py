@@ -829,8 +829,18 @@ def save_model_form(model_id: str, form: Dict[str, Any]) -> Dict[str, Any]:
         entry["api_key"] = api_key
     elif "api_key" in existing:
         entry["api_key"] = existing["api_key"]
-    # 非表单字段（capabilities/成本/延迟等）保留
-    for keep in ("capabilities", "cost_per_1k_tokens", "latency", "quality"):
+    # 非表单字段（capabilities/成本/延迟/本地专用提示词等）保留，避免编辑时被清空
+    for keep in (
+        "capabilities",
+        "cost_per_1k_tokens",
+        "latency",
+        "quality",
+        "max_tokens",
+        "temperature",
+        "dimension",
+        "priority",
+        "extra_system_prompt_file",
+    ):
         if keep in existing:
             entry[keep] = existing[keep]
     if "capabilities" not in entry:

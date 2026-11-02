@@ -87,6 +87,20 @@ async def analyze_image_with_route(image_data: bytes) -> dict[str, Any]:
                 local_result.get("error_message") or local_result.get("description") or "unknown error",
             )
 
+    if mode == "cloud":
+        # 视觉模型链（本地千问优先 → 云端）；全都失败才退回本地 OCR
+        result = await analyze_cloud_image(image_data)
+        if result.get("success"):
+            return result
+        logger.warning("[ImageVision] 视觉模型均不可用，回退本地 OCR")
+        try:
+            fallback = _analyze_local_ocr(image_data)
+            fallback["vision_error"] = result.get("error_message") or result.get("description") or ""
+            return fallback
+        except Exception as exc:  # noqa: BLE001 - OCR 也失败就返回原错误
+            logger.warning("[ImageVision] OCR 兜底失败: %s", exc)
+            return result
+
     return await analyze_cloud_image(image_data)
 
 

@@ -29,7 +29,10 @@ class OneBotPlatform(MessageMixin, BasePlatform):
     platform_id = "aiocqhttp"
     platform_name = "OneBot/NapCat"
     health_check_interval = 30.0
-    auto_reconnect = False  # OneBot 监听循环自带重连，不触发系统级重连
+    # Keep the platform lifecycle aware of the listener task.  The listener also
+    # retries while NapCat is starting, but BasePlatform must be able to wait for
+    # that task instead of marking the platform offline after one short probe.
+    auto_reconnect = True
 
     # 社交能力声明
     supports_like = True
@@ -43,6 +46,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         self._bot_qq = os.getenv("QQ_BOT_QQ", self.config.get("bot_qq", ""))
         self._ws: Optional[Any] = None
         self._connected = False
+        self._connected_event = asyncio.Event()
         self._shutting_down = False
         self._pending_echoes: Dict[str, asyncio.Future] = {}
         self._loaded_config: dict = {}
@@ -252,7 +256,8 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         由调用方单独处理，因此不在这里作为触发条件判断。
         """
         if message_type != "group":
-            return False
+            # 私聊：主人发的图片直接进入视觉分析（本地千问优先，成本可控）
+            return bool(is_owner)
         if is_at_bot or is_owner:
             return True
 
@@ -330,21 +335,29 @@ class OneBotPlatform(MessageMixin, BasePlatform):
             # 清理已死亡的任务，防止 accumulate dead tasks
             self._tasks[:] = [t for t in self._tasks if not t.done()]
 
-            # 如果已有后台任务在运行，不重复创建
+            # 如果已有后台任务在运行，不重复创建；等待它完成握手。
             if self._tasks:
+                try:
+                    await asyncio.wait_for(self._connected_event.wait(), timeout=15.0)
+                except asyncio.TimeoutError as exc:
+                    raise ConnectionError(f"OneBot WebSocket 尚未连接: {self._ws_url}") from exc
                 return bool(self._connected and self._ws is not None)
 
             self._ws = None
             self._connected = False
+            self._connected_event.clear()
 
             async def listen_loop():
                 retry_delay = 1
                 while not self._shutting_down:
                     try:
                         async with aiohttp.ClientSession() as session:
-                            async with session.ws_connect(self._ws_url) as ws:
+                            token = os.getenv("QQ_ONEBOT_TOKEN", "").strip()
+                            headers = {"Authorization": f"Bearer {token}"} if token else None
+                            async with session.ws_connect(self._ws_url, headers=headers) as ws:
                                 self._ws = ws
                                 self._connected = True
+                                self._connected_event.set()
                                 logger.info(f"[{self.platform_id}] 已连接到 {self._ws_url}")
                                 retry_delay = 1
 
@@ -364,6 +377,19 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                                         logger.error(f"[{self.platform_id}] WebSocket 错误")
                                         break
 
+                                # A clean server-side close also ends the async
+                                # iterator without raising.  Mark it offline so
+                                # health checks and the retry loop can recover.
+                                self._connected = False
+                                self._ws = None
+                                self._connected_event.clear()
+                                if not self._shutting_down:
+                                    logger.warning(
+                                        f"[{self.platform_id}] WebSocket 已关闭，{retry_delay}s 后重连"
+                                    )
+                                    await asyncio.sleep(retry_delay)
+                                    retry_delay = min(retry_delay * 2, 30)
+
                     except asyncio.CancelledError:
                         logger.info(f"[{self.platform_id}] listen_loop 任务取消")
                         break
@@ -376,6 +402,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                             logger.debug(f"[{self.platform_id}] 连接断开: {e}, {retry_delay}s 后重连")
                         self._connected = False
                         self._ws = None
+                        self._connected_event.clear()
                         await asyncio.sleep(retry_delay)
                         retry_delay = min(retry_delay * 2, 30)
 
@@ -384,14 +411,14 @@ class OneBotPlatform(MessageMixin, BasePlatform):
 
             listen_task = asyncio.create_task(listen_loop())
             self._tasks.append(listen_task)
-            await asyncio.sleep(0.5)
-            if self._connected and self._ws is not None:
-                return True
-            listen_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await listen_task
-            self._tasks = [task for task in self._tasks if task is not listen_task]
-            raise ConnectionError(f"OneBot WebSocket 尚未连接: {self._ws_url}")
+            try:
+                await asyncio.wait_for(self._connected_event.wait(), timeout=15.0)
+            except asyncio.TimeoutError as exc:
+                # Keep the listener alive: NapCat can finish starting after the
+                # initial connect attempt and the next lifecycle retry will wait
+                # on the same task.
+                raise ConnectionError(f"OneBot WebSocket 尚未连接: {self._ws_url}") from exc
+            return bool(self._connected and self._ws is not None)
 
         except ConnectionError:
             # Let BasePlatform's reconnect policy own the retry loop. Returning
@@ -987,9 +1014,9 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                     continue
                 asyncio.ensure_future(self._auto_save_image_bytes(image_bytes, user_id, img_data))
                 try:
-                    from core.image_vision_router import analyze_cloud_image
+                    from core.image_vision_router import analyze_image_with_route
 
-                    result = await analyze_cloud_image(image_bytes)
+                    result = await analyze_image_with_route(image_bytes)
                     if result.get("success"):
                         extra["image_analysis"] = result
                         extra["has_image"] = True
@@ -1156,9 +1183,9 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                                 continue
                             asyncio.ensure_future(self._auto_save_image_bytes(image_bytes, user_id, img_data))
                             try:
-                                from core.image_vision_router import analyze_cloud_image
+                                from core.image_vision_router import analyze_image_with_route
 
-                                result = await analyze_cloud_image(image_bytes)
+                                result = await analyze_image_with_route(image_bytes)
                                 if result.get("success"):
                                     extra["image_analysis"] = result
                                     extra["has_image"] = True
@@ -1202,9 +1229,9 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                                 continue
                             asyncio.ensure_future(self._auto_save_image_bytes(image_bytes, user_id, {"file": fid}))
                             try:
-                                from core.image_vision_router import analyze_cloud_image
+                                from core.image_vision_router import analyze_image_with_route
 
-                                result = await analyze_cloud_image(image_bytes)
+                                result = await analyze_image_with_route(image_bytes)
                                 if result.get("success"):
                                     extra["image_analysis"] = result
                                     extra["has_image"] = True
@@ -2225,6 +2252,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
     async def _do_disconnect(self):
         self._shutting_down = True
         self._connected = False
+        self._connected_event.clear()
         if self._ws:
             with contextlib.suppress(Exception):
                 await self._ws.close()

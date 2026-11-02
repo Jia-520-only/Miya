@@ -177,6 +177,7 @@ class ResponseGenerator:
                         user_message=prompt_info["user"],
                         tools=tools_schema,
                         tool_choice="auto",
+                        local_reply=True,
                     )
                 except Exception as tool_error:
                     logger.warning(f"[响应生成器] 工具调用失败: {tool_error}，尝试不使用工具...")
@@ -186,6 +187,7 @@ class ResponseGenerator:
                             user_message=prompt_info["user"],
                             tools=None,
                             tool_choice="none",
+                            local_reply=True,
                         )
                     except Exception:
                         response = "系统出了点问题。我记下了，等会再试。"
@@ -204,6 +206,7 @@ class ResponseGenerator:
                 response = await ai_client_to_use.chat_with_system_prompt(
                     system_prompt=prompt_info["system"],
                     user_message=prompt_info["user"],
+                    local_reply=True,
                 )
 
             # 【新增】在QQ端显示弥娅状态标签
