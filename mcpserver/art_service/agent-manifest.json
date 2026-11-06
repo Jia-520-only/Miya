@@ -1,7 +1,7 @@
 {
   "name": "art_service",
   "displayName": "AI 绘画",
-  "description": "让弥娅主动调用 AI 绘画引擎生成图片——支持 ComfyUI、DALL·E、NovelAI、CogView、通义万相",
+  "description": "让弥娅主动调用 AI 绘画引擎生成图片——支持 ComfyUI、DALL·E、NovelAI、CogView、通义万相；通过本机 ComfyUI 工作台调用现有中文 AI 助手、绘图和 H3 视频生成。",
   "agentType": "mcp",
   "entryPoint": {
     "module": "mcpserver.art_service.service",
@@ -32,6 +32,19 @@
         "parameters": {
           "provider": "string - 按引擎筛选（可选）",
           "limit": "int - 返回数量 (默认 20)"
+        }
+      },
+      {
+        "name": "comfyui",
+        "description": "本机 ComfyUI 中文 AI 助手、绘图、图生视频统一入口。需要画图/做视频/让弥娅自主创作时优先使用。先 list_workflows 或 describe_workflow；中文需求用 assist_prompt 取得提示词，再 generate 提交。视频需要 first_frame：可先生成图片，get_task 成功后 upload_media 上传 local_paths，再将 input_name 填入视频参数。generate 返回 queued 只代表入队，必须用 get_task 查到 success 才能声称生成完成；同一任务不要重复提交。完成后用 send_platform_file 发送 local_paths。视频默认 W6A8 稳定方案、288×512、5秒、静音；更改参数前先 describe_workflow。",
+        "parameters": {
+          "action": "string - list_workflows / describe_workflow / assist_prompt / upload_media / generate / get_task",
+          "workflow": "string - 可选，image 绘图或 video 视频；默认 image",
+          "prompt": "string - 可选，assist_prompt 时为中文需求；generate 时为最终提示词",
+          "parameters_json": "string - 可选，JSON对象字符串，例如 {\"width\":512,\"height\":512,\"seed\":42} 或 {\"first_frame\":\"miya/xxx.png\",\"seconds\":5}；可用参数及默认值见 describe_workflow",
+          "file_path": "string - 可选，仅 upload_media 使用，本机素材文件的绝对路径；返回 input_name",
+          "prompt_id": "string - 可选，仅 get_task 使用，generate 返回的任务编号",
+          "wait_seconds": "number - 可选，仅 get_task 使用，每次最多等待20秒，默认20；0表示立即查询"
         }
       }
     ]

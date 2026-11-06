@@ -172,7 +172,27 @@ class MemoryManager:
                 },
             )
 
-            if detected_importance > 0 and detected_info_type:
+            # Group utterances are shareable across contexts only when the
+            # configured owner identity authored an explicitly personal fact.
+            # Group discussion and other members' messages remain group-only.
+            owner_id = ""
+            with contextlib.suppress(Exception):
+                from memory.identity_resolver import get_identity_resolver
+
+                owner_id = get_identity_resolver().owner_canonical_id
+            is_owner = bool(owner_id and identity.user_id == owner_id)
+            group_shareable_types = {"生日", "喜好", "厌恶", "名字", "星座"}
+            explicit_self_fact = bool(re.search(
+                r"(?:我(?:最)?喜欢|我不喜欢|我讨厌|我的生日|我生日|我叫|我是|我的星座|我属)",
+                content,
+            ))
+            may_store_as_personal = not group_id or (
+                is_owner
+                and detected_info_type in group_shareable_types
+                and explicit_self_fact
+            )
+
+            if detected_importance > 0 and detected_info_type and may_store_as_personal:
                 # V4.1.11: 去重检查（内容 hash 比对，避免子串误匹配）
                 import hashlib
 
@@ -185,20 +205,48 @@ class MemoryManager:
                         is_duplicate = True
                         break
                 if not is_duplicate:
+                    memory_metadata = {
+                        **identity.metadata(),
+                        "source": "auto_extract",
+                        "info_type": detected_info_type,
+                    }
+                    if group_id:
+                        # Keep provenance without making the memory group-scoped.
+                        memory_metadata.update({
+                            "visibility": "personal",
+                            "conversation_scope": "personal",
+                            "group_id": "",
+                            "source_group_id": group_id,
+                            "source_platform": platform,
+                            "source_message_id": str(
+                                perception.get("message_id")
+                                or perception.get("event_id")
+                                or perception.get("message_seq")
+                                or ""
+                            ),
+                            "source_timestamp": str(
+                                perception.get("timestamp")
+                                or perception.get("time")
+                                or perception.get("created_at")
+                                or ""
+                            ),
+                            "speaker_user_id": identity.user_id,
+                        })
                     await bus.store_important(
                         content=content,
                         user_id=user_id,
                         tags=[detected_info_type],
                         priority=detected_importance,
-                        metadata={
-                            **identity.metadata(),
-                            "source": "auto_extract",
-                            "info_type": detected_info_type,
-                        },
+                        metadata=memory_metadata,
                     )
                     logger.info(f"[记忆管理器] 已自动存储重要信息: {detected_info_type}")
                 else:
                     logger.debug(f"[记忆管理器] 跳过重复重要信息: {detected_info_type}")
+            elif detected_importance > 0 and detected_info_type and group_id:
+                logger.debug(
+                    "[记忆管理器] 群消息不符合个人记忆规则，保持群范围: %s",
+                    detected_info_type,
+                )
 
         except Exception as e:
             logger.error(f"[记忆管理器] 存储用户消息失败: {e}", exc_info=True)

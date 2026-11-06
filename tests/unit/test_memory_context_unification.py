@@ -10,6 +10,7 @@ from core.vision_context import VisionContextStore
 from hub.memory_manager import MemoryManager
 from memory.context_assembler import ContextAssembler
 from memory.context_identity import ContextIdentity
+from memory.context_identity import matches_context_scope
 from memory.core import JsonBackend, MiyaMemoryCore
 from memory.models import MemoryItem, MemoryLevel
 from memory.models import MemoryQuery
@@ -113,6 +114,29 @@ async def test_context_assembler_does_not_leak_private_history_into_group():
     assert [message.content for message in messages] == ["群聊内容"]
 
 
+@pytest.mark.asyncio
+async def test_context_assembler_loads_archived_group_messages_with_event_time():
+    archive = SimpleNamespace(query_messages=AsyncMock(return_value=[{
+        "message_id": "event-1",
+        "sender_id": "user-1",
+        "group_id": "group-1",
+        "content": "普通群消息",
+        "timestamp": "2026-10-03T10:02:00+00:00",
+    }]))
+
+    with (
+        patch("memory.get_dialogue_history", AsyncMock(return_value=[])),
+        patch("core.unified_message_store.get_unified_message_store", return_value=archive),
+    ):
+        messages = await ContextAssembler().load_dialogue(
+            ContextIdentity.resolve("user-1", "group-1", "aiocqhttp"), limit=10,
+        )
+
+    assert [message.content for message in messages] == ["普通群消息"]
+    assert messages[0].timestamp == "2026-10-03T10:02:00+00:00"
+    assert messages[0].metadata["group_id"] == "group-1"
+
+
 def test_browser_camera_card_expires_old_observations():
     store = VisionContextStore()
     store.add({"source": "camera", "timestamp": 1, "summary": "过期观察"})
@@ -131,6 +155,68 @@ def test_memory_query_cache_key_is_scoped_by_conversation():
 
     assert core._get_cache_key(private) != core._get_cache_key(group)
     assert core._get_cache_key(private) != core._get_cache_key(other_platform)
+
+
+def test_memory_context_scope_keeps_group_history_private_and_shares_personal_memories():
+    user_scope = MemoryQuery(scope_user_ids=["owner"])
+    group_scope = MemoryQuery(scope_user_ids=["owner"], scope_group_id="group-1")
+    group_only = MemoryItem(
+        content="群内讨论", user_id="owner", group_id="group-1",
+        metadata={"visibility": "group"},
+    )
+    personal = MemoryItem(
+        content="喜欢海盐冰淇淋", user_id="owner",
+        metadata={"visibility": "personal", "group_id": ""},
+    )
+
+    assert not matches_context_scope(group_only, user_scope)
+    assert matches_context_scope(personal, user_scope)
+    assert matches_context_scope(group_only, group_scope)
+    assert matches_context_scope(personal, group_scope)
+
+
+@pytest.mark.asyncio
+async def test_group_message_only_owner_personal_facts_become_cross_context_memory():
+    owner = SimpleNamespace(
+        owner_canonical_id="owner",
+        canonicalize=lambda value: str(value),
+        expand=lambda value: [str(value)],
+    )
+    bus = SimpleNamespace(
+        store_dialogue=AsyncMock(),
+        get_user_memories=AsyncMock(return_value=[]),
+        store_important=AsyncMock(),
+    )
+    manager = object.__new__(MemoryManager)
+    manager.memory_net = None
+    manager.time_tracker = None
+    manager._bus = bus
+
+    with patch("memory.identity_resolver.get_identity_resolver", return_value=owner):
+        await manager.store_user_message({
+            "content": "我喜欢海盐冰淇淋",
+            "user_id": "owner",
+            "group_id": "group-1",
+            "platform": "qq",
+            "message_type": "group",
+            "message_id": "event-7",
+            "timestamp": "2026-10-03T10:00:00+08:00",
+        })
+        await manager.store_user_message({
+            "content": "我喜欢海盐冰淇淋",
+            "user_id": "member-2",
+            "group_id": "group-1",
+            "platform": "qq",
+            "message_type": "group",
+        })
+
+    assert bus.store_important.await_count == 1
+    metadata = bus.store_important.await_args.kwargs["metadata"]
+    assert metadata["visibility"] == "personal"
+    assert metadata["group_id"] == ""
+    assert metadata["source_group_id"] == "group-1"
+    assert metadata["source_message_id"] == "event-7"
+    assert metadata["source_timestamp"] == "2026-10-03T10:00:00+08:00"
 
 
 @pytest.mark.asyncio

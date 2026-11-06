@@ -1179,6 +1179,8 @@ class PlatformToolsManager:
     # 纯闲聊最小工具集 — 降低 prompt 体积，加速简单对话
     MINIMAL_CHAT_TOOLS = [
         "send_message",
+        "mcp_art_service_comfyui",
+        "send_platform_file",
         "qq_like",
         "send_poke",
         "react_emoji",
@@ -1327,8 +1329,8 @@ class PlatformToolsManager:
         # 地球online 工具 — 所有平台通用
         selected_tools = selected_tools + self.EARTH_TOOLS
 
-        # 自检工具 — 所有平台通用（只读、轻量，让弥娅在任何平台都能体检/看日志）
-        for _t in ("self_check", "daemon_logs"):
+        # 自检、创作与作品发送 — 所有平台通用
+        for _t in ("self_check", "daemon_logs", "mcp_art_service_comfyui", "send_platform_file"):
             if _t not in selected_tools:
                 selected_tools.append(_t)
 

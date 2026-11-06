@@ -279,3 +279,6 @@ data/camera_observation_result.json
 data/camera_vision_agent.json
 data/camera_identities/
 
+# Local ComfyUI jobs and generated media
+data/artwork/comfyui/
+

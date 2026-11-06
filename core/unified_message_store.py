@@ -35,6 +35,7 @@ CREATE INDEX IF NOT EXISTS idx_pm_user ON platform_messages(user_id);
 CREATE INDEX IF NOT EXISTS idx_pm_direction ON platform_messages(direction);
 CREATE INDEX IF NOT EXISTS idx_pm_message_id ON platform_messages(message_id);
 CREATE INDEX IF NOT EXISTS idx_pm_created ON platform_messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_pm_group_created ON platform_messages(group_id, created_at);
 """
 
 
@@ -80,16 +81,25 @@ class UnifiedMessageStore:
         self._initialized = True
         logger.info(f"[UnifiedMessageStore] 初始化完成: {self._db_path}")
 
+    async def close(self) -> None:
+        if not self._initialized:
+            return
+        if self._use_async:
+            await self._db.close()
+        else:
+            self._conn.close()
+        self._initialized = False
+
     async def _exec_write(self, sql: str, params: tuple = ()) -> Optional[int]:
         """执行写操作，返回 lastrowid"""
         if self._use_async:
             cursor = await self._db.execute(sql, params)
             await self._db.commit()
-            return cursor.lastrowid
+            return cursor.lastrowid if cursor.rowcount else None
         else:
             cursor = self._conn.execute(sql, params)
             self._conn.commit()
-            return cursor.lastrowid
+            return cursor.lastrowid if cursor.rowcount else None
 
     async def _exec_fetch(self, sql: str, params: tuple = ()) -> list:
         """查询并返回结果"""
@@ -133,6 +143,7 @@ class UnifiedMessageStore:
         reply_to_message_id: Optional[str] = None,
         group_id: Optional[str] = None,
         text: Optional[str] = None,
+        timestamp: Optional[str] = None,
     ) -> Optional[int]:
         """
         记录一条消息到跨平台存储
@@ -152,17 +163,23 @@ class UnifiedMessageStore:
                 msg_content["reply_to_message_id"] = reply_to_message_id
             if group_id:
                 msg_content["group_id"] = group_id
+            if timestamp:
+                msg_content["timestamp"] = timestamp
 
             content_json = json.dumps(msg_content, ensure_ascii=False)
             user_key = f"{platform_id}:{user_id}"
             if group_id:
                 user_key = f"{user_key}:{group_id}"
-            created_at = datetime.now().isoformat()
+            created_at = timestamp or datetime.now().astimezone().isoformat()
 
             row_id = await self._exec_write(
                 """INSERT INTO platform_messages
                    (platform_id, user_id, sender_id, sender_name, content, direction, message_id, reply_to_message_id, group_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                   WHERE ? = '' OR NOT EXISTS (
+                       SELECT 1 FROM platform_messages
+                       WHERE platform_id = ? AND group_id = ? AND message_id = ? AND direction = ?
+                   )""",
                 (
                     platform_id,
                     user_key,
@@ -174,8 +191,29 @@ class UnifiedMessageStore:
                     reply_to_message_id or "",
                     group_id or "",
                     created_at,
+                    message_id or "",
+                    platform_id,
+                    group_id or "",
+                    message_id or "",
+                    direction,
                 ),
             )
+
+            if row_id is None and message_id:
+                existing = await self._exec_one(
+                    """SELECT id FROM platform_messages
+                       WHERE platform_id = ? AND group_id = ? AND message_id = ? AND direction = ?
+                       ORDER BY id LIMIT 1""",
+                    (platform_id, group_id or "", message_id, direction),
+                )
+                if existing and "segments" in msg_content:
+                    await self._exec_write(
+                        """UPDATE platform_messages
+                           SET content = ?, created_at = ?, sender_id = ?, sender_name = ?
+                           WHERE id = ?""",
+                        (content_json, created_at, sender_id or "", sender_name or "", existing["id"]),
+                    )
+                return int(existing["id"]) if existing else None
 
             logger.debug(
                 f"[MessageStore] 记录消息 #{row_id}: {platform_id}/{direction} from={sender_name or sender_id}"
@@ -196,6 +234,7 @@ class UnifiedMessageStore:
         until: Optional[datetime] = None,
         limit: int = 50,
         offset: int = 0,
+        group_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         查询跨平台消息
@@ -216,6 +255,9 @@ class UnifiedMessageStore:
             if direction:
                 conditions.append("direction = ?")
                 params.append(direction)
+            if group_id is not None:
+                conditions.append("group_id = ?")
+                params.append(group_id)
             if sender_name:
                 conditions.append("sender_name LIKE ?")
                 params.append(f"%{sender_name}%")
@@ -250,6 +292,7 @@ class UnifiedMessageStore:
                         "user_id": row["user_id"],
                         "sender_id": row["sender_id"],
                         "sender_name": row["sender_name"],
+                        "group_id": row["group_id"] or "",
                         "content": content.get("text", str(content)),
                         "raw_content": content,
                         "direction": row["direction"],
@@ -358,6 +401,7 @@ class UnifiedMessageStore:
                         "user_id": row["user_id"],
                         "sender_id": row["sender_id"],
                         "sender_name": row["sender_name"],
+                        "group_id": row["group_id"] or "",
                         "content": content.get("text", str(content)),
                         "raw_content": content,
                         "direction": row["direction"],

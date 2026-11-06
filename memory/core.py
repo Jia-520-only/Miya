@@ -1531,7 +1531,7 @@ class MiyaMemoryCore:
             q.scope_user_ids = alias_ids or ([effective_user_id] if effective_user_id else [])
             q.user_ids = None
             q.user_id = None
-        elif effective_user_id and q.level != MemoryLevel.DIALOGUE:
+        elif effective_user_id:
             q.scope_user_ids = alias_ids or [effective_user_id]
         elif alias_ids:
             q.user_ids = alias_ids

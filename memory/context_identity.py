@@ -86,9 +86,20 @@ def matches_context_scope(memory: Any, query: Any) -> bool:
     if memory.user_id == "global" and not group_id and visibility not in {"private", "owner", "group"}:
         return True
     if query.scope_group_id:
-        return bool(
+        in_group = bool(
             group_id == query.scope_group_id
-            and visibility not in {"private", "owner"}
+            and visibility not in {"private", "owner", "personal"}
             and (not query.scope_platforms or memory.platform in query.scope_platforms)
         )
-    return memory.user_id in (query.scope_user_ids or [])
+        personal = bool(
+            visibility == "personal"
+            and not group_id
+            and memory.user_id in (query.scope_user_ids or [])
+        )
+        return in_group or personal
+    if memory.user_id not in (query.scope_user_ids or []):
+        return False
+    # A user's messages from a group are not private memories, even when the
+    # same canonical user ID is used for both scopes. Legacy group records are
+    # excluded by group_id even if they predate the visibility field.
+    return not group_id and visibility not in {"group", "owner"}

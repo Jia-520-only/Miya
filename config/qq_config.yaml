@@ -179,6 +179,8 @@ qq:
   # 用于群聊中消息密集时，收集一段时间内的消息再统一回复
   message_batching:
     enabled: true                         # 是否启用消息汇总窗口
+    burst_window_seconds: 0.6             # 群触发消息短时聚合窗口
+    queue_size: 60                        # 每个群最多等待处理的触发消息数
     window_seconds: 5                     # 窗口期时长（秒），收到新消息会重置计时
     max_window_seconds: 10                # 最大窗口期（防止无限等待）
     max_messages: 15                      # 窗口期内最大消息数量，超过则立即处理

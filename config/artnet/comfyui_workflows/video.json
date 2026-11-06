@@ -1,0 +1,113 @@
+{
+  "1": {
+    "inputs": {
+      "seconds": 5.0,
+      "quality": "清晰均衡 · Ref2V 4步",
+      "size": "自定义宽高",
+      "aspect": "自定义比例 · 按宽高",
+      "width": 288,
+      "height": 512,
+      "segment_seconds": 5,
+      "seed": 2026102501,
+      "audio_mode": "静音 · 最快",
+      "compression": "更清晰 · CRF18",
+      "crf": 18,
+      "output_fps": 24,
+      "prompt": "",
+      "segment_prompts": "",
+      "task_mode": "常规 H3 生成",
+      "replacement_quality": "均衡替换 · 4 步",
+      "identity_detail": "匹配生成尺寸",
+      "expression_mode": "跟随动作视频表情",
+      "replacement_identity": "原版 · pro4500",
+      "output_detail": "原生输出 · 最快",
+      "quality_profile": "速度清晰 · 4步Turbo + 单段参考",
+      "acceleration_profile": "稳定成片 · Star7 FP16 + Comfy Kitchen"
+    },
+    "class_type": "H3ConsoleSettings",
+    "_meta": {
+      "title": "① 生成控制 · 全画幅 / 任务 / 画质与速度"
+    }
+  },
+  "3": {
+    "inputs": {
+      "last_frame": "__none__",
+      "image_1": "__none__",
+      "image_2": "__none__",
+      "image_3": "__none__",
+      "image_4": "__none__",
+      "image_5": "__none__",
+      "video_1": "__none__",
+      "video_2": "__none__",
+      "audio_1": "__none__",
+      "audio_2": "__none__",
+      "audio_3": "__none__",
+      "reference_seconds": 5,
+      "use_reference_audio": false,
+      "reference_timing": "随生成片段推进动作参考",
+      "plan": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "H3ConsoleAssets",
+    "_meta": {
+      "title": "② 多媒体参考 · 多人物 / 动作分段 / 原声"
+    }
+  },
+  "4": {
+    "inputs": {
+      "save_sampler_results": false,
+      "detail_steps": 0,
+      "plan": [
+        "1",
+        0
+      ],
+      "assets": [
+        "3",
+        0
+      ],
+      "first_frame": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "H3ConsoleGenerate",
+    "_meta": {
+      "title": "③ 生成与采样存档 · 可选低噪细节加步"
+    }
+  },
+  "5": {
+    "inputs": {
+      "finish_mode": "原生预览 · 暂不超分",
+      "saved_video": "",
+      "export_crf": 18,
+      "filename_prefix": "Miya/video",
+      "source_mode": "生成新视频",
+      "archive_file": "__none__",
+      "output_aspect": "跟随原片比例 · 长边3840",
+      "plan": [
+        "1",
+        0
+      ],
+      "images": [
+        "4",
+        0
+      ],
+      "audio": [
+        "4",
+        1
+      ]
+    },
+    "class_type": "H3ConsoleFinish",
+    "_meta": {
+      "title": "⑤ 成片与存档 · 原生 / 2倍 / 全画幅4K"
+    }
+  },
+  "10": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": ""
+    }
+  }
+}

@@ -138,7 +138,7 @@ async def _synthesize_gpt_sovits(config: dict, text: str) -> str:
     payload = {
         "text": filtered,
         "text_lang": sovits.get("language", "zh"),
-        "ref_audio_path": sovits.get("reference_audio", ""),
+        "ref_audio_path": sovits.get("reference_audio", "").strip(),
         "prompt_text": sovits.get("reference_text", ""),
         "prompt_lang": sovits.get("language", "zh"),
         "top_k": sovits.get("top_k", 15),
@@ -150,7 +150,8 @@ async def _synthesize_gpt_sovits(config: dict, text: str) -> str:
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as s:
         async with s.post(f"{api_url.rstrip('/')}/tts", json=payload) as r:
             if r.status != 200:
-                raise RuntimeError(f"GPT-SoVITS {r.status}")
+                detail = (await r.text()).strip()
+                raise RuntimeError(f"GPT-SoVITS {r.status}: {detail[:2000]}")
             data = await r.read()
     tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     tmp_path = tmp.name

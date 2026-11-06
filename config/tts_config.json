@@ -23,7 +23,7 @@
       "enabled": true,
       "is_default": true,
       "api_url": "http://127.0.0.1:9880",
-      "reference_audio": "D:/AIvoice/voice/遐蝶/v2ProPlus/遐蝶/reference_audios/中文/emotions/【开心】作为助讲的风堇小姐…真是那刻夏老师的克星呀。.wav",
+      "reference_audio": "D:/MiyaFactory/voice/model/gptsovits/遐蝶/v2ProPlus/遐蝶/reference_audios/中文/emotions/【开心】作为助讲的风堇小姐…真是那刻夏老师的克星呀。.wav",
       "reference_text": "作为助讲的风堇小姐…真是那刻夏老师的克星呀。",
       "language": "zh",
       "speed": 1.0,

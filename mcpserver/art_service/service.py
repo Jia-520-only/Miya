@@ -6,6 +6,8 @@ import json
 import logging
 from typing import Any
 
+from .comfyui import ComfyUIWorkshop
+
 logger = logging.getLogger("art_service")
 
 
@@ -27,11 +29,13 @@ class ArtService:
                 return await self._list_providers(tool_call)
             elif tool_name == "get_gallery":
                 return await self._get_gallery(tool_call)
+            elif tool_name == "comfyui":
+                return json.dumps(await ComfyUIWorkshop().handle(tool_call), ensure_ascii=False)
             else:
                 return json.dumps(
                     {
                         "error": f"未知工具: {tool_name}",
-                        "available": ["generate_image", "list_providers", "get_gallery"],
+                        "available": ["generate_image", "list_providers", "get_gallery", "comfyui"],
                     },
                     ensure_ascii=False,
                 )

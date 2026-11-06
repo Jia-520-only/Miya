@@ -83,6 +83,32 @@ class ContextAssembler:
         except Exception as exc:
             logger.warning("[ContextAssembler] 统一对话读取失败: %s", exc)
 
+        if identity.group_id:
+            try:
+                from core.unified_message_store import get_unified_message_store
+
+                archived = await get_unified_message_store().query_messages(
+                    platform_id=identity.platform,
+                    group_id=identity.group_id,
+                    direction="in",
+                    limit=limit,
+                )
+                for item in archived:
+                    message_id = str(item.get("message_id") or "")
+                    metadata = {
+                        "group_id": identity.group_id,
+                        "platform_user_id": str(item.get("sender_id") or ""),
+                        "memory_event_id": (
+                            f"{identity.platform}:{identity.group_id}:{message_id}" if message_id else ""
+                        ),
+                        "source": "message_archive",
+                    }
+                    sources.append(("archive", ContextMessage(
+                        "user", str(item.get("content", "")), str(item.get("timestamp", "")), metadata,
+                    )))
+            except Exception as exc:
+                logger.warning("[ContextAssembler] 群消息归档读取失败 group=%s: %s", identity.group_id, exc)
+
         result: list[tuple[str, ContextMessage]] = []
         seen_ids: set[tuple[str, str]] = set()
         for origin, message in sources:
@@ -105,11 +131,20 @@ class ContextAssembler:
             key = (str(event_id), role)
             if event_id and key in seen_ids:
                 continue
+            sender_id = metadata.get("platform_user_id", metadata.get("user_id", ""))
+
+            def _sender_id(message: ContextMessage) -> str:
+                return message.metadata.get("platform_user_id", message.metadata.get("user_id", ""))
+
             duplicate = next((previous for previous_origin, previous in result if (
                 previous_origin != origin and previous.role == role and previous.content == content
-                and metadata.get("platform_user_id", metadata.get("user_id", "")) == previous.metadata.get("platform_user_id", previous.metadata.get("user_id", ""))
+                and (
+                    effective_group_id(previous) == group
+                    or (previous_origin == "cache" and bool(identity.group_id))
+                )
                 and stamp and previous.timestamp
                 and abs(timestamp_value(stamp) - timestamp_value(previous.timestamp)) < 2
+                and not (sender_id and _sender_id(previous) and sender_id != _sender_id(previous))
             )), None)
             if duplicate:
                 continue

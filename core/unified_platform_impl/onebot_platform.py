@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -56,6 +57,8 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         self._queue_initialized = False
         # 群聊忙时消息合并缓冲: group_id → [消息上下文, ...]（缓解多人同时@时处理不过来）
         self._pending_group_messages: Dict[str, list] = {}
+        self._group_event_queues: Dict[str, asyncio.Queue] = {}
+        self._group_event_workers: Dict[str, asyncio.Task] = {}
         # 群成员缓存: group_id → (timestamp, [member_info_dict, ...])
         self._group_member_cache: Dict[int, tuple] = {}
         # 群文件上传缓存: group_id → [(user_id, file_name, file_size, timestamp), ...]
@@ -360,6 +363,11 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                                 self._connected_event.set()
                                 logger.info(f"[{self.platform_id}] 已连接到 {self._ws_url}")
                                 retry_delay = 1
+                                recovery_task = asyncio.create_task(
+                                    self._recover_recent_group_history(),
+                                    name="onebot_group_history_recovery",
+                                )
+                                self._tasks.append(recovery_task)
 
                                 async for msg in ws:
                                     if msg.type == aiohttp.WSMsgType.TEXT:
@@ -451,18 +459,16 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         同一会话内的消息顺序由 _process_locks（按会话加锁）保证；
         不同会话可并发处理。任务异常已在此兜底，避免“从未被检索的异常”。
 
-        高并发优化：
-        - 群聊消息先做触发预过滤，确定不会触发弥娅回复的消息直接丢弃，
-          避免无意义地占用锁与 AI 管线（DecisionHub 内部仍有同款兜底判定）。
-        - 事件任务数超限时丢弃低优先级群消息，防止刷屏时任务无限堆积。
+        群聊原始消息先持久化，之后的触发预过滤只控制是否进入 AI 回复管线。
+        事件任务数超限时仍可能跳过 AI 回复，但不会跳过原始历史归档。
         """
+        await self._archive_group_event(data)
         if not self._should_dispatch(data):
             return
-        if len(self._event_tasks) >= self._max_event_tasks():
-            # 仅丢弃群消息（私聊与 notice 事件始终保留）
-            if data.get("post_type") == "message" and data.get("message_type") == "group":
-                logger.warning(f"[{self.platform_id}] 事件任务积压({len(self._event_tasks)})，丢弃群消息")
-                return
+
+        if data.get("post_type") == "message" and data.get("message_type") == "group":
+            self._enqueue_group_event(data)
+            return
 
         async def _run():
             try:
@@ -476,8 +482,343 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         self._event_tasks.add(task)
         task.add_done_callback(self._event_tasks.discard)
 
+    def _enqueue_group_event(self, data: Dict) -> None:
+        """Queue group triggers behind one bounded worker per group."""
+        group_id = str(data.get("group_id", "") or "")
+        if not group_id:
+            logger.warning("[%s] 群消息缺少 group_id，跳过 AI 处理", self.platform_id)
+            return
+
+        queue = self._group_event_queues.get(group_id)
+        if queue is None:
+            if len(self._event_tasks) >= self._max_event_tasks():
+                logger.warning(
+                    "[%s] 事件任务积压(%s)，群 %s 触发消息已归档但跳过 AI 处理",
+                    self.platform_id, len(self._event_tasks), group_id,
+                )
+                return
+            queue = asyncio.Queue(maxsize=self._group_worker_queue_size())
+            self._group_event_queues[group_id] = queue
+            worker = asyncio.create_task(
+                self._run_group_event_worker(group_id, queue),
+                name=f"onebot_group_events_{group_id}",
+            )
+            self._group_event_workers[group_id] = worker
+            self._event_tasks.add(worker)
+            worker.add_done_callback(self._event_tasks.discard)
+
+        try:
+            queue.put_nowait(data)
+        except asyncio.QueueFull:
+            logger.warning(
+                "[%s] 群 %s 触发队列已满(size=%s)，消息 %s 已归档但跳过 AI 处理",
+                self.platform_id, group_id, queue.qsize(), data.get("message_id"),
+            )
+
+    async def _run_group_event_worker(self, group_id: str, queue: asyncio.Queue) -> None:
+        """Debounce a short burst, then coalesce only consecutive messages by sender."""
+        idle_timeout = max(5.0, self._group_burst_window() * 4)
+        try:
+            while True:
+                try:
+                    first = await asyncio.wait_for(queue.get(), timeout=idle_timeout)
+                except asyncio.TimeoutError:
+                    return
+
+                batch = [first]
+                deadline = asyncio.get_running_loop().time() + self._group_burst_window()
+                while len(batch) < self._group_batch_max():
+                    remaining = deadline - asyncio.get_running_loop().time()
+                    if remaining <= 0:
+                        break
+                    try:
+                        batch.append(await asyncio.wait_for(queue.get(), timeout=remaining))
+                    except asyncio.TimeoutError:
+                        break
+
+                event_batches = (
+                    self._coalesce_group_events(batch)
+                    if self._group_batching_enabled()
+                    else [[event] for event in batch]
+                )
+                for events in event_batches:
+                    try:
+                        event = events[0] if len(events) == 1 else self._merge_group_events(events)
+                        await self._handle_onebot_message(event)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        logger.exception("[%s] 群 %s 批量消息处理失败", self.platform_id, group_id)
+        finally:
+            if self._group_event_workers.get(group_id) is asyncio.current_task():
+                self._group_event_workers.pop(group_id, None)
+                self._group_event_queues.pop(group_id, None)
+
+    @staticmethod
+    def _coalesce_group_events(events: list[Dict]) -> list[list[Dict]]:
+        """Coalesce only adjacent plain text/@ events from the same sender."""
+        batches: list[list[Dict]] = []
+        for event in events:
+            sender = event.get("sender") or {}
+            sender_id = str(sender.get("user_id", "") or "")
+            message = event.get("message")
+            segments = message if isinstance(message, list) else []
+            text = "".join(
+                str((segment.get("data") or {}).get("text", ""))
+                for segment in segments
+                if isinstance(segment, dict) and segment.get("type") == "text"
+            )
+            safe = bool(sender_id) and bool(segments) and all(
+                isinstance(segment, dict) and segment.get("type") in {"text", "at"}
+                for segment in segments
+            ) and not text.lstrip().startswith("/")
+            if (
+                safe and batches and len(batches[-1]) < 15
+                and str((batches[-1][-1].get("sender") or {}).get("user_id", "")) == sender_id
+                and OneBotPlatform._is_coalescible_group_event(batches[-1][-1])
+            ):
+                batches[-1].append(event)
+            else:
+                batches.append([event])
+        return batches
+
+    @staticmethod
+    def _is_coalescible_group_event(event: Dict) -> bool:
+        sender = event.get("sender") or {}
+        segments = event.get("message")
+        if not sender.get("user_id") or not isinstance(segments, list) or not segments:
+            return False
+        if not all(
+            isinstance(segment, dict) and segment.get("type") in {"text", "at"}
+            for segment in segments
+        ):
+            return False
+        text = "".join(
+            str((segment.get("data") or {}).get("text", ""))
+            for segment in segments if segment.get("type") == "text"
+        )
+        return not text.lstrip().startswith("/")
+
+    @staticmethod
+    def _merge_group_events(events: list[Dict]) -> Dict:
+        merged = dict(events[-1])
+        messages = []
+        at_segments = []
+        seen_at = set()
+        for event in events:
+            segments = event.get("message") or []
+            text = "".join(
+                str((segment.get("data") or {}).get("text", ""))
+                for segment in segments if segment.get("type") == "text"
+            ).strip()
+            if text:
+                messages.append(text)
+            for segment in segments:
+                if segment.get("type") == "at":
+                    target = str((segment.get("data") or {}).get("qq", ""))
+                    if target not in seen_at:
+                        seen_at.add(target)
+                        at_segments.append(segment)
+
+        combined = [{"type": "text", "data": {"text": f"[短时间连续消息 {len(events)} 条]\n" + "\n".join(messages)}}]
+        merged["message"] = [*at_segments, *combined]
+        merged["raw_message"] = merged["message"]
+        merged["batch_message_ids"] = [str(event.get("message_id", "")) for event in events if event.get("message_id")]
+        merged["batch_count"] = len(events)
+        return merged
+
+    @staticmethod
+    def _group_burst_window() -> float:
+        try:
+            from config.config_utils import get_qq_config
+
+            if not get_qq_config("qq", "message_batching", "enabled", default=True):
+                return 0.0
+            return max(0.0, float(get_qq_config("qq", "message_batching", "burst_window_seconds", default=0.6)))
+        except Exception:
+            return 0.6
+
+    @staticmethod
+    def _group_worker_queue_size() -> int:
+        try:
+            from config.config_utils import get_qq_config
+
+            return max(1, int(get_qq_config("qq", "message_batching", "queue_size", default=60)))
+        except Exception:
+            return 60
+
+    async def _archive_group_event(self, data: Dict) -> None:
+        """Persist every allowed group message before reply-trigger filtering."""
+        if data.get("post_type") != "message" or data.get("message_type") != "group":
+            return
+
+        sender = data.get("sender") or {}
+        group_id = str(data.get("group_id", "") or "")
+        sender_id = str(sender.get("user_id", "") or "")
+        if not group_id or not sender_id:
+            return
+        self_id = str(data.get("self_id") or self.config.get("bot_qq") or "")
+        if self_id and sender_id == self_id:
+            return
+
+        try:
+            if not self._is_group_allowed(group_id) or not self._is_user_allowed(sender_id):
+                return
+        except Exception as exc:
+            logger.warning(
+                "[%s] 无法确认群消息归档权限: %s", self.platform_id, exc,
+            )
+            return
+
+        raw_message = data.get("message", data.get("raw_message", ""))
+        segments = raw_message if isinstance(raw_message, list) else []
+        text_parts = []
+        for segment in segments:
+            if not isinstance(segment, dict):
+                continue
+            segment_type = str(segment.get("type", ""))
+            segment_data = segment.get("data") or {}
+            if segment_type == "text":
+                text_parts.append(str(segment_data.get("text", "")))
+            elif segment_type == "at":
+                text_parts.append(f"@{segment_data.get('name') or segment_data.get('qq', '')}")
+            elif segment_type in {"image", "video", "record", "file", "face", "reply"}:
+                text_parts.append(f"[{segment_type}]")
+        text = "".join(text_parts) if segments else str(raw_message or "")
+
+        source_time = data.get("time")
+        try:
+            event_epoch = float(source_time)
+            event_timestamp = datetime.fromtimestamp(event_epoch, UTC).isoformat()
+        except (TypeError, ValueError, OverflowError, OSError):
+            event_epoch = time.time()
+            event_timestamp = datetime.fromtimestamp(event_epoch, UTC).isoformat()
+
+        try:
+            from core.unified_message_store import get_unified_message_store
+
+            store = get_unified_message_store()
+            record_id = None
+            for attempt in range(3):
+                record_id = await store.record_message(
+                    platform_id=self.platform_id,
+                    user_id=sender_id,
+                    sender_id=sender_id,
+                    sender_name=str(sender.get("card") or sender.get("nickname") or sender_id),
+                    content={
+                        "text": text,
+                        "segments": segments,
+                        "message_type": "group",
+                        "timestamp_epoch": event_epoch,
+                        "message_id": str(data.get("message_id", "") or ""),
+                    },
+                    direction="in",
+                    message_id=str(data.get("message_id", "") or ""),
+                    reply_to_message_id=next((
+                        str((segment.get("data") or {}).get("id", ""))
+                        for segment in segments if segment.get("type") == "reply"
+                    ), None),
+                    group_id=group_id,
+                    timestamp=event_timestamp,
+                )
+                if record_id is not None:
+                    break
+                if attempt < 2:
+                    await asyncio.sleep(0.05 * (2 ** attempt))
+            if record_id is None:
+                logger.error(
+                    "[%s] 群消息归档重试后仍失败 group=%s message=%s",
+                    self.platform_id, group_id, data.get("message_id"),
+                )
+        except Exception:
+            logger.exception(
+                "[%s] 群消息原始历史写入失败 group=%s message=%s",
+                self.platform_id, group_id, data.get("message_id"),
+            )
+
+    async def _recover_recent_group_history(self) -> None:
+        """Best-effort replay of recent QQ history after each successful reconnect."""
+        try:
+            from core.unified_message_store import get_unified_message_store
+
+            store = get_unified_message_store()
+            groups = await self.get_group_list() or []
+            for group in groups:
+                group_id = str(group.get("group_id", "") if isinstance(group, dict) else group)
+                if not group_id or not self._is_group_allowed(group_id):
+                    continue
+
+                previous = await store.query_messages(
+                    platform_id=self.platform_id,
+                    group_id=group_id,
+                    direction="in",
+                    limit=1,
+                )
+                previous_time = 0.0
+                if previous:
+                    raw = previous[0].get("raw_content") or {}
+                    try:
+                        previous_time = float(raw.get("timestamp_epoch", 0) or 0)
+                    except (TypeError, ValueError):
+                        previous_time = 0.0
+                    if not previous_time:
+                        try:
+                            previous_time = datetime.fromisoformat(previous[0]["timestamp"]).timestamp()
+                        except (KeyError, TypeError, ValueError, OverflowError, OSError):
+                            previous_time = 0.0
+
+                result = await self.get_group_msg_history(int(group_id), message_seq=0, count=100)
+                if isinstance(result, dict):
+                    history = result.get("messages") or result.get("message") or []
+                elif isinstance(result, list):
+                    history = result
+                else:
+                    history = []
+                history = [item for item in history if isinstance(item, dict)]
+
+                def _event_time(item: dict) -> float:
+                    try:
+                        return float(item.get("time", 0) or 0)
+                    except (TypeError, ValueError, OverflowError):
+                        return 0.0
+
+                history.sort(key=_event_time)
+
+                if history and previous_time:
+                    try:
+                        oldest_time = float(history[0].get("time", 0) or 0)
+                    except (TypeError, ValueError):
+                        oldest_time = 0.0
+                    if oldest_time > previous_time + 2:
+                        logger.warning(
+                            "[%s] 群 %s 重连历史可能有缺口: 本地最后时间 %.0f, NapCat 最早可见时间 %.0f",
+                            self.platform_id,
+                            group_id,
+                            previous_time,
+                            oldest_time,
+                        )
+
+                recovered = 0
+                for message in history:
+                    replay = dict(message)
+                    replay.update({
+                        "post_type": "message",
+                        "message_type": "group",
+                        "group_id": group_id,
+                        "self_id": self._bot_qq,
+                    })
+                    await self._archive_group_event(replay)
+                    recovered += 1
+                if recovered:
+                    logger.info(
+                        "[%s] 群 %s 重连后检查并归档最近 %s 条可见历史",
+                        self.platform_id, group_id, recovered,
+                    )
+        except Exception as exc:
+            logger.warning("[%s] 重连群历史回填失败（在线消息归档仍继续）: %s", self.platform_id, exc)
+
     def _should_dispatch(self, data: Dict) -> bool:
-        """群聊消息触发预过滤：确定不会触发弥娅回复的群消息直接丢弃。
+        """群聊回复预过滤：不触发弥娅回复的群消息不进入 AI 管线。
 
         保留条件（任一满足）：
         - 非群聊事件（私聊/通知/请求）
@@ -560,7 +901,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
             except Exception:
                 return True  # 谛听状态不可用时保守放行
 
-            logger.debug(f"[{self.platform_id}] 群消息预过滤丢弃: {content[:40]}")
+            logger.debug(f"[{self.platform_id}] 群消息不触发回复，原始消息已归档: {content[:40]}")
             return False
         except Exception as e:
             logger.debug(f"[{self.platform_id}] 触发预过滤异常，保守放行: {e}")
@@ -997,7 +1338,15 @@ class OneBotPlatform(MessageMixin, BasePlatform):
             return
 
         # === 9. 直接图片 AI 视觉分析 ===
-        extra = {}
+        extra = {
+            "message_id": str(data.get("message_id", "") or ""),
+            "batch_message_ids": data.get("batch_message_ids", []),
+            "batch_count": int(data.get("batch_count", 1) or 1),
+        }
+        try:
+            extra["timestamp"] = datetime.fromtimestamp(float(data.get("time")), UTC).isoformat()
+        except (TypeError, ValueError, OverflowError, OSError):
+            pass
         extra["at_list"] = at_list
         if at_list and group_id_str and msg_type == "group":
             names = await self.resolve_at_names(int(group_id_str), at_list)
@@ -1334,26 +1683,27 @@ class OneBotPlatform(MessageMixin, BasePlatform):
             max_messages = self._group_batch_max()
             if len(pending) >= max_messages:
                 logger.warning(
-                    f"[{self.platform_id}] 群 {group_id} 消息积压超限({max_messages})，丢弃: {content[:30]}"
+                    f"[{self.platform_id}] 群 {group_id} 消息缓冲已满({max_messages})，等待处理: {content[:30]}"
+                )
+                await self._flush_group_pending(group_id, lock)
+            else:
+                pending.append(
+                    {
+                        "data": data,
+                        "content": content,
+                        "user_id": user_id,
+                        "user_name": user_name,
+                        "group_id": group_id,
+                        "group_name": group_name,
+                        "sender_role": sender_role,
+                        "is_at_bot": is_at_bot,
+                        "extra": extra,
+                    }
+                )
+                logger.info(
+                    f"[{self.platform_id}] 群 {group_id} 处理中，消息进入缓冲 ({len(pending)}): {content[:30]}"
                 )
                 return
-            pending.append(
-                {
-                    "data": data,
-                    "content": content,
-                    "user_id": user_id,
-                    "user_name": user_name,
-                    "group_id": group_id,
-                    "group_name": group_name,
-                    "sender_role": sender_role,
-                    "is_at_bot": is_at_bot,
-                    "extra": extra,
-                }
-            )
-            logger.info(
-                f"[{self.platform_id}] 群 {group_id} 处理中，消息进入合并缓冲 ({len(pending)}): {content[:30]}"
-            )
-            return
 
         async with lock:
             response = await self.route_to_decision_hub(
@@ -1374,40 +1724,27 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         await self._flush_group_pending(group_id, lock)
 
     async def _flush_group_pending(self, group_id: str, lock: asyncio.Lock) -> None:
-        """合并处理缓冲中的群消息（最多连续处理 3 批，防止持续刷屏时无限合并）"""
+        """按原发送者逐条处理缓冲消息，最多连续处理 3 批。"""
         for _ in range(3):
             pending = self._pending_group_messages.pop(group_id, None)
             if not pending:
                 return
-            first = pending[0]
-            if len(pending) == 1:
-                merged_content = first["content"]
-                merged_user_id = first["user_id"]
-                merged_user_name = first["user_name"]
-            else:
-                lines = []
-                for i, p in enumerate(pending, 1):
-                    name = p["user_name"] or p["user_id"]
-                    lines.append(f"{i}. {name}: {p['content'][:200]}")
-                merged_content = f"[群聊合并消息 {len(pending)} 条]\n" + "\n".join(lines)
-                merged_user_id = first["user_id"]
-                merged_user_name = "多人"
-
-            logger.info(f"[{self.platform_id}] 合并处理群 {group_id} 的 {len(pending)} 条消息")
-            async with lock:
-                response = await self.route_to_decision_hub(
-                    content=merged_content,
-                    user_id=merged_user_id,
-                    user_name=merged_user_name,
-                    message_type="group",
-                    group_id=group_id,
-                    group_name=first.get("group_name", ""),
-                    sender_role=first.get("sender_role", "member"),
-                    is_at_bot=True,
-                    extra=first.get("extra") or {},
-                )
-                if response:
-                    await self._send_onebot_reply(first["data"], response)
+            logger.info(f"[{self.platform_id}] 逐条处理群 {group_id} 的 {len(pending)} 条缓冲消息")
+            for item in pending:
+                async with lock:
+                    response = await self.route_to_decision_hub(
+                        content=item["content"],
+                        user_id=item["user_id"],
+                        user_name=item["user_name"],
+                        message_type="group",
+                        group_id=group_id,
+                        group_name=item.get("group_name", ""),
+                        sender_role=item.get("sender_role", "member"),
+                        is_at_bot=item.get("is_at_bot", True),
+                        extra=item.get("extra") or {},
+                    )
+                    if response:
+                        await self._send_onebot_reply(item["data"], response)
 
     def _group_batching_enabled(self) -> bool:
         """群聊消息合并窗口开关（从 qq_config.yaml 读取）"""
@@ -2253,6 +2590,14 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         self._shutting_down = True
         self._connected = False
         self._connected_event.clear()
+        workers = list(self._group_event_workers.values())
+        for worker in workers:
+            if not worker.done():
+                worker.cancel()
+        if workers:
+            await asyncio.gather(*workers, return_exceptions=True)
+        self._group_event_workers.clear()
+        self._group_event_queues.clear()
         if self._ws:
             with contextlib.suppress(Exception):
                 await self._ws.close()

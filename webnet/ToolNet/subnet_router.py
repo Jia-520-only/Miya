@@ -96,6 +96,7 @@ SUBNET_CATEGORIES = {
         "mcp_art_service_generate_image",
         "mcp_art_service_list_providers",
         "mcp_art_service_get_gallery",
+        "mcp_art_service_comfyui",
     ],
 }
 
