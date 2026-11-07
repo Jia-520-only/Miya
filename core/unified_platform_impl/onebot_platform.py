@@ -50,6 +50,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         self._connected_event = asyncio.Event()
         self._shutting_down = False
         self._pending_echoes: Dict[str, asyncio.Future] = {}
+        self._history_recovery_task: Optional[asyncio.Task] = None
         self._loaded_config: dict = {}
         self._process_locks: Dict[str, asyncio.Lock] = {}
         self._poke_cooldown: Dict[str, float] = {}  # user_id → last_poke_time
@@ -363,11 +364,11 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                                 self._connected_event.set()
                                 logger.info(f"[{self.platform_id}] 已连接到 {self._ws_url}")
                                 retry_delay = 1
-                                recovery_task = asyncio.create_task(
-                                    self._recover_recent_group_history(),
+                                await self._stop_group_history_recovery()
+                                self._history_recovery_task = asyncio.create_task(
+                                    self._recover_recent_group_history_with_retry(),
                                     name="onebot_group_history_recovery",
                                 )
-                                self._tasks.append(recovery_task)
 
                                 async for msg in ws:
                                     if msg.type == aiohttp.WSMsgType.TEXT:
@@ -391,6 +392,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                                 self._connected = False
                                 self._ws = None
                                 self._connected_event.clear()
+                                await self._stop_group_history_recovery()
                                 if not self._shutting_down:
                                     logger.warning(
                                         f"[{self.platform_id}] WebSocket 已关闭，{retry_delay}s 后重连"
@@ -399,9 +401,11 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                                     retry_delay = min(retry_delay * 2, 30)
 
                     except asyncio.CancelledError:
+                        await self._stop_group_history_recovery()
                         logger.info(f"[{self.platform_id}] listen_loop 任务取消")
                         break
                     except Exception as e:
+                        await self._stop_group_history_recovery()
                         if self._shutting_down:
                             break
                         if retry_delay <= 4:
@@ -647,28 +651,28 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         except Exception:
             return 60
 
-    async def _archive_group_event(self, data: Dict) -> None:
+    async def _archive_group_event(self, data: Dict) -> bool:
         """Persist every allowed group message before reply-trigger filtering."""
         if data.get("post_type") != "message" or data.get("message_type") != "group":
-            return
+            return True
 
         sender = data.get("sender") or {}
         group_id = str(data.get("group_id", "") or "")
         sender_id = str(sender.get("user_id", "") or "")
         if not group_id or not sender_id:
-            return
+            return False
         self_id = str(data.get("self_id") or self.config.get("bot_qq") or "")
         if self_id and sender_id == self_id:
-            return
+            return True
 
         try:
             if not self._is_group_allowed(group_id) or not self._is_user_allowed(sender_id):
-                return
+                return True
         except Exception as exc:
             logger.warning(
                 "[%s] 无法确认群消息归档权限: %s", self.platform_id, exc,
             )
-            return
+            return False
 
         raw_message = data.get("message", data.get("raw_message", ""))
         segments = raw_message if isinstance(raw_message, list) else []
@@ -730,92 +734,151 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                     "[%s] 群消息归档重试后仍失败 group=%s message=%s",
                     self.platform_id, group_id, data.get("message_id"),
                 )
+                return False
+            return True
         except Exception:
             logger.exception(
                 "[%s] 群消息原始历史写入失败 group=%s message=%s",
                 self.platform_id, group_id, data.get("message_id"),
             )
+            return False
 
-    async def _recover_recent_group_history(self) -> None:
+    async def _recover_recent_group_history(self, completed_groups: Optional[set[str]] = None) -> bool:
         """Best-effort replay of recent QQ history after each successful reconnect."""
+        if completed_groups is None:
+            completed_groups = set()
         try:
-            from core.unified_message_store import get_unified_message_store
-
-            store = get_unified_message_store()
-            groups = await self.get_group_list() or []
-            for group in groups:
-                group_id = str(group.get("group_id", "") if isinstance(group, dict) else group)
-                if not group_id or not self._is_group_allowed(group_id):
-                    continue
-
-                previous = await store.query_messages(
-                    platform_id=self.platform_id,
-                    group_id=group_id,
-                    direction="in",
-                    limit=1,
+            groups = await self.get_group_list()
+            if not groups:
+                logger.warning(
+                    "[%s] 重连后未取得群列表，跳过本轮历史回填（将由重试任务再次尝试）",
+                    self.platform_id,
                 )
-                previous_time = 0.0
-                if previous:
-                    raw = previous[0].get("raw_content") or {}
-                    try:
-                        previous_time = float(raw.get("timestamp_epoch", 0) or 0)
-                    except (TypeError, ValueError):
-                        previous_time = 0.0
-                    if not previous_time:
-                        try:
-                            previous_time = datetime.fromisoformat(previous[0]["timestamp"]).timestamp()
-                        except (KeyError, TypeError, ValueError, OverflowError, OSError):
-                            previous_time = 0.0
-
-                result = await self.get_group_msg_history(int(group_id), message_seq=0, count=100)
-                if isinstance(result, dict):
-                    history = result.get("messages") or result.get("message") or []
-                elif isinstance(result, list):
-                    history = result
-                else:
-                    history = []
-                history = [item for item in history if isinstance(item, dict)]
-
-                def _event_time(item: dict) -> float:
-                    try:
-                        return float(item.get("time", 0) or 0)
-                    except (TypeError, ValueError, OverflowError):
-                        return 0.0
-
-                history.sort(key=_event_time)
-
-                if history and previous_time:
-                    try:
-                        oldest_time = float(history[0].get("time", 0) or 0)
-                    except (TypeError, ValueError):
-                        oldest_time = 0.0
-                    if oldest_time > previous_time + 2:
-                        logger.warning(
-                            "[%s] 群 %s 重连历史可能有缺口: 本地最后时间 %.0f, NapCat 最早可见时间 %.0f",
-                            self.platform_id,
-                            group_id,
-                            previous_time,
-                            oldest_time,
-                        )
-
-                recovered = 0
-                for message in history:
-                    replay = dict(message)
-                    replay.update({
-                        "post_type": "message",
-                        "message_type": "group",
-                        "group_id": group_id,
-                        "self_id": self._bot_qq,
-                    })
-                    await self._archive_group_event(replay)
-                    recovered += 1
-                if recovered:
-                    logger.info(
-                        "[%s] 群 %s 重连后检查并归档最近 %s 条可见历史",
-                        self.platform_id, group_id, recovered,
-                    )
+                return False
         except Exception as exc:
             logger.warning("[%s] 重连群历史回填失败（在线消息归档仍继续）: %s", self.platform_id, exc)
+            return False
+
+        failed_groups = []
+        for group in groups:
+            group_id = str(group.get("group_id", "") if isinstance(group, dict) else group)
+            if not group_id or group_id in completed_groups:
+                continue
+            try:
+                if not self._is_group_allowed(group_id):
+                    continue
+                if await self._recover_group_history(group_id):
+                    completed_groups.add(group_id)
+                    continue
+            except Exception as exc:
+                logger.warning("[%s] 群 %s 历史回填异常: %s", self.platform_id, group_id, exc)
+            failed_groups.append(group_id)
+        if failed_groups:
+            logger.warning(
+                "[%s] 本轮群历史回填未完成，待重试群: %s",
+                self.platform_id, ", ".join(failed_groups),
+            )
+        return not failed_groups
+
+    async def _recover_group_history(self, group_id: str) -> bool:
+        """Recover one group; an unavailable history must not count as success."""
+        from core.unified_message_store import get_unified_message_store
+
+        store = get_unified_message_store()
+        previous = await store.query_messages(
+            platform_id=self.platform_id, group_id=group_id, direction="in", limit=1,
+        )
+        previous_time = 0.0
+        if previous:
+            raw = previous[0].get("raw_content") or {}
+            try:
+                previous_time = float(raw.get("timestamp_epoch", 0) or 0)
+            except (TypeError, ValueError):
+                pass
+            if not previous_time:
+                try:
+                    previous_time = datetime.fromisoformat(previous[0]["timestamp"]).timestamp()
+                except (KeyError, TypeError, ValueError, OverflowError, OSError):
+                    pass
+
+        result = await self.get_group_msg_history(int(group_id), message_seq=0, count=100)
+        history = result.get("messages", result.get("message")) if isinstance(result, dict) else result
+        if not isinstance(history, list) or any(not isinstance(item, dict) for item in history):
+            return False
+
+        def _event_time(item: dict) -> float:
+            try:
+                return float(item.get("time", 0) or 0)
+            except (TypeError, ValueError, OverflowError):
+                return 0.0
+
+        history.sort(key=_event_time)
+        if history and previous_time:
+            oldest_time = _event_time(history[0])
+            if oldest_time > previous_time + 2:
+                logger.warning(
+                    "[%s] 群 %s 重连历史可能有缺口: 本地最后时间 %.0f, NapCat 最早可见时间 %.0f",
+                    self.platform_id, group_id, previous_time, oldest_time,
+                )
+
+        archive_ok = True
+        for message in history:
+            replay = dict(message)
+            replay.update({
+                "post_type": "message", "message_type": "group",
+                "group_id": group_id, "self_id": self._bot_qq,
+            })
+            if not await self._archive_group_event(replay):
+                archive_ok = False
+        logger.info(
+            "[%s] 群 %s 重连后检查最近 %s 条可见历史，归档%s",
+            self.platform_id, group_id, len(history), "完成" if archive_ok else "未完成",
+        )
+        return archive_ok
+
+    async def _stop_group_history_recovery(self) -> None:
+        task = self._history_recovery_task
+        self._history_recovery_task = None
+        if task is not None:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def _recover_recent_group_history_with_retry(self) -> None:
+        """Wait for NapCat's API to become ready, then retry history recovery.
+
+        NapCat can accept the WebSocket connection before its group list/history
+        APIs are ready. A single immediate request therefore loses the recovery
+        opportunity even though the bot is already online.
+        """
+        completed_groups: set[str] = set()
+        for attempt, delay in enumerate((2.0, 5.0, 12.0), start=1):
+            try:
+                await asyncio.sleep(delay)
+                if self._shutting_down:
+                    return
+                recovered = await self._recover_recent_group_history(completed_groups)
+                if recovered:
+                    logger.info(
+                        "[%s] 重连历史回填任务完成（第 %s 次尝试）",
+                        self.platform_id,
+                        attempt,
+                    )
+                    return
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "[%s] 重连历史回填第 %s 次尝试失败: %s",
+                    self.platform_id,
+                    attempt,
+                    exc,
+                )
+        logger.warning(
+            "[%s] 重连历史回填在 %s 次尝试后仍未完成；后续在线消息仍会继续归档",
+            self.platform_id,
+            3,
+        )
 
     def _should_dispatch(self, data: Dict) -> bool:
         """群聊回复预过滤：不触发弥娅回复的群消息不进入 AI 管线。
@@ -1137,8 +1200,13 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         - 使用至少 15s 的 echo 超时；媒体上传可显式延长到 120s
         - 永不回退 HTTP 重发
         - 超时时返回 {"echo_timeout": True} 标记，视为"结果未知但已处理"
+
+        detailed=True 的查询会保留失败响应；已收到明确失败时不再通过 HTTP
+        重发，只有连接异常或超时才回退，供历史回填区分空列表和请求失败。
         """
         if not self._ws or not self._connected:
+            if detailed:
+                return {"_miya_status": "error", "error": "WebSocket 未连接"}
             return None
 
         is_send = action in self._SEND_ACTIONS
@@ -1148,6 +1216,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         echo = f"miya_{action}_{id(params)}"
         future: asyncio.Future = asyncio.get_event_loop().create_future()
         self._pending_echoes[echo] = future
+        transport_error = "OneBot 查询失败"
         try:
             await self._ws.send_str(
                 json.dumps(
@@ -1161,12 +1230,13 @@ class OneBotPlatform(MessageMixin, BasePlatform):
             result = await asyncio.wait_for(future, timeout=effective_timeout)
             if result and result.get("status") == "ok":
                 return result.get("data")
-            if is_send:
+            if is_send or detailed:
                 # NapCat 明确返回失败状态 → 不重试，避免重复发送
                 if detailed:
                     return {"_miya_status": "failed", "response": result or {}}
                 return None
         except asyncio.TimeoutError:
+            transport_error = f"WebSocket echo 超时({effective_timeout:.0f}s)"
             if is_send:
                 if detailed:
                     return {"_miya_status": "timeout"}
@@ -1176,6 +1246,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                 )
                 return {"status": "ok", "data": {"echo_timeout": True}}
         except Exception as e:
+            transport_error = str(e)
             if is_send:
                 if detailed:
                     return {"_miya_status": "error", "error": str(e)}
@@ -1197,8 +1268,13 @@ class OneBotPlatform(MessageMixin, BasePlatform):
                     data = await resp.json()
                     if data.get("status") == "ok":
                         return data.get("data")
-        except Exception:
-            pass
+                    if detailed:
+                        return {"_miya_status": "failed", "response": data}
+                transport_error = f"HTTP 状态码 {resp.status}"
+        except Exception as exc:
+            transport_error = f"{transport_error}; HTTP: {exc}"
+        if detailed:
+            return {"_miya_status": "error", "error": transport_error}
         return None
 
     async def _handle_chat_message(self, data: Dict):
@@ -2161,7 +2237,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         return await self._call_onebot_api("get_group_info", {"group_id": group_id})
 
     async def get_group_list(self) -> Optional[list]:
-        result = await self._call_onebot_api("get_group_list", {})
+        result = await self._call_onebot_api("get_group_list", {}, timeout=10.0)
         return result if isinstance(result, list) else None
 
     async def get_group_member_list(self, group_id: int) -> Optional[list]:
@@ -2182,10 +2258,21 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         return await self._call_onebot_api("get_stranger_info", {"user_id": user_id, "no_cache": no_cache})
 
     async def get_group_msg_history(self, group_id: int, message_seq: int = 0, count: int = 20) -> Optional[dict]:
-        return await self._call_onebot_api(
+        result = await self._call_onebot_api(
             "get_group_msg_history",
             {"group_id": group_id, "message_seq": message_seq, "count": count},
+            timeout=10.0,
+            detailed=True,
         )
+        if isinstance(result, dict) and result.get("_miya_status"):
+            response = result.get("response") or {}
+            reason = response.get("message") or response.get("wording") or result.get("error") or "未知错误"
+            logger.warning(
+                "[%s] 群 %s 历史暂不可用 retcode=%s: %s",
+                self.platform_id, group_id, response.get("retcode", "unknown"), reason,
+            )
+            return None
+        return result
 
     async def get_msg(self, message_id: int) -> Optional[dict]:
         return await self._call_onebot_api("get_msg", {"message_id": message_id})
@@ -2590,6 +2677,7 @@ class OneBotPlatform(MessageMixin, BasePlatform):
         self._shutting_down = True
         self._connected = False
         self._connected_event.clear()
+        await self._stop_group_history_recovery()
         workers = list(self._group_event_workers.values())
         for worker in workers:
             if not worker.done():

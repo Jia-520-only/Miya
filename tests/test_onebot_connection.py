@@ -10,6 +10,62 @@ from aiohttp import web
 
 
 class OneBotConnectionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reconnect_cancels_previous_history_recovery(self):
+        from core.unified_platform_impl.onebot_platform import OneBotPlatform
+
+        first_close = asyncio.Event()
+        started = [asyncio.Event(), asyncio.Event()]
+        cancelled = [asyncio.Event(), asyncio.Event()]
+        recovery_tasks = []
+        connections = []
+
+        async def websocket_handler(request):
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            connections.append(ws)
+            if len(connections) == 1:
+                await first_close.wait()
+                await ws.close()
+            else:
+                async for _ in ws:
+                    pass
+            return ws
+
+        async def recover():
+            index = len(recovery_tasks)
+            recovery_tasks.append(asyncio.current_task())
+            if index == 1:
+                self.assertTrue(cancelled[0].is_set())
+            started[index].set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled[index].set()
+
+        app = web.Application()
+        app.router.add_get("/", websocket_handler)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        platform = OneBotPlatform()
+        platform._ws_url = f"ws://127.0.0.1:{port}/"
+        platform._recover_recent_group_history_with_retry = recover
+        try:
+            self.assertTrue(await platform._do_connect())
+            await asyncio.wait_for(started[0].wait(), timeout=2)
+            first_close.set()
+            await asyncio.wait_for(started[1].wait(), timeout=5)
+            self.assertTrue(recovery_tasks[0].cancelled())
+        finally:
+            first_close.set()
+            await platform._do_disconnect()
+            await platform._cancel_tasks()
+            await runner.cleanup()
+        self.assertTrue(recovery_tasks[1].cancelled())
+        self.assertIsNone(platform._history_recovery_task)
+
     async def test_waits_for_napcat_start_and_sends_access_token(self):
         from core.unified_platform_impl.onebot_platform import OneBotPlatform
 

@@ -106,7 +106,12 @@ async def test_context_assembler_does_not_leak_private_history_into_group():
         timestamp="2026-10-03T10:01:00", metadata={"group_id": "group-1"}, group_id="group-1",
     )
 
-    with patch("memory.get_dialogue_history", AsyncMock(return_value=[private, group])):
+    with (
+        patch("memory.get_dialogue_history", AsyncMock(return_value=[private, group])),
+        patch("core.unified_message_store.get_unified_message_store", return_value=SimpleNamespace(
+            query_messages=AsyncMock(return_value=[]),
+        )),
+    ):
         messages = await ContextAssembler().load_dialogue(
             ContextIdentity.resolve("user-1", "group-1", "qq"), limit=10,
         )
@@ -119,6 +124,7 @@ async def test_context_assembler_loads_archived_group_messages_with_event_time()
     archive = SimpleNamespace(query_messages=AsyncMock(return_value=[{
         "message_id": "event-1",
         "sender_id": "user-1",
+        "sender_name": "小明",
         "group_id": "group-1",
         "content": "普通群消息",
         "timestamp": "2026-10-03T10:02:00+00:00",
@@ -135,6 +141,65 @@ async def test_context_assembler_loads_archived_group_messages_with_event_time()
     assert [message.content for message in messages] == ["普通群消息"]
     assert messages[0].timestamp == "2026-10-03T10:02:00+00:00"
     assert messages[0].metadata["group_id"] == "group-1"
+    assert messages[0].metadata["sender_name"] == "小明"
+
+
+def test_group_context_keeps_speaker_identity_in_prompt_formatting():
+    from core.prompt_manager import PromptManager
+
+    manager = object.__new__(PromptManager)
+    text = manager._format_memory_context([
+        {
+            "role": "user",
+            "content": "这是群友说的话",
+            "metadata": {
+                "group_id": "group-1",
+                "conversation_scope": "group",
+                "sender_name": "小明",
+                "platform_user_id": "1001",
+            },
+        },
+        {
+            "role": "user",
+            "content": "这是佳说的话",
+            "metadata": {
+                "group_id": "group-1",
+                "conversation_scope": "group",
+                "sender_name": "佳",
+                "platform_user_id": "1523878699",
+            },
+        },
+    ])
+
+    assert "群成员 小明[1001]：这是群友说的话" in text
+    assert "群成员 佳[1523878699]：这是佳说的话" in text
+    assert "用户：这是群友说的话" not in text
+
+
+@pytest.mark.asyncio
+async def test_context_assembler_reads_onebot_archive_for_qq_alias():
+    async def query_messages(**kwargs):
+        if kwargs.get("platform_id") == "aiocqhttp":
+            return [{
+                "message_id": "event-qq",
+                "sender_id": "user-1",
+                "group_id": "group-1",
+                "content": "OneBot 历史消息",
+                "timestamp": "2026-10-03T10:02:00+00:00",
+            }]
+        return []
+
+    archive = SimpleNamespace(query_messages=AsyncMock(side_effect=query_messages))
+
+    with (
+        patch("memory.get_dialogue_history", AsyncMock(return_value=[])),
+        patch("core.unified_message_store.get_unified_message_store", return_value=archive),
+    ):
+        messages = await ContextAssembler().load_dialogue(
+            ContextIdentity.resolve("user-1", "group-1", "qq"), limit=10,
+        )
+
+    assert [message.content for message in messages] == ["OneBot 历史消息"]
 
 
 def test_browser_camera_card_expires_old_observations():

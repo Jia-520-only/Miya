@@ -42,7 +42,24 @@ class ContextSnapshot:
     def prompt_text(self, max_chars: int = 8000) -> str:
         parts = []
         if self.messages:
-            lines = [f"- [{message.timestamp}] {message.role}: {message.content[:350]}" for message in self.messages[-12:]]
+            lines = []
+            for message in self.messages[-12:]:
+                metadata = message.metadata or {}
+                sender_name = str(metadata.get("sender_name") or "").strip()
+                sender_id = str(
+                    metadata.get("platform_user_id") or metadata.get("sender_id") or ""
+                ).strip()
+                is_group = bool(metadata.get("group_id") or metadata.get("conversation_scope") == "group")
+                if message.role == "assistant":
+                    speaker = "弥娅"
+                elif is_group:
+                    speaker = sender_name or "群成员"
+                    if sender_id and sender_id not in speaker:
+                        speaker = f"{speaker}[{sender_id}]"
+                    speaker = f"群成员 {speaker}"
+                else:
+                    speaker = sender_name or message.role
+                lines.append(f"- [{message.timestamp}] {speaker}: {message.content[:350]}")
             parts.append("【近期对话】\n" + "\n".join(lines))
         parts.extend(part for part in (
             self.memory_context, self.working_context, self.pending_context,
@@ -87,17 +104,37 @@ class ContextAssembler:
             try:
                 from core.unified_message_store import get_unified_message_store
 
-                archived = await get_unified_message_store().query_messages(
-                    platform_id=identity.platform,
-                    group_id=identity.group_id,
-                    direction="in",
-                    limit=limit,
+                archive_store = get_unified_message_store()
+                archive_platforms = (
+                    sorted(MiyaPlatform.qq_family())
+                    if platform_family(identity.platform) == "qq"
+                    else [identity.platform]
                 )
+                archived = []
+                for archive_platform in archive_platforms:
+                    archived.extend(await archive_store.query_messages(
+                        platform_id=archive_platform,
+                        group_id=identity.group_id,
+                        direction="in",
+                        limit=limit,
+                    ))
+                # Keep compatibility with older adapters that used a QQ family
+                # label instead of the concrete OneBot platform ID.
+                if not archived and identity.platform not in archive_platforms:
+                    archived = await archive_store.query_messages(
+                        platform_id=identity.platform,
+                        group_id=identity.group_id,
+                        direction="in",
+                        limit=limit,
+                    )
                 for item in archived:
                     message_id = str(item.get("message_id") or "")
                     metadata = {
                         "group_id": identity.group_id,
                         "platform_user_id": str(item.get("sender_id") or ""),
+                        "sender_id": str(item.get("sender_id") or ""),
+                        "sender_name": str(item.get("sender_name") or ""),
+                        "conversation_scope": "group",
                         "memory_event_id": (
                             f"{identity.platform}:{identity.group_id}:{message_id}" if message_id else ""
                         ),

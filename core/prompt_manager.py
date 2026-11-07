@@ -207,7 +207,7 @@ class PromptManager:
                     context_parts.append(
                         "- 查询示例：用户说'你记得我都聊过什么吗' → 调用 memory_list() 查看所有长期记忆"
                     )
-                elif platform == "qq":
+                elif platform == "qq" or platform in {"qqofficial", "qq_official", "aiocqhttp", "onebot"}:
                     message_type = context.get("message_type", "unknown")
                     if message_type == "group":
                         group_id = context.get("group_id", "")
@@ -502,8 +502,24 @@ class PromptManager:
                     for m in chunk:
                         role = m.get("role", "")
                         content = m.get("content", "")[:30]
+                        metadata = m.get("metadata", {}) or {}
                         if role == "user":
-                            senders.append("用户")
+                            if metadata.get("group_id") or metadata.get("conversation_scope") == "group":
+                                sender = str(
+                                    metadata.get("sender_name")
+                                    or metadata.get("sender")
+                                    or "群成员"
+                                ).strip()
+                                sender_id = str(
+                                    metadata.get("platform_user_id")
+                                    or metadata.get("sender_id")
+                                    or ""
+                                ).strip()
+                                if sender_id and sender_id not in sender:
+                                    sender = f"{sender}[{sender_id}]"
+                                senders.append(f"群成员 {sender}")
+                            else:
+                                senders.append("用户")
                         elif role == "assistant":
                             senders.append("弥娅")
                         if content:
@@ -519,10 +535,30 @@ class PromptManager:
             memory.get("timestamp", "")
             metadata = memory.get("metadata", {}) or {}
             is_scheduled = metadata.get("scheduled", False)
+            is_group_message = bool(
+                metadata.get("group_id")
+                or metadata.get("conversation_scope") == "group"
+            )
+            sender_name = str(
+                metadata.get("sender_name")
+                or metadata.get("sender")
+                or ""
+            ).strip()
+            sender_id = str(
+                metadata.get("platform_user_id")
+                or metadata.get("sender_id")
+                or ""
+            ).strip()
 
             if role and content:
                 if role == "user":
-                    lines.append(f"用户：{content}")
+                    if is_group_message:
+                        speaker = sender_name or "群成员"
+                        if sender_id and sender_id not in speaker:
+                            speaker = f"{speaker}[{sender_id}]"
+                        lines.append(f"群成员 {speaker}：{content}")
+                    else:
+                        lines.append(f"用户：{content}")
                 elif role == "assistant":
                     tag = "[定时] " if is_scheduled else ""
                     lines.append(f"{tag}弥娅：{content}")

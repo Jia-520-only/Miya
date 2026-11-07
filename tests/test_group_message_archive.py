@@ -142,3 +142,27 @@ def test_reconnect_replays_available_group_history_idempotently(tmp_path, monkey
         await store.close()
 
     asyncio.run(run())
+
+
+def test_reconnect_history_retries_when_napcat_api_is_not_ready(monkeypatch):
+    async def run():
+        import core.unified_platform_impl.onebot_platform as platform_module
+
+        platform = OneBotPlatform({"bot_qq": "999"})
+        platform._shutting_down = False
+        attempts = []
+
+        async def recover(_completed_groups):
+            attempts.append(True)
+            return len(attempts) >= 2
+
+        async def no_wait(_delay):
+            return None
+
+        platform._recover_recent_group_history = recover
+        monkeypatch.setattr(platform_module.asyncio, "sleep", no_wait)
+
+        await platform._recover_recent_group_history_with_retry()
+        assert len(attempts) == 2
+
+    asyncio.run(run())
