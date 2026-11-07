@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -58,6 +59,17 @@ class AIMessage:
 
 class BaseAIClient:
     """AI客户端基类"""
+
+    @property
+    def tool_context(self) -> Optional[Dict[str, Any]]:
+        context = getattr(self, "_tool_context_var", None)
+        return context.get() if context is not None else None
+
+    @tool_context.setter
+    def tool_context(self, context: Optional[Dict[str, Any]]) -> None:
+        if not hasattr(self, "_tool_context_var"):
+            self._tool_context_var = ContextVar(f"miya_ai_tool_context_{id(self)}", default=None)
+        self._tool_context_var.set(context)
 
     def __init__(self, api_key: str, model: str, **kwargs):
         self.api_key = api_key
@@ -945,6 +957,8 @@ class BaseAIClient:
                 sender_name=context.get("sender_name"),
                 platform_adapter=context.get("platform_adapter"),
                 platform_user_id=context.get("platform_user_id"),
+                platform=context.get("platform"),
+                tool_context=context,
                 at_list=context.get("at_list") or [],
             )
         except Exception as exc:

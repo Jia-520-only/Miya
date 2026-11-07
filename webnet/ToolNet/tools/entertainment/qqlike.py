@@ -78,6 +78,12 @@ class QQLike(BaseTool):
 
         logger.info(f"[qq_like] 最终参数: target_user_id={target_user_id}, times={times}")
 
+        from webnet.ToolNet.base import resolve_platform_adapter
+
+        adapter = resolve_platform_adapter(context)
+        if adapter and getattr(adapter, "platform_id", "") in {"qqofficial", "qq_official"}:
+            return "QQ 官方机器人暂不支持 QQ 点赞"
+
         # 检查是否给自己点赞
         if bot_qq and target_user_id == bot_qq:
             return "❌ 不能给自己点赞哦~"
@@ -98,12 +104,11 @@ class QQLike(BaseTool):
             return "单次点赞次数不能超过10次"
 
         # 优先走通用平台适配器（跨平台能力接口）
-        from webnet.ToolNet.base import resolve_platform_adapter
-
-        adapter = resolve_platform_adapter(context)
         if adapter and getattr(adapter, "supports_like", False) and hasattr(adapter, "send_like"):
             try:
-                await adapter.send_like(target_user_id, times)
+                result = await adapter.send_like(target_user_id, times)
+                if result is False:
+                    return "⚠️ 点赞未成功：平台未确认操作成功"
                 return (
                     f"✅ 已给 QQ{target_user_id} 点赞。"
                     if times == 1
@@ -111,6 +116,7 @@ class QQLike(BaseTool):
                 )
             except Exception as e:
                 logger.error(f"[qq_like] 通用点赞失败: {e}", exc_info=True)
+                return f"⚠️ 点赞失败: {str(e)[:100]}"
 
         # 尝试直接调用点赞回调（旧机制兜底）
         if send_like_callback:
@@ -118,6 +124,8 @@ class QQLike(BaseTool):
                 logger.info(f"[qq_like] 准备调用 send_like_callback, target={target_user_id}, times={times}")
                 result = await send_like_callback(target_user_id, times)
                 logger.info(f"[qq_like] send_like_callback 执行完成, result={result}")
+                if result is False:
+                    return "⚠️ 点赞未成功：平台未确认操作成功"
 
                 if times == 1:
                     return f"✅ 已给 QQ{target_user_id} 点赞。"

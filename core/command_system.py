@@ -23,8 +23,8 @@ COMMANDS_DIR = Path(__file__).resolve().parent.parent / "skills" / "commands"
 
 @dataclass
 class CommandContext:
-    group_id: int = 0
-    sender_id: int = 0
+    group_id: int | str = 0
+    sender_id: int | str = 0
     user_id: str = ""
     args: List[str] = field(default_factory=list)
     raw_text: str = ""
@@ -40,16 +40,30 @@ class CommandContext:
     faq_storage: Any = None
     history_manager: Any = None
     bot_qq: int = 0
-    superadmin_qq: int = 0
+    superadmin_qq: int | str = 0
     admin_qq_list: List[int] = field(default_factory=list)
+    platform: str = ""
+    permission_level: Optional[str] = None
 
     def check_permission(self, required: str) -> bool:
         if required == "public":
             return True
+        if self.permission_level is not None:
+            levels = {"user": 0, "admin": 1, "superadmin": 2}
+            return required in levels and levels.get(self.permission_level, 0) >= levels[required]
+        # 未配置的 0 / 空 ID 不能匹配管理员。
+        is_superadmin = (
+            str(self.sender_id or "") not in {"", "0"}
+            and str(self.superadmin_qq or "") not in {"", "0"}
+            and str(self.sender_id) == str(self.superadmin_qq)
+        )
         if required == "superadmin":
-            return self.sender_id == self.superadmin_qq
+            return is_superadmin
         if required == "admin":
-            return self.sender_id == self.superadmin_qq or self.sender_id in self.admin_qq_list
+            return is_superadmin or (
+                str(self.sender_id or "") not in {"", "0"}
+                and str(self.sender_id) in {str(uid) for uid in self.admin_qq_list}
+            )
         return False
 
 

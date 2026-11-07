@@ -203,17 +203,19 @@ class MessageMixin:
         if not miya:
             return "弥娅系统未就绪"
 
-        from core.platform_context import set_current_platform_adapter
+        from core.platform_context import reset_current_platform_adapter, set_current_platform_adapter
 
-        set_current_platform_adapter(self)
+        adapter_token = set_current_platform_adapter(self)
 
         try:
             from mlink.message import Message
 
-            group_id_int = 0
-            if group_id:
-                with contextlib.suppress(ValueError):
-                    group_id_int = int(group_id)
+            # OneBot 保留数字 ID；官方 OpenID 等不透明标识必须原样传递。
+            opaque_ids = self.platform_id in {"qqofficial", "qq_official"}
+            group_id_value = (
+                int(group_id) if not opaque_ids and str(group_id).isdigit()
+                else (str(group_id) if group_id else 0)
+            )
 
             perception_data = {
                 "content": content,
@@ -223,7 +225,7 @@ class MessageMixin:
                 "sender_id": user_id,
                 "unified_user_id": f"{self.platform_id}_{user_id}",
                 "message_type": message_type,
-                "group_id": group_id_int,
+                "group_id": group_id_value,
                 "group_name": group_name,
                 "sender_role": sender_role,
                 "platform": self.platform_id,
@@ -244,6 +246,11 @@ class MessageMixin:
                     perception_data["is_owner"] = True
                     # 从 superadmins 配置中获取名字和规范ID
                     for _person, info in engine._config.get("superadmins", {}).items():
+                        person_ids = info.get("ids", {}).get(self.platform_id, [])
+                        if isinstance(person_ids, str):
+                            person_ids = [person_ids]
+                        if str(user_id) not in {str(uid) for uid in person_ids or []}:
+                            continue
                         perception_data["owner_name"] = info.get("name", "")
                         # 获取规范用户ID（第一个有值的平台ID作为标准）
                         canonical_id = str(user_id)
@@ -293,6 +300,9 @@ class MessageMixin:
                     # ── 统一斜杠命令系统（唯一命令入口） ──
                     cmd_response = await _dispatch_slash_command(self, content, user_id, group_id, message_type)
                     if cmd_response:
+                        # 官方 API 的回复需要原消息 ID，交由适配器在原会话发送。
+                        if getattr(self, "command_reply_via_response", False):
+                            return cmd_response
                         await _send_cmd_reply(self, cmd_response, user_id, group_id, message_type)
                         return
 
@@ -336,6 +346,8 @@ class MessageMixin:
         except Exception as e:
             logger.error(f"[{self.platform_id}] 消息处理异常: {e}", exc_info=True)
             return f"处理消息时出错了: {e}"
+        finally:
+            reset_current_platform_adapter(adapter_token)
 
     @staticmethod
     def _group_command_allowed(
@@ -597,6 +609,13 @@ class MessageMixin:
             logger.warning(f"[{self.platform_id}] TTS 本地播放失败: {e}")
 
 
+def _command_target_id(platform: Any, target: Any) -> Any:
+    """仅 OneBot 的协议目标转换成整数，其他平台标识保持不透明。"""
+    if getattr(platform, "platform_id", "") in {"qq", "onebot", "aiocqhttp"} and str(target).isdigit():
+        return int(target)
+    return target
+
+
 async def _dispatch_slash_command(
     platform: Any, content: str, user_id: str, group_id: str, message_type: str
 ) -> str | None:
@@ -612,23 +631,29 @@ async def _dispatch_slash_command(
         command_name, subcommand, args = match
 
         # 构建上下文
+        opaque_ids = getattr(platform, "platform_id", "") in {"qqofficial", "qq_official"}
         ctx = CommandContext(
-            sender_id=int(user_id) if user_id.isdigit() else 0,
+            sender_id=int(user_id) if not opaque_ids and str(user_id).isdigit() else str(user_id),
             user_id=user_id,
-            group_id=int(group_id) if group_id and group_id.isdigit() else 0,
-            scope="private" if message_type == "private" else "group",
+            group_id=int(group_id) if not opaque_ids and str(group_id).isdigit() else (group_id or 0),
+            scope="private" if message_type in {"private", "c2c", "direct"} else "group",
+            platform=getattr(platform, "platform_id", ""),
+            permission_level="user",
         )
 
         # 注入平台能力
-        ctx.onebot_client = getattr(platform, "_ws", None)
+        if ctx.platform in {"qq", "onebot", "aiocqhttp"}:
+            ctx.onebot_client = platform
 
         async def send_group_msg(gid, text):
-            if hasattr(platform, "_send_onebot_reply"):
-                await platform._send_onebot_reply(str(gid), text, message_type="group", group_id=str(gid))
+            if hasattr(platform, "send_group_message"):
+                return await platform.send_group_message(_command_target_id(platform, gid), text)
+            return False
 
         async def send_private_msg(uid, text):
-            if hasattr(platform, "_send_onebot_reply"):
-                await platform._send_onebot_reply(str(uid), text, message_type="private", user_id=str(uid))
+            if hasattr(platform, "send_private_message"):
+                return await platform.send_private_message(_command_target_id(platform, uid), text)
+            return False
 
         ctx.send_group_message = send_group_msg
         ctx.send_private_message = send_private_msg
@@ -647,14 +672,18 @@ async def _dispatch_slash_command(
             ctx.cognitive_service = getattr(miya, "cognitive_service", None)
 
         # 权限信息 — 从 permissions.json 读取
-        ctx.superadmin_qq = int(os.getenv("QQ_SUPERADMIN_QQ", "0"))
-        ctx.bot_qq = int(os.getenv("QQ_BOT_QQ", "0"))
+        if ctx.platform in {"qq", "onebot", "aiocqhttp"}:
+            ctx.superadmin_qq = int(os.getenv("QQ_SUPERADMIN_QQ", "0"))
+            ctx.bot_qq = int(os.getenv("QQ_BOT_QQ", "0"))
+            if ctx.superadmin_qq and str(ctx.sender_id) == str(ctx.superadmin_qq):
+                ctx.permission_level = "superadmin"
         try:
             from core.unified_permission import get_permission_engine
 
             engine = get_permission_engine()
-            if engine.is_superadmin(str(ctx.sender_id), platform=getattr(platform, "platform_id", "aiocqhttp")):
+            if engine.is_superadmin(str(user_id), platform=ctx.platform):
                 ctx.superadmin_qq = ctx.sender_id
+                ctx.permission_level = "superadmin"
         except Exception:
             pass
 
@@ -690,40 +719,21 @@ async def _dispatch_slash_command(
 async def _send_cmd_reply(platform: Any, response: str, user_id: str, group_id: str, message_type: str) -> None:
     """根据消息来源发送命令回复到正确的会话"""
     try:
-        import json as _json
-
-        ws = getattr(platform, "_ws", None)
-        if not ws:
-            await _send_private(platform, response, user_id)
-            return
-
-        if message_type == "group" and group_id:
-            payload = {
-                "action": "send_group_msg",
-                "params": {
-                    "group_id": int(group_id),
-                    "message": str(response),
-                },
-            }
+        if message_type in {"group", "channel"}:
+            sender = getattr(platform, "send_group_message", None)
+            if sender and group_id:
+                await sender(_command_target_id(platform, group_id), str(response))
         else:
-            payload = {
-                "action": "send_private_msg",
-                "params": {
-                    "user_id": int(user_id),
-                    "message": str(response),
-                },
-            }
-        await ws.send_str(_json.dumps(payload))
+            await _send_private(platform, response, user_id)
     except Exception as e:
         logger.warning(f"[Commands] 回复发送失败: {e}")
-        await _send_private(platform, response, user_id)
 
 
 async def _send_private(platform: Any, response: str, user_id: str) -> None:
     import inspect
 
     if hasattr(platform, "send_private_message"):
-        result = platform.send_private_message(user_id, response)
+        result = platform.send_private_message(_command_target_id(platform, user_id), response)
         if inspect.isawaitable(result):
             await result
 

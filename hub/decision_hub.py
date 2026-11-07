@@ -47,6 +47,14 @@ from mlink.message import Message
 logger = logging.getLogger(__name__)
 
 
+def _supports_proactive_delivery(platform: Any, chat_type: str = "private") -> bool:
+    """Return whether an adapter explicitly allows proactive delivery to this chat type."""
+    if platform is None or not getattr(platform, "support_proactive_message", True):
+        return False
+    sender_name = "send_group_message" if chat_type == "group" else "send_private_message"
+    return callable(getattr(platform, sender_name, None))
+
+
 # Stage 1: 纯函数已迁移到 hub.decision_hub_helpers。
 # 上方同名旧实现暂时保留，但会被以下导入覆盖；后续阶段将物理删除。
 from hub.decision_hub_helpers import (  # noqa: E402
@@ -76,6 +84,29 @@ class DecisionHub:
     - EmotionController: 情绪控制（情绪更新、染色、衰减）
     - MemoryManager: 记忆管理（存储、检索、压缩）
     """
+
+    def _platform_tool_context(self, platform: str) -> dict:
+        """按当前消息的平台选择工具通道，官方 OpenID 不进入 OneBot 回退。"""
+        from core.platform_context import get_current_platform_adapter
+
+        def normalized(value):
+            return {"qq_official": "qqofficial", "onebot": "aiocqhttp", "qq": "aiocqhttp"}.get(value, value)
+
+        adapter = get_current_platform_adapter()
+        if adapter is not None and normalized(getattr(adapter, "platform_id", "")) != normalized(platform):
+            adapter = None
+        registry = getattr(self, "platform_registry", None)
+        if adapter is None and registry is not None:
+            adapter = registry.get(platform) or registry.get(normalized(platform))
+        if adapter is None and normalized(platform) == "aiocqhttp":
+            adapter = getattr(self, "onebot_client", None)
+        onebot = adapter if normalized(platform) == "aiocqhttp" else None
+        return {
+            "platform_adapter": adapter,
+            "onebot_client": onebot,
+            "send_like_callback": getattr(adapter, "send_like", None)
+            if getattr(adapter, "supports_like", False) else None,
+        }
 
     def __init__(
         self,
@@ -677,10 +708,7 @@ class DecisionHub:
                     "user_id": user_id,
                     "group_id": group_id,
                     "message_type": ctx.chat_type if ctx else "private",
-                    "onebot_client": self.onebot_client,
-                    "send_like_callback": getattr(self.onebot_client, "send_like", None)
-                    if self.onebot_client
-                    else None,
+                    **self._platform_tool_context(platform),
                     "memory_engine": self.memory_engine,
                     "emotion": self.emotion,
                     "personality": self.personality,
@@ -1000,7 +1028,7 @@ class DecisionHub:
         # 1) 平台注册表直接发送 (v8.2: 启用跨平台 ID 翻译)
         if self.platform_registry and platform and platform != "terminal":
             inst = self.platform_registry.get(platform)
-            if inst and hasattr(inst, "is_online") and inst.is_online:
+            if inst and hasattr(inst, "is_online") and inst.is_online and _supports_proactive_delivery(inst, chat_type):
                 if chat_type == "group" and hasattr(inst, "send_group_message"):
                     logger.info(f"[主动分发] 发送群消息 (via {platform}): {message[:50]}")
                     sent = await self._attempt_proactive_send(inst.send_group_message, target_id, message)
@@ -1014,7 +1042,7 @@ class DecisionHub:
                     sent = await self._attempt_proactive_send(inst.send_private_message, resolved_id, message)
 
         # 2) QQ 系列 → OneBot 回退 (仅 QQ 类平台)
-        _qq_platforms = MiyaPlatform.qq_family()
+        _qq_platforms = {"qq", "aiocqhttp", "onebot"}
         if not sent and self.onebot_client and platform in _qq_platforms:
             if chat_type == "group":
                 sent = await self._attempt_proactive_send(self.onebot_client.send_group_message, target_id, message)
@@ -1175,17 +1203,12 @@ class DecisionHub:
         except Exception:
             pass
 
-        # QQ 系列平台的已知 ID 模式
-        _qq_platforms = MiyaPlatform.qq_family()
+        # OneBot 的数字 QQ ID 可直接使用，官方平台必须走明确的身份绑定。
+        _qq_platforms = {"qq", "aiocqhttp", "onebot"}
         _is_qq_target = target_platform in _qq_platforms
 
         # QQ 纯数字 ID：OneBot/NapCat 可用 QQ 号，qqofficial 需要 openid
         if _is_qq_target and target_id.isdigit():
-            if target_platform == "qqofficial":
-                openid = self._find_qqofficial_openid(target_id)
-                if openid:
-                    logger.info(f"[跨平台] qqofficial QQ号 {target_id} → openid {openid}")
-                    return openid
             return target_id
 
         try:
@@ -1345,7 +1368,7 @@ class DecisionHub:
             for pid in self.platform_registry.list_active() or []:
                 inst = self.platform_registry.get(pid)
                 if inst and hasattr(inst, "is_online") and inst.is_online:
-                    if hasattr(inst, "send_private_message"):
+                    if _supports_proactive_delivery(inst, "private"):
                         priority = priority_map.get(pid, priority_map.get(f"{pid}_private", 5))
                         candidates.append((pid, priority))
 
@@ -1485,7 +1508,7 @@ class DecisionHub:
         for pid in active:
             inst = self.platform_registry.get(pid)
             if inst and hasattr(inst, "is_online") and inst.is_online:
-                if hasattr(inst, "send_private_message"):
+                if _supports_proactive_delivery(inst, "private"):
                     base_score = priority_map.get(pid, priority_map.get(f"{pid}_private", 5))
 
                     activity = user_activity.get(pid, {})
@@ -3236,6 +3259,8 @@ class DecisionHub:
                     "platform_user_id": perception.get("platform_user_id", user_id),
                     "group_id": perception.get("group_id"),
                     "message_type": perception.get("message_type"),
+                    "channel_id": perception.get("channel_id"),
+                    "message_id": perception.get("message_id"),
                     "sender_name": sender_name,
                     "at_list": perception.get("at_list", []) or [],
                     "at_names": perception.get("at_names", {}),
@@ -3244,10 +3269,7 @@ class DecisionHub:
                     "emotion": self.emotion,
                     "personality": self.personality,
                     "scheduler": self.scheduler,
-                    "onebot_client": self.onebot_client,
-                    "send_like_callback": getattr(self.onebot_client, "send_like", None)
-                    if self.onebot_client
-                    else None,
+                    **self._platform_tool_context(platform),
                     # 【关键】传递图片分析结果
                     "image_analysis": perception.get("image_analysis"),
                     "image_data": perception.get("image_data"),
@@ -3291,7 +3313,7 @@ class DecisionHub:
                     and diting_intent not in action_intents
                     and diting_intent != ""
                 ):
-                    minimal = self.platform_tools_manager.get_minimal_chat_tools()
+                    minimal = self.platform_tools_manager.get_minimal_chat_tools(platform)
                     if minimal:
                         tools_schema = minimal
                         logger.info(f"[决策层-闲聊加速] 精简为 {len(tools_schema)} 个工具")

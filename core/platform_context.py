@@ -6,35 +6,39 @@
 import base64 as _base64
 import logging
 import os
+from contextvars import ContextVar, Token
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("Miya.PlatformContext")
 
-_current_platform_adapter: Optional[Any] = None
-_current_platform: str = ""
+_current_platform_adapter: ContextVar[Any] = ContextVar("miya_platform_adapter", default=None)
+_current_platform: ContextVar[str] = ContextVar("miya_platform", default="")
 
 
-def set_current_platform_adapter(adapter: Any) -> None:
+def set_current_platform_adapter(adapter: Any) -> Token:
     """设置当前请求的平台适配器引用"""
-    global _current_platform_adapter
-    _current_platform_adapter = adapter
+    return _current_platform_adapter.set(adapter)
+
+
+def reset_current_platform_adapter(token: Token) -> None:
+    """恢复请求之前的适配器，避免同一任务的后续工作继承旧会话。"""
+    _current_platform_adapter.reset(token)
 
 
 def get_current_platform_adapter() -> Optional[Any]:
     """获取当前请求的平台适配器引用"""
-    return _current_platform_adapter
+    return _current_platform_adapter.get()
 
 
 def set_current_platform(platform: str) -> None:
     """设置当前请求的平台标识（用于 app 端降级处理）"""
-    global _current_platform
-    _current_platform = platform
+    _current_platform.set(platform)
 
 
 def get_current_platform() -> str:
     """获取当前请求的平台标识"""
-    return _current_platform
+    return _current_platform.get()
 
 
 class AppPlatformBridge:

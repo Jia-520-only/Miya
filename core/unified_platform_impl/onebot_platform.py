@@ -1955,16 +1955,20 @@ class OneBotPlatform(MessageMixin, BasePlatform):
             logger.error(f"[{self.platform_id}] 发送私聊消息失败: {e}")
             return False
 
-    async def send_like(self, user_id: int, times: int = 1):
-        """给用户点赞"""
-        await self._call_onebot_api("send_like", {"user_id": user_id, "times": times})
+    async def send_like(self, user_id: int, times: int = 1) -> bool:
+        """给用户点赞，并确认 OneBot 返回状态。"""
+        result = await self._call_onebot_api("send_like", {"user_id": user_id, "times": times}, detailed=True)
+        return not (isinstance(result, dict) and result.get("_miya_status"))
 
-    async def send_poke(self, user_id: int, group_id: int = 0):
-        """拍一拍用户"""
+    async def send_poke(self, user_id: int, group_id: int = 0) -> bool:
+        """拍一拍用户，并确认 OneBot 返回状态。"""
         if group_id:
-            await self._call_onebot_api("group_poke", {"group_id": group_id, "user_id": user_id})
+            result = await self._call_onebot_api(
+                "group_poke", {"group_id": group_id, "user_id": user_id}, detailed=True
+            )
         else:
-            await self._call_onebot_api("friend_poke", {"user_id": user_id})
+            result = await self._call_onebot_api("friend_poke", {"user_id": user_id}, detailed=True)
+        return not (isinstance(result, dict) and result.get("_miya_status"))
 
     async def upload_image(self, file_path: str) -> Optional[str]:
         """返回可发送的图片 file 引用（file:// URI）。
@@ -2537,11 +2541,12 @@ class OneBotPlatform(MessageMixin, BasePlatform):
     async def set_msg_emoji_like(self, message_id: int, emoji_id: str) -> bool:
         """给消息设置表情表态"""
         try:
-            await self._call_onebot_api(
+            result = await self._call_onebot_api(
                 "set_msg_emoji_like",
                 {"message_id": message_id, "emoji_id": emoji_id},
+                detailed=True,
             )
-            return True
+            return not (isinstance(result, dict) and result.get("_miya_status"))
         except Exception as e:
             logger.debug(f"[{self.platform_id}] 表情表态失败: {e}")
             return False

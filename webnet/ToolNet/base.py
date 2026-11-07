@@ -15,16 +15,24 @@ logger = logging.getLogger(__name__)
 def resolve_platform_adapter(context: Any = None) -> Any:
     """解析工具执行时的平台适配器引用。
 
-    优先从 context.platform_adapter 取，其次从全局 platform_context 取。
+    优先从 context.platform_adapter 取，其次从当前请求的 platform_context 取。
     返回 None 表示当前无平台上下文（如后台定时任务）。
     """
+    expected = getattr(context, "platform", None)
+
+    def matches(adapter: Any) -> bool:
+        aliases = {"qq_official": "qqofficial", "qq": "aiocqhttp", "onebot": "aiocqhttp"}
+        actual = getattr(adapter, "platform_id", None)
+        return not expected or aliases.get(actual, actual) == aliases.get(expected, expected)
+
     adapter = getattr(context, "platform_adapter", None) if context is not None else None
-    if adapter:
+    if adapter and (getattr(adapter, "platform_id", None) is None or matches(adapter)):
         return adapter
     try:
         from core.platform_context import get_current_platform_adapter
 
-        return get_current_platform_adapter()
+        adapter = get_current_platform_adapter()
+        return adapter if adapter is not None and matches(adapter) else None
     except Exception:
         return None
 
@@ -50,8 +58,9 @@ class ToolContext:
 
     # 运行时信息
     request_id: Optional[str] = None  # 请求ID
-    group_id: Optional[int] = None  # 群号
-    user_id: Optional[int] = None  # 用户ID
+    group_id: Optional[int | str] = None  # 群号 / OpenID
+    user_id: Optional[int | str] = None  # 用户ID / OpenID
+    platform: Optional[str] = None
     message_type: Optional[str] = None  # 消息类型 (group/private)
     sender_name: Optional[str] = None  # 发送者名称
     is_at_bot: bool = False  # 是否@机器人
@@ -73,6 +82,8 @@ class ToolContext:
 
     # 平台原始用户 ID（未被规范化的，用于各平台 API 调用）
     platform_user_id: Optional[str] = None
+    channel_id: Optional[str] = None
+    message_id: Optional[str] = None
 
 
 class ToolRegistry:

@@ -248,7 +248,7 @@ class Scheduler:
         # 1) 跨平台分发 — 由 DecisionHub 统一路由（含跨平台 ID 解析与在线检测）
         if self.cross_platform_sender is not None:
             try:
-                sent = await self.cross_platform_sender(
+                delivery = self.cross_platform_sender(
                     message=message,
                     target_id=target_id,
                     chat_type=target_type,
@@ -256,6 +256,14 @@ class Scheduler:
                     trigger_type="scheduled",
                     store_memory=False,
                 )
+                if (
+                    self.main_event_loop and self.main_event_loop.is_running()
+                    and asyncio.get_running_loop() is not self.main_event_loop
+                ):
+                    future = asyncio.run_coroutine_threadsafe(delivery, self.main_event_loop)
+                    sent = await asyncio.wrap_future(future)
+                else:
+                    sent = await delivery
                 if sent:
                     logger.info(f"定时消息已分发: platform={platform}, 目标={target_type}_{target_id}")
                 else:
@@ -265,7 +273,7 @@ class Scheduler:
                 logger.error(f"跨平台分发定时消息失败: {e}", exc_info=True)
 
         # 2) OneBot 直连回退
-        if self.onebot_client:
+        if self.onebot_client and platform in {"qq", "aiocqhttp", "onebot"}:
             if target_type == "group":
                 sent = await self._safe_onebot_call(
                     self.onebot_client.send_group_message, target_id, message, task

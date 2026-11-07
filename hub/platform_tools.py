@@ -1267,6 +1267,19 @@ class PlatformToolsManager:
         "group_analysis_message_mix",
     ]
 
+    # 通用业务能力共享；这些工具依赖 OneBot 的账号/群管理接口。
+    QQ_OFFICIAL_UNSUPPORTED_TOOLS = frozenset({
+        "qq_like", "send_poke", "get_user_info", "get_member_list",
+        "get_member_info", "find_member", "qq_level_query", "group_file_downloader",
+        "group_analysis_member_structure", "group_analysis_member_activity",
+        "group_analysis_inactive_risk", "group_analysis_message_mix",
+    })
+
+    @classmethod
+    def _supported_tools(cls, names: List[str], platform: str) -> List[str]:
+        unsupported = cls.QQ_OFFICIAL_UNSUPPORTED_TOOLS if platform in {"qqofficial", "qq_official"} else set()
+        return list(dict.fromkeys(name for name in names if name not in unsupported))
+
     def __init__(self, tool_subnet):
         """
         初始化平台工具管理器
@@ -1290,7 +1303,7 @@ class PlatformToolsManager:
 
         try:
             adapter = get_adapter(platform)
-            return adapter._get_available_tools()
+            return self._supported_tools(adapter._get_available_tools(), platform)
         except Exception as e:
             logger.error(f"[平台工具] 获取平台工具失败: {e}")
             return []
@@ -1319,7 +1332,7 @@ class PlatformToolsManager:
             selected_tools = [*selected_tools, "jmcomic_download"]
 
         # 如果是 QQ 平台（含 aiocqhttp OneBot），添加更多常用工具
-        if MiyaPlatform.is_qq(platform) or platform == MiyaPlatform.AIOCQHTTP.value:
+        if MiyaPlatform.is_qq_family(platform):
             selected_tools = self.CORE_TOOLS + self.QQ_EXTENDED_TOOLS
             # QQ 聊天场景不需要屏幕视觉工具，移除避免 AI 混淆
             selected_tools = [
@@ -1334,6 +1347,8 @@ class PlatformToolsManager:
             if _t not in selected_tools:
                 selected_tools.append(_t)
 
+        selected_tools = self._supported_tools(selected_tools, platform)
+
         # 从 tool_subnet 获取工具 schema
         try:
             all_schemas = self.tool_subnet.get_tools_schema()
@@ -1345,13 +1360,19 @@ class PlatformToolsManager:
 
         except Exception as e:
             logger.warning(f"[平台工具] 获取平台工具失败: {e}，使用全部工具")
-            return self.tool_subnet.get_tools_schema()
+            all_schemas = self.tool_subnet.get_tools_schema()
+            unsupported = self.QQ_OFFICIAL_UNSUPPORTED_TOOLS if platform in {"qqofficial", "qq_official"} else set()
+            return [
+                schema for schema in all_schemas
+                if schema.get("function", {}).get("name") not in unsupported
+            ]
 
-    def get_minimal_chat_tools(self) -> List[Dict]:
+    def get_minimal_chat_tools(self, platform: str = "") -> List[Dict]:
         """返回纯闲聊最小工具集，用于加速简单对话"""
         try:
             all_schemas = self.tool_subnet.get_tools_schema()
-            minimal = [s for s in all_schemas if s.get("function", {}).get("name") in self.MINIMAL_CHAT_TOOLS]
+            names = self._supported_tools(self.MINIMAL_CHAT_TOOLS, platform)
+            minimal = [s for s in all_schemas if s.get("function", {}).get("name") in names]
             logger.debug(f"[平台工具] 闲聊精简: {len(minimal)} 个工具")
             return minimal
         except Exception:

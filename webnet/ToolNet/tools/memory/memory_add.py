@@ -64,7 +64,7 @@ class MemoryAdd(BaseTool):
                 tags=tags,
                 user_id=user_id,
                 session_id=getattr(context, "request_id", ""),
-                platform="qq",
+                platform=getattr(context, "platform", None) or "qq",
                 source=MemorySource.MANUAL,
                 event_type="手动添加",
                 significance=priority,

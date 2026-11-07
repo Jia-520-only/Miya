@@ -36,8 +36,8 @@ class CreateScheduleTaskTool(BaseTool):
                         "default": "group",
                     },
                     "target_id": {
-                        "type": "integer",
-                        "description": "目标ID（群号或用户QQ号），默认为当前用户ID",
+                        "type": ["integer", "string"],
+                        "description": "目标ID（群号、用户ID或 OpenID），默认为当前会话",
                     },
                     "message": {
                         "type": "string",
@@ -115,20 +115,14 @@ class CreateScheduleTaskTool(BaseTool):
 
     async def execute(self, args: Dict[str, Any], context: ToolContext) -> str:
         """执行工具"""
-        import sys
-
-        print(
-            "=================== CREATE_SCHEDULE TOOL EXECUTED! ===================",
-            file=sys.stderr,
-        )
-        print(f"args={args}, context={type(context)}", file=sys.stderr)
         logger.info(f"=== CREATE_SCHEDULE TOOL CALLED === args={args}")
         task_type = args.get("task_type")
         # 从上下文推断 target_type：私聊用 private，群聊用 group
         context_msg_type = getattr(context, "message_type", None) or "group"
-        default_target_type = "private" if context_msg_type == "private" else "group"
+        default_target_type = "private" if context_msg_type in {"private", "c2c", "direct"} else "group"
         target_type = args.get("target_type", default_target_type)
-        target_id = args.get("target_id", context.user_id)  # 默认使用当前用户ID
+        default_target = context.group_id if target_type == "group" else (context.platform_user_id or context.user_id)
+        target_id = args.get("target_id") or default_target
         message = args.get("message", "")
         schedule_time = args.get("schedule_time", "")
         repeat = args.get("repeat", "once")
@@ -152,6 +146,8 @@ class CreateScheduleTaskTool(BaseTool):
 
         if task_type == "action" and not action_type:
             return "❌ 动作任务需要指定action_type（qq_like或send_poke）"
+        if task_type == "action" and context.platform in {"qqofficial", "qq_official"}:
+            return "❌ 当前 QQ 官方机器人不支持定时点赞或拍一拍，可设置文字提醒"
 
         try:
             # 生成任务ID（完整 UUID，不再截断以避免碰撞）
@@ -262,11 +258,8 @@ class CreateScheduleTaskTool(BaseTool):
                 if action_type == "qq_like":
                     task_data["times"] = times
 
-            # 使用调度器
-            print(f"[DEBUG] context: {type(context)}, memory_engine: {context.memory_engine}")
-            print(f"[DEBUG] context.__dict__: {context.__dict__}")
-
-            if context.memory_engine:
+            # 使用请求传入的调度器；仅有记忆记录不代表任务已开始调度。
+            if context.memory_engine or context.scheduler:
                 # 尝试获取调度器 - 多层降级获取
                 scheduler = None
 
@@ -306,15 +299,15 @@ class CreateScheduleTaskTool(BaseTool):
                     scheduler.schedule(task)
                     logger.info(f"定时任务已添加到调度队列: {task_id}, 执行时间: {scheduled_at}")
                 else:
-                    logger.warning("调度器不可用，任务将只存储在记忆中")
+                    return "❌ 调度器未就绪，未创建定时任务"
 
-                # 同时存储在记忆中
-                context.memory_engine.store_tide(
-                    memory_id=f"scheduled_task_{task_id}",
-                    content=task_data,
-                    priority=priority / 10,
-                    ttl=86400 * 30,  # 30天
-                )
+                if context.memory_engine:
+                    context.memory_engine.store_tide(
+                        memory_id=f"scheduled_task_{task_id}",
+                        content=task_data,
+                        priority=priority / 10,
+                        ttl=86400 * 30,
+                    )
 
                 # 格式化输出
                 result = "✅ 定时任务已创建\n"
@@ -338,8 +331,7 @@ class CreateScheduleTaskTool(BaseTool):
 
                 return result
             else:
-                logger.warning("memory_engine 不可用，无法创建定时任务")
-                return f"⚠️ 记忆引擎未初始化，任务已创建但无法持久化\n\n任务ID: {task_id}\n类型: {task_type}"
+                return "❌ 调度器未就绪，未创建定时任务"
 
         except Exception as e:
             logger.error(f"创建定时任务失败: {e}", exc_info=True)

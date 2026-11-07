@@ -5,7 +5,7 @@ ToolNet 子网基类
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -115,6 +115,8 @@ class ToolSubnet:
         at_list: List[int] = field(default_factory=list),
         platform_adapter: Any = None,
         platform_user_id: Optional[str] = None,
+        platform: Optional[str] = None,
+        tool_context: Optional[Dict[str, Any]] = None,
     ) -> str:
         """执行工具
 
@@ -138,20 +140,32 @@ class ToolSubnet:
         except ImportError:
             from .registry import ToolContext
 
-        context = ToolContext(
-            memory_engine=self.config.memory_engine,
-            unified_memory=self.config.memory_engine,  # 使用 memory_engine 作为 unified_memory
-            onebot_client=self.config.onebot_client,
-            scheduler=self.config.scheduler,
-            lifenet=lifenet,
-            user_id=user_id,
-            group_id=group_id,
-            message_type=message_type,
-            sender_name=sender_name,
-            at_list=at_list if at_list is not None else [],
-            platform_adapter=platform_adapter,
-            platform_user_id=platform_user_id,
-        )
+        runtime = tool_context or {}
+        platform_adapter = platform_adapter or runtime.get("platform_adapter")
+        platform = platform or runtime.get("platform") or getattr(platform_adapter, "platform_id", None)
+        onebot_client = None
+        if platform in {None, "qq", "onebot", "aiocqhttp"}:
+            onebot_client = platform_adapter or runtime.get("onebot_client") or self.config.onebot_client
+        # 惰性工具子网可能没有系统组件；请求携带的记忆引擎/调度器优先。
+        values = {
+            "memory_engine": self.config.memory_engine,
+            "unified_memory": self.config.memory_engine,
+            "scheduler": self.config.scheduler,
+            **{f.name: runtime[f.name] for f in fields(ToolContext) if f.init and f.name in runtime},
+            "onebot_client": onebot_client,
+            "lifenet": lifenet or runtime.get("lifenet"),
+            "user_id": user_id,
+            "group_id": group_id,
+            "message_type": message_type,
+            "sender_name": sender_name,
+            "at_list": at_list if isinstance(at_list, list) else [],
+            "platform_adapter": platform_adapter,
+            "platform_user_id": platform_user_id,
+            "platform": platform,
+        }
+        if platform not in {None, "qq", "onebot", "aiocqhttp"}:
+            values["send_like_callback"] = None
+        context = ToolContext(**values)
 
         try:
             # 执行工具 (registry expects: name, context, **kwargs)

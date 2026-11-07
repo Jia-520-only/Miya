@@ -183,7 +183,7 @@ class ToolRegistry:
     def _detect_platform_from_context(self, context: ToolContext) -> str:
         """从上下文检测平台类型"""
         # 尝试从多个属性检测平台
-        if hasattr(context, "platform"):
+        if getattr(context, "platform", None):
             return context.platform
 
         # 根据消息类型或其他属性推断

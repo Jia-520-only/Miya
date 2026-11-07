@@ -46,18 +46,25 @@ class SendPoke(BaseTool):
         if not target_user_id:
             return "请指定要戳的用户"
 
+        from webnet.ToolNet.base import resolve_platform_adapter
+
+        adapter = resolve_platform_adapter(context)
+        if adapter and not getattr(adapter, "supports_poke", False):
+            if getattr(adapter, "platform_id", "") in {"qqofficial", "qq_official"}:
+                return "QQ 官方机器人暂不支持戳一戳"
+            return "当前平台不支持戳一戳"
+
         try:
             target_user_id = int(target_user_id)
             group_id = int(group_id) if group_id else 0
         except (ValueError, TypeError):
-            pass
+            return "戳一戳需要数字 QQ 用户号和群号"
 
-        from webnet.ToolNet.base import resolve_platform_adapter
-
-        adapter = resolve_platform_adapter(context)
         if adapter and getattr(adapter, "supports_poke", False) and hasattr(adapter, "send_poke"):
             try:
-                await adapter.send_poke(target_user_id, group_id)
+                result = await adapter.send_poke(target_user_id, group_id)
+                if result is False:
+                    return "戳一戳失败：OneBot 未确认操作成功"
                 return f"✅ 戳了戳 {target_user_id}"
             except Exception as e:
                 logger.error(f"戳一戳失败: {e}", exc_info=True)

@@ -52,15 +52,9 @@ def _resolve_target(context: ToolContext, target_type: str = "private") -> str:
 
 
 def _resolve_platform_adapter(context: ToolContext):
-    adapter = getattr(context, "platform_adapter", None)
-    if adapter:
-        return adapter
-    try:
-        from core.platform_context import get_current_platform_adapter
+    from webnet.ToolNet.base import resolve_platform_adapter
 
-        return get_current_platform_adapter()
-    except ImportError:
-        return None
+    return resolve_platform_adapter(context)
 
 
 def _platform_supports_file(platform) -> bool:

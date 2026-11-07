@@ -5,9 +5,13 @@ QQ 官方机器人平台 (从旧代码迁移)
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import logging
 import os
+import re
+from contextvars import ContextVar
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from core.unified_platform.base import BasePlatform
@@ -38,9 +42,6 @@ def _parse_attachments(msg: Any, file_category: str = "file") -> List[Any]:
         if not url:
             continue
 
-        # 下载文件内容
-        file_data = _download_attachment_url(url)
-
         if file_category == "image" and ctype and ctype.startswith("image/"):
             fc = FileContext.from_image(
                 url=url,
@@ -67,6 +68,8 @@ def _parse_attachments(msg: Any, file_category: str = "file") -> List[Any]:
         else:
             continue
 
+        # 分类后再下载，同一附件不会被图片/文件两个分支重复下载。
+        file_data = _download_attachment_url(url)
         if file_data:
             fc.file_data = file_data
             if not fsize:
@@ -116,12 +119,17 @@ class QQOfficialPlatform(MessageMixin, BasePlatform):
     platform_id = "qqofficial"
     platform_name = "QQ 官方机器人"
     health_check_interval = 30.0
+    command_reply_via_response = True
+    supports_channel_reaction = True
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         BasePlatform.__init__(self, config)
         self._bot_client = None
         self._bot_task: Optional[asyncio.Task] = None
         self._msg_seq_counter = 0
+        self._reply_context: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
+            f"qqofficial_reply_{id(self)}", default=None
+        )
 
         self.appid = self.config.get("appid", "")
         self.secret = self.config.get("secret", "")
@@ -129,42 +137,128 @@ class QQOfficialPlatform(MessageMixin, BasePlatform):
         self.sandbox = self.config.get("sandbox", False)
 
     def _next_msg_seq(self) -> int:
+        context = self._reply_context.get()
+        if context is not None:
+            context["seq"] += 1
+            return context["seq"]
         self._msg_seq_counter += 1
         return self._msg_seq_counter
 
-    async def send_private_message(self, user_id: int, message: str) -> bool:
-        """发送私聊消息（主动）"""
+    async def set_channel_reaction(
+        self, channel_id: str, message_id: str, emoji_id: str, emoji_type: int = 1
+    ) -> bool:
+        """添加频道消息表态；QQ 群和 C2C 不使用此接口。"""
+        if not self._bot_client or emoji_type not in (1, 2):
+            return False
+        await self._bot_client.api.put_reaction(
+            str(channel_id), str(message_id), emoji_type, str(emoji_id)
+        )
+        return True
+
+    def _reply_params(self, target: str, message_type: str) -> Dict[str, Any]:
+        context = self._reply_context.get()
+        params = {}
+        if context and context["target"] == str(target) and context["kind"] == message_type:
+            if context["message_id"]:
+                params["msg_id"] = context["message_id"]
+        params["msg_seq"] = self._next_msg_seq()
+        return params
+
+    @staticmethod
+    def _message_delivered(result: Any) -> bool:
+        return bool(result.get("id")) if isinstance(result, dict) else bool(getattr(result, "id", None))
+
+    async def send_private_message(self, user_id: int | str, message: str) -> bool:
+        return await self._send_text(self._resolve_qqofficial_openid(str(user_id)), message, "c2c")
+
+    async def send_group_message(self, group_id: int | str, message: str) -> bool:
+        return await self._send_text(str(group_id), message, "group")
+
+    async def _send_text(self, target: str, message: str, message_type: str) -> bool:
         if not self._bot_client:
             return False
         try:
-            await self._bot_client.api.post_c2c_message(
-                openid=str(user_id),
-                msg_type=0,
-                content=message,
-                msg_seq=self._next_msg_seq(),
-            )
-            logger.info(f"[qqofficial] 主动私聊消息 -> {user_id}: {message[:30]}")
-            return True
+            for chunk in self._split_long_line(message, 500):
+                params = self._reply_params(target, message_type)
+                if message_type == "group":
+                    result = await self._bot_client.api.post_group_message(
+                        group_openid=target, msg_type=0, content=chunk, **params
+                    )
+                else:
+                    result = await self._bot_client.api.post_c2c_message(
+                        openid=target, msg_type=0, content=chunk, **params
+                    )
+                if not self._message_delivered(result):
+                    logger.warning("[qqofficial] 文本发送未返回消息回执")
+                    return False
+                self._record_message_out()
+            return bool(message.strip())
         except Exception as e:
-            logger.error(f"[qqofficial] 主动私聊消息失败: {e}")
+            logger.error("[qqofficial] 文本发送失败: %s", e)
             return False
 
-    async def send_group_message(self, group_id: int, message: str) -> bool:
-        """发送群聊消息（主动）"""
-        if not self._bot_client:
-            return False
+    async def _handle_message(self, msg: Any, kind: str) -> None:
+        """统一处理群聊、C2C、频道及频道私信，回复上下文按请求隔离。"""
+        if msg is None or getattr(msg, "author", None) is None:
+            return
+        author = msg.author
+        user_id = str(
+            getattr(author, "member_openid", None)
+            or getattr(author, "user_openid", None)
+            or getattr(author, "id", None)
+            or ""
+        )
+        if not user_id:
+            return
+        group_id = str(getattr(msg, "group_openid", "") or "")
+        channel_id = str(getattr(msg, "channel_id", "") or "")
+        target = group_id if kind == "group" else channel_id if kind == "channel" else user_id
+        if not target:
+            return
+        token = self._reply_context.set({
+            "kind": kind, "target": target, "message_id": str(getattr(msg, "id", "") or ""), "seq": 0
+        })
         try:
-            await self._bot_client.api.post_group_message(
-                group_openid=str(group_id),
-                msg_type=0,
-                content=message,
-                msg_seq=self._next_msg_seq(),
+            content = (getattr(msg, "content", "") or "").strip()
+            if kind in {"group", "channel"}:
+                bot_id = self.bot_qq or str(getattr(getattr(self._bot_client, "robot", None), "id", "") or "")
+                if bot_id:
+                    content = re.sub(r"<@!?" + re.escape(str(bot_id)) + r">", "", content).strip()
+            images, files = await asyncio.gather(
+                asyncio.to_thread(_parse_attachments, msg, "image"),
+                asyncio.to_thread(_parse_attachments, msg, "file"),
             )
-            logger.info(f"[qqofficial] 主动群聊消息 -> {group_id}: {message[:30]}")
-            return True
-        except Exception as e:
-            logger.error(f"[qqofficial] 主动群聊消息失败: {e}")
-            return False
+            prefix, extra = _detect_qqofficial_reply(msg)
+            content = prefix + content
+            if not content and not images and not files:
+                return
+            extra["message_id"] = str(getattr(msg, "id", "") or "")
+            if kind == "channel":
+                extra["channel_id"] = channel_id
+            response = await self.route_to_decision_hub(
+                content=content,
+                user_id=user_id,
+                user_name=getattr(author, "username", "") or getattr(author, "nick", "") or user_id,
+                message_type="group" if kind in {"group", "channel"} else "private",
+                group_id=target if kind in {"group", "channel"} else "",
+                is_at_bot=True,
+                images=images or None,
+                files=files or None,
+                extra=extra,
+            )
+            if response:
+                # 频道及频道私信保留 botpy 的原事件回复方法。
+                if kind in {"channel", "direct"}:
+                    for chunk in self._split_long_line(response, 500):
+                        await msg.reply(content=chunk)
+                elif not await self._tts_process_and_send_qqofficial(
+                    response, msg if kind == "c2c" else None, msg if kind == "group" else None
+                ):
+                    await self._send_text(target, response, kind)
+        except Exception:
+            logger.exception("[qqofficial] %s 消息处理失败", kind)
+        finally:
+            self._reply_context.reset(token)
 
     async def _do_connect(self) -> bool:
         if not self.appid or not self.secret:
@@ -188,130 +282,16 @@ class QQOfficialPlatform(MessageMixin, BasePlatform):
                     logger.info(f"[qqofficial] Bot 已上线 (QQ: {platform.bot_qq})")
 
                 async def on_at_message_create(self, message):
-                    await _do_handle(message, "channel")
+                    await platform._handle_message(message, "channel")
 
                 async def on_group_at_message_create(self, message):
-                    await _do_handle_group(message)
+                    await platform._handle_message(message, "group")
 
                 async def on_direct_message_create(self, message):
-                    await _do_handle(message, "private")
+                    await platform._handle_message(message, "direct")
 
                 async def on_c2c_message_create(self, message):
-                    await _do_handle(message, "c2c")
-
-            async def _do_handle(msg, msg_type):
-                try:
-                    if msg is None:
-                        logger.warning("[qqofficial] 收到空的 %s 事件，已跳过", msg_type)
-                        return
-                    author = msg.author
-                    if author is None:
-                        logger.warning("[qqofficial] %s 事件缺少 author，已跳过", msg_type)
-                        return
-                    user_id = str(
-                        getattr(author, "user_openid", None)
-                        or getattr(author, "member_openid", None)
-                        or getattr(author, "id", None)
-                        or ""
-                    )
-                    user_name = getattr(author, "username", "") or getattr(author, "nick", "") or user_id
-                    content = msg.content.strip() if msg.content else ""
-
-                    # 解析附件/图片
-                    from core.file_context import FileContext
-
-                    images = _parse_attachments(msg, "image")
-                    files = _parse_attachments(msg, "file")
-
-                    # 检测引用回复
-                    reply_prefix, reply_extra = _detect_qqofficial_reply(msg)
-                    if reply_prefix:
-                        content = reply_prefix + (content or "")
-
-                    if not content and not images and not files:
-                        return
-
-                    extra = reply_extra if reply_extra else None
-
-                    response = await platform.route_to_decision_hub(
-                        content=content,
-                        user_id=user_id,
-                        user_name=user_name,
-                        message_type=("c2c" if msg_type == "c2c" else "private"),
-                        is_at_bot=True,
-                        images=images if images else None,
-                        files=files if files else None,
-                        extra=extra,
-                    )
-                    resp_text = response or ""
-                    if resp_text:
-                        voice_sent = await platform._tts_process_and_send_qqofficial(resp_text, msg, None)
-                        if not voice_sent:
-                            for chunk in platform._split_message(resp_text, 500):
-                                await msg.reply(
-                                    content=chunk,
-                                    msg_seq=platform._next_msg_seq(),
-                                )
-                except Exception as e:
-                    logger.error(f"[qqofficial] 消息处理异常: {e}")
-
-            async def _do_handle_group(msg):
-                try:
-                    if msg is None or getattr(msg, "author", None) is None:
-                        logger.warning("[qqofficial] 收到空的群消息事件，已跳过")
-                        return
-                    user_id = str(
-                        getattr(msg.author, "member_openid", None)
-                        or getattr(msg.author, "user_openid", None)
-                        or getattr(msg.author, "id", None)
-                        or ""
-                    )
-                    user_name = getattr(msg.author, "username", "") or getattr(msg.author, "nick", "") or user_id
-                    content = msg.content.strip() if msg.content else ""
-                    group_id = msg.group_openid
-
-                    # 解析附件/图片
-                    from core.file_context import FileContext
-
-                    images = _parse_attachments(msg, "image")
-                    files = _parse_attachments(msg, "file")
-
-                    # 检测引用回复
-                    reply_prefix, reply_extra = _detect_qqofficial_reply(msg)
-                    if reply_prefix:
-                        content = reply_prefix + (content or "")
-
-                    if not content and not images and not files:
-                        return
-
-                    extra = reply_extra if reply_extra else None
-
-                    response = await platform.route_to_decision_hub(
-                        content=content,
-                        user_id=user_id,
-                        user_name=user_name,
-                        message_type="group",
-                        group_id=group_id,
-                        is_at_bot=True,
-                        images=images if images else None,
-                        files=files if files else None,
-                        extra=extra,
-                    )
-                    resp_text = response or ""
-                    if resp_text:
-                        voice_sent = await platform._tts_process_and_send_qqofficial(resp_text, None, msg)
-                        if not voice_sent:
-                            for chunk in platform._split_message(resp_text, 500):
-                                await msg._api.post_group_message(
-                                    group_openid=group_id,
-                                    msg_type=0,
-                                    msg_id=msg.id,
-                                    content=chunk,
-                                    msg_seq=platform._next_msg_seq(),
-                                )
-                            await asyncio.sleep(0.3)
-                except Exception as e:
-                    logger.error(f"[qqofficial] 群消息处理异常: {e}")
+                    await platform._handle_message(message, "c2c")
 
             http_timeout = max(10, int(self.config.get("http_timeout", 30)))
             self._bot_client = _MiyaBotClient(
@@ -434,44 +414,60 @@ class QQOfficialPlatform(MessageMixin, BasePlatform):
     async def _do_send_qqofficial_file(
         self, file_path: str, file_name: str, caption: str, msg_type: str, target: str
     ) -> bool:
-        """QQ Official 底层文件发送"""
-        import os as _os
-
-        file_uri = f"file:///{file_path.replace(_os.sep, '/')}"
         file_type = self._qq_official_file_type(file_path)
-
-        peer_id = self._resolve_qqofficial_openid(target)
-
         if file_type is None:
-            logger.warning(
-                f"[{self.platform_id}] QQ 官方 bot API 不支持该文件类型: {_os.path.splitext(file_path)[1].lower()}"
-                "（仅支持图片、视频、语音）"
-            )
+            logger.warning("[qqofficial] 当前适配器不支持发送该格式: %s", os.path.splitext(file_path)[1])
             return False
-
+        if msg_type not in {"group", "private", "c2c"}:
+            return False
         try:
-            if msg_type == "private":
-                await self._bot_client.api.post_c2c_file(
-                    openid=peer_id,
-                    file_type=file_type,
-                    url=file_uri,
-                )
-            else:
-                await self._bot_client.api.post_group_file(
-                    group_openid=peer_id,
-                    file_type=file_type,
-                    url=file_uri,
-                )
-
-            self._record_message_out()
-            logger.info(f"[{self.platform_id}] 文件已发送: {file_name} -> {peer_id}")
-            return True
-
-        except AttributeError:
-            logger.warning(f"[{self.platform_id}] botpy SDK 不支持 post_c2c_file/post_group_file API")
+            data = await asyncio.to_thread(Path(file_path).read_bytes)
+            encoded = base64.b64encode(data).decode("ascii")
+            return await self._send_media(
+                target, "group" if msg_type == "group" else "c2c", file_type, encoded, caption
+            )
+        except Exception:
+            logger.exception("[qqofficial] 读取或发送媒体失败")
             return False
+
+    async def _send_media(
+        self, target: str, kind: str, file_type: int, encoded: str, caption: str = ""
+    ) -> bool:
+        """上传本地内容，再携带 file_info 回复；只有消息回执才代表投递成功。"""
+        if not self._bot_client or kind not in {"group", "c2c"}:
+            return False
+        from botpy.http import Route
+
+        peer_id = str(target) if kind == "group" else self._resolve_qqofficial_openid(str(target))
+        if not peer_id or not encoded:
+            return False
+        try:
+            if kind == "group":
+                route = Route("POST", "/v2/groups/{group_openid}/files", is_sandbox=self.sandbox, group_openid=peer_id)
+            else:
+                route = Route("POST", "/v2/users/{openid}/files", is_sandbox=self.sandbox, openid=peer_id)
+            uploaded = await self._bot_client.api._http.request(
+                route, json={"file_type": file_type, "file_data": encoded, "srv_send_msg": False}
+            )
+            file_info = uploaded.get("file_info") if isinstance(uploaded, dict) else None
+            if not file_info:
+                logger.warning("[qqofficial] 上传媒体未返回 file_info")
+                return False
+            params = self._reply_params(peer_id, kind)
+            payload = {"msg_type": 7, "media": {"file_info": file_info}, **params}
+            if caption:
+                payload["content"] = caption
+            if kind == "group":
+                result = await self._bot_client.api.post_group_message(group_openid=peer_id, **payload)
+            else:
+                result = await self._bot_client.api.post_c2c_message(openid=peer_id, **payload)
+            if not self._message_delivered(result):
+                logger.warning("[qqofficial] 媒体发送未返回消息回执")
+                return False
+            self._record_message_out()
+            return True
         except Exception as e:
-            logger.error(f"[{self.platform_id}] 文件发送 API 调用失败: {e}")
+            logger.warning("[qqofficial] 媒体发送失败: %s", e)
             return False
 
     @staticmethod
@@ -490,59 +486,77 @@ class QQOfficialPlatform(MessageMixin, BasePlatform):
 
     @staticmethod
     def _resolve_qqofficial_openid(target: str) -> str:
-        """QQ 号 → QQ Official openid"""
-        if not target or not target.isdigit():
+        """只转换明确绑定到同一人的 QQ ID，绝不使用其他账号的 OpenID。"""
+        target = str(target or "")
+        if not target.isdigit():
             return target
         try:
             import json
-            from pathlib import Path
 
             perms_path = Path("config/permissions.json")
-            if perms_path.exists():
-                perms = json.loads(perms_path.read_text(encoding="utf-8"))
-                superadmins = perms.get("superadmins", {})
-                for sa_info in superadmins.values():
-                    ids = sa_info.get("ids", {})
-                    qqofficial_ids = ids.get("qqofficial", [])
-                    for qoid in qqofficial_ids:
-                        qoid_str = str(qoid)
-                        if qoid_str != target and qoid_str:
-                            logger.info("[qqofficial] QQ %s → openid %s", target, qoid_str)
-                            return qoid_str
+            if not perms_path.exists():
+                return target
+            perms = json.loads(perms_path.read_text(encoding="utf-8"))
+            for info in perms.get("superadmins", {}).values():
+                ids = info.get("ids", {})
+                qq_ids = []
+                for platform in ("qq", "aiocqhttp", "onebot"):
+                    values = ids.get(platform, [])
+                    qq_ids.extend([values] if isinstance(values, (str, int)) else values or [])
+                if target not in {str(uid) for uid in qq_ids}:
+                    continue
+                openids = ids.get("qqofficial") or ids.get("qq_official") or []
+                if isinstance(openids, (str, int)):
+                    openids = [openids]
+                return next((str(uid) for uid in openids if uid), target)
         except Exception:
-            pass
+            logger.debug("[qqofficial] 无法解析用户绑定", exc_info=True)
         return target
 
-    async def _tts_process_and_send_qqofficial(self, text: str, private_msg=None, group_msg=None) -> bool:
-        """QQ 官方平台的 TTS 处理：合成 → 发语音 → 本地播，返回是否已发语音"""
-        audio_path, sent = await self._tts_process(text)
-        if not sent or not audio_path:
+    async def _tts_send_voice(self, audio_path: str, text: str, **kwargs) -> bool:
+        """共享 TTS 在合成后调用此方法；格式转换仅操作临时副本。"""
+        context = self._reply_context.get()
+        target = kwargs.get("target") or (context or {}).get("target", "")
+        kind = kwargs.get("kind") or (context or {}).get("kind", "")
+        if not target or kind not in {"group", "c2c"}:
             return False
         try:
-            import os
+            if Path(audio_path).suffix.lower() == ".silk":
+                data = await asyncio.to_thread(Path(audio_path).read_bytes)
+                encoded = base64.b64encode(data).decode("ascii")
+            else:
+                import shutil
+                import tempfile
 
-            file_uri = f"file:///{audio_path.replace(os.sep, '/')}"
-            if private_msg:
-                await private_msg._api.post_c2c_file(
-                    openid=getattr(private_msg.author, "member_openid", "")
-                    or getattr(private_msg.author, "user_openid", ""),
-                    file_type=3,
-                    url=file_uri,
-                )
-            elif group_msg:
-                await group_msg._api.post_group_file(
-                    group_openid=group_msg.group_openid,
-                    file_type=3,
-                    url=file_uri,
-                )
-            logger.info("[qqofficial] 语音消息已发送")
+                from astrbot.core.utils.tencent_record_helper import audio_to_tencent_silk_base64
+
+                with tempfile.TemporaryDirectory(prefix="miya_qq_voice_") as temp_dir:
+                    source = Path(temp_dir) / ("voice" + Path(audio_path).suffix)
+                    await asyncio.to_thread(shutil.copyfile, audio_path, source)
+                    encoded, _duration = await audio_to_tencent_silk_base64(str(source))
+            return await self._send_media(target, kind, 3, encoded)
         except Exception as e:
-            logger.warning(f"[qqofficial] 语音发送失败: {e}，回退文字")
+            logger.warning("[qqofficial] 语音发送失败，回退文字: %s", e)
             return False
-        import asyncio as _asyncio
 
-        _asyncio.get_event_loop().call_later(
-            30,
-            lambda p=audio_path: __import__("os").unlink(p) if __import__("os").path.exists(p) else None,
+    async def _tts_process_and_send_qqofficial(self, text: str, private_msg=None, group_msg=None) -> bool:
+        msg = group_msg if group_msg is not None else private_msg
+        if msg is None:
+            return False
+        kind = "group" if group_msg is not None else "c2c"
+        author = getattr(msg, "author", None)
+        target = str(
+            getattr(msg, "group_openid", "") if kind == "group"
+            else getattr(author, "user_openid", None) or getattr(author, "member_openid", "")
         )
-        return True
+        token = None
+        if self._reply_context.get() is None:
+            token = self._reply_context.set({
+                "kind": kind, "target": target, "message_id": str(getattr(msg, "id", "") or ""), "seq": 0
+            })
+        try:
+            _audio_path, sent = await self._tts_process(text, target=target, kind=kind)
+            return sent
+        finally:
+            if token is not None:
+                self._reply_context.reset(token)

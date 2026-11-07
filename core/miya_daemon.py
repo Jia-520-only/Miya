@@ -207,6 +207,18 @@ class MiyaDaemon:
         """初始化并连接所有平台"""
         self._registry.on_broadcast(self._on_platform_broadcast)
 
+        # 注册表和调度器属于所有平台，不能依赖收到第一条 OneBot 消息才初始化。
+        hub = getattr(self._miya, "decision_hub", None)
+        scheduler = getattr(self._miya, "scheduler", None)
+        if hub:
+            hub.platform_registry = self._registry
+        if scheduler and hub:
+            from hub.scheduler import set_global_scheduler
+
+            scheduler.cross_platform_sender = hub._dispatch_proactive_message
+            scheduler.main_event_loop = asyncio.get_running_loop()
+            set_global_scheduler(scheduler)
+
         if platform_ids:
             results = {}
             for pid in platform_ids:
@@ -217,6 +229,8 @@ class MiyaDaemon:
         online = sum(1 for v in results.values() if v)
         total = len(results)
         logger.info(f"平台连接: {online}/{total} 在线")
+        if scheduler and hub:
+            scheduler.start_background()
 
     async def wait(self):
         """阻塞等待直到收到停止信号"""
