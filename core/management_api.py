@@ -104,6 +104,9 @@ class ManagementAPI:
             allow_methods=["*"],
             allow_headers=["*"],
         )
+        from core.desktop_request_logs import DesktopRequestLogMiddleware
+
+        self.app.add_middleware(DesktopRequestLogMiddleware)
 
     def _setup_routes(self):
         """注册所有路由"""

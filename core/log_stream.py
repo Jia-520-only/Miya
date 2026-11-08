@@ -34,13 +34,14 @@ class LogStreamBuffer:
         self._entries: Deque[Dict] = deque(maxlen=maxlen)
         self._seq = itertools.count(1)
 
-    def add(self, level: str, name: str, text: str) -> Dict:
+    def add(self, level: str, name: str, text: str, *, source: str = "backend") -> Dict:
         entry = {
             "seq": next(self._seq),
             "ts": datetime.now().isoformat(timespec="milliseconds"),
             "level": level,
             "name": name,
             "text": text,
+            "source": source,
         }
         with self._lock:
             self._entries.append(entry)
@@ -78,6 +79,11 @@ def get_log_buffer() -> LogStreamBuffer:
     if _buffer is None:
         _buffer = LogStreamBuffer()
     return _buffer
+
+
+def log_desktop_request(text: str, *, level: str = "INFO") -> None:
+    """Add a desktop API access line to the shared log stream, not stdout."""
+    get_log_buffer().add(level, "Miya.DesktopFrontend", text, source="frontend")
 
 
 class LogStreamHandler(logging.Handler):

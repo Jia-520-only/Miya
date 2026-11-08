@@ -679,6 +679,9 @@ class Miya:
                                 allow_methods=["*"],
                                 allow_headers=["*"],
                             )
+                            from core.desktop_request_logs import DesktopRequestLogMiddleware
+
+                            app.add_middleware(DesktopRequestLogMiddleware)
                             app.include_router(self.web_api.router)
 
                             # 安装吟美虚拟主播插件

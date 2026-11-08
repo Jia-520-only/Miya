@@ -355,6 +355,9 @@ class RuntimeAPIServer:
             allow_methods=["*"],  # 允许所有 HTTP 方法
             allow_headers=["*"],  # 允许所有请求头
         )
+        from core.desktop_request_logs import DesktopRequestLogMiddleware
+
+        app.add_middleware(DesktopRequestLogMiddleware)
 
         # 健康检查
         @app.get("/api/probe")

@@ -25,6 +25,7 @@ def test_buffer_add_and_snapshot():
     assert entries[-1]["text"] == "line-4"
     assert entries[-1]["level"] == "INFO"
     assert entries[-1]["name"] == "Test"
+    assert entries[-1]["source"] == "backend"
     assert "ts" in entries[-1]
 
 

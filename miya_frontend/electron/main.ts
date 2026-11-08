@@ -4,7 +4,8 @@ import { dirname, resolve, sep } from 'node:path'
 import process from 'node:process'
 import { domainToUnicode, fileURLToPath, pathToFileURL } from 'node:url'
 import { app, BrowserWindow, desktopCapturer, ipcMain, Menu, nativeTheme, net, protocol, session, shell, systemPreferences } from 'electron'
-import { getBackendLogs, startBackend, stopBackend, startPortPolling, stopPortPolling } from './modules/backend'
+import { getBackendLogs, readPortsFromDisk, startBackend, stopBackend, startPortPolling, stopPortPolling } from './modules/backend'
+import { installDesktopRequestLogs } from './modules/desktop-request-logs'
 import { registerHotkeys, unregisterHotkeys } from './modules/hotkeys'
 import { createMenu } from './modules/menu'
 import { startTerminal, stopTerminal, writeToTerminal, resizeTerminal, isTerminalRunning, isTuiRunning, getTerminalUrl, getTerminalBuffer, setMiyaRoot, startDshHost, stopDshHost, isDshHostRunning, getDshHostUrl } from './modules/terminal'
@@ -115,6 +116,9 @@ app.whenReady().then(async () => {
   }
 
   const appSession = session.defaultSession
+  if (process.env.MIYA_DESKTOP_REQUEST_LOGS?.trim() === '1') {
+    installDesktopRequestLogs(appSession, readPortsFromDisk)
+  }
   appSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
     if (!['geolocation', 'media', 'notifications'].includes(permission) || !details.isMainFrame) return false
     const requestingUrl = details.requestingUrl || requestingOrigin

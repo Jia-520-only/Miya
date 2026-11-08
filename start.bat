@@ -222,7 +222,7 @@ echo Starting Electron desktop app...
 echo   Start backend separately (start.bat 2)
 :: Run the dev steps directly so a broken global npm shim cannot prevent launch.
 :: The dependency check above guarantees the local Vite/esbuild packages exist.
-start "MIYA Desktop" cmd /c "set MIYA_NO_BACKEND=1 && cd /d %~dp0miya_frontend && node scripts/generate-audio-manifest.mjs && node scripts/esbuild-electron.mjs && node node_modules/vite/bin/vite.js"
+start "MIYA Desktop" cmd /c "chcp 65001 >nul && set MIYA_NO_BACKEND=1&& set MIYA_DESKTOP_REQUEST_LOGS=1&& cd /d %~dp0miya_frontend && node scripts/generate-audio-manifest.mjs && node scripts/esbuild-electron.mjs && node node_modules/vite/bin/vite.js"
 echo.
 echo [OK] Desktop app launched
 timeout /t 2 >nul

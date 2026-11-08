@@ -361,6 +361,18 @@ LOG_LEVEL=WARNING  # 精简
 
 日志文件：`logs/miya.log`
 
+Windows 使用 `start.bat 2` 启动 Python 后端、`start.bat 3` 启动桌面时，桌面发出的本机 API 请求会输出到选项 3 的窗口：
+
+```text
+[Frontend] 16:20:12 GET :8000/api/status -> 200 (28 ms)
+```
+
+选项 3 会自动设置 `MIYA_DESKTOP_REQUEST_LOGS=1`，并将新窗口的代码页设为 UTF-8。新增的桌面终端提示使用英文和 ASCII 分隔符，避免 Windows 控制台编码不一致造成乱码。Electron 给后端请求加上 `X-Miya-Client: desktop`，Python 将这些访问和连接日志保留到共享日志缓冲，避免在后端控制台重复输出。AI、记忆、平台和摄像头等业务日志及异常继续输出到后端窗口；其他客户端的请求日志也保留原样。
+
+应用内「后台终端」提供「后端日志 / 前端日志 / 全部日志」切换，默认显示后端日志。前端分类显示桌面接口访问和连接记录，HTTP 4xx 标为警告、5xx 标为错误。来源分类可以叠加级别和关键词筛选；清屏只清除当前来源的本地显示记录，导出只包含当前筛选结果。界面继续使用中文。
+
+更新代码后需要重启后端和桌面。直接运行 `npm run dev` 时，如需启用同样的分流，可先设置 `MIYA_DESKTOP_REQUEST_LOGS=1`。
+
 ### 常用脚本
 
 ```bash
