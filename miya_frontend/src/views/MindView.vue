@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { apiUrl } from '@/utils/api-url'
@@ -109,9 +109,9 @@ function refreshColorCache() {
   const root = getComputedStyle(document.documentElement)
   cachedAnchorColor = root.getPropertyValue('--miya-comp-mind-anchor').trim() || '#ffd700'
   cachedLevelColors = {
-    long_term: root.getPropertyValue('--miya-comp-mind-long-term').trim() || '#00ADB5',
+    long_term: root.getPropertyValue('--miya-comp-mind-long-term').trim() || '#719DE6',
     short_term: root.getPropertyValue('--miya-comp-mind-short-term').trim() || '#7dd3fc',
-    dialogue: root.getPropertyValue('--miya-comp-mind-dialogue').trim() || '#00ADB5',
+    dialogue: root.getPropertyValue('--miya-comp-mind-dialogue').trim() || '#719DE6',
     semantic: root.getPropertyValue('--miya-comp-mind-semantic').trim() || '#ff6b9d',
     knowledge: root.getPropertyValue('--miya-comp-mind-knowledge').trim() || '#ffd700',
     core: cachedAnchorColor,
@@ -122,7 +122,7 @@ function refreshColorCache() {
     joy: root.getPropertyValue('--miya-comp-emotion-joy').trim() || '#ffd700',
     sadness: root.getPropertyValue('--miya-comp-emotion-sadness').trim() || '#7dd3fc',
     anger: root.getPropertyValue('--miya-comp-emotion-anger').trim() || '#ff4444',
-    fear: root.getPropertyValue('--miya-comp-emotion-fear').trim() || '#00ADB5',
+    fear: root.getPropertyValue('--miya-comp-emotion-fear').trim() || '#719DE6',
     love: root.getPropertyValue('--miya-comp-emotion-love').trim() || '#ff6b9d',
     neutral: root.getPropertyValue('--miya-comp-emotion-neutral').trim() || '#aaa',
     surprise: root.getPropertyValue('--miya-comp-emotion-surprise').trim() || '#ff8c00',
@@ -158,7 +158,7 @@ function animate() {
     const px = w / 2 + (rx * FOV * camZoom) / rz2
     const py = h / 2 - (ry * FOV * camZoom) / rz2
     const alpha = Math.max(0, (0.1 + Math.sin(s.twinkle) * 0.05) * (DEPTH / rz2))
-    ctx.fillStyle = `rgba(0, 173, 181, ${alpha})`
+    ctx.fillStyle = `rgba(113, 157, 230, ${alpha})`
     ctx.fillRect(px, py, s.size, s.size)
   }
 
@@ -426,8 +426,8 @@ onUnmounted(() => cancelAnimationFrame(animId))
       <button class="sr-btn" @click="loadData()" title="重新随机采样">&nbsp;↻&nbsp;</button>
       <div class="sr-legend">
         <span class="legend-item"><i style="color:var(--miya-comp-mind-anchor,#ffd700)">●</i>锚点</span>
-        <span class="legend-item"><i style="color:var(--miya-comp-mind-long-term,#00ADB5)">●</i>长期</span>
-        <span class="legend-item"><i style="color:var(--miya-comp-mind-dialogue,#00ADB5)">●</i>对话</span>
+        <span class="legend-item"><i style="color:var(--miya-comp-mind-long-term,#719DE6)">●</i>长期</span>
+        <span class="legend-item"><i style="color:var(--miya-comp-mind-dialogue,#719DE6)">●</i>对话</span>
         <span class="legend-item"><i style="color:var(--miya-comp-mind-semantic,#ff6b9d)">●</i>语义</span>
         <span class="legend-item"><i style="color:var(--miya-comp-mind-short-term,#7dd3fc)">●</i>短期</span>
       </div>
@@ -458,24 +458,24 @@ onUnmounted(() => cancelAnimationFrame(animId))
 
 <style scoped>
 .star-river {
-  --line: var(--miya-comp-mind-line, #00ADB5);
+  --line: var(--miya-comp-mind-line, #719DE6);
   --anchor: var(--miya-comp-mind-anchor, #ffd700);
-  --highlight: var(--miya-comp-mind-highlight, #00ADB5);
+  --highlight: var(--miya-comp-mind-highlight, #719DE6);
   height: 100%; display: flex; flex-direction: column; color: var(--miya-text); }
-.sr-header { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 1rem; border-bottom: 1px solid rgba(0, 173, 181, 0.06); flex-shrink: 0; }
+.sr-header { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 1rem; border-bottom: 1px solid rgba(113, 157, 230, 0.06); flex-shrink: 0; }
 .sr-header h1 { font-family: 'Noto Serif SC', serif; font-size: 1rem; color: var(--miya-accent); margin: 0; }
 .sr-counts { font-size: 0.65rem; color: var(--miya-text-dim); font-family: 'JetBrains Mono', monospace; }
 .sr-demo-badge { font-size: 0.55rem; color: rgba(255,215,0,0.5); border: 1px solid rgba(255,215,0,0.2); border-radius: 0.15rem; padding: 0.05rem 0.35rem; }
 .sr-help { font-size: 0.6rem; color: var(--miya-text-dim); margin-left: auto; opacity: 0.5; }
-.back-btn { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 0.3rem; border: 1px solid rgba(0, 173, 181, 0.12); background: rgba(0, 173, 181, 0.04); color: rgba(0, 173, 181, 0.6); cursor: pointer; }
-.back-btn:hover { background: rgba(0, 173, 181, 0.1); }
+.back-btn { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 0.3rem; border: 1px solid rgba(113, 157, 230, 0.12); background: rgba(113, 157, 230, 0.04); color: rgba(113, 157, 230, 0.6); cursor: pointer; }
+.back-btn:hover { background: rgba(113, 157, 230, 0.1); }
 
-.sr-toolbar { display: flex; align-items: center; gap: 0.4rem; padding: 0.4rem 1rem; border-bottom: 1px solid rgba(0, 173, 181, 0.04); flex-shrink: 0; flex-wrap: wrap; position: relative; z-index: 10; }
-.sr-search { flex: 1; max-width: 200px; background: rgba(10,18,32,0.8); border: 1px solid rgba(0, 173, 181, 0.12); border-radius: 0.3rem; color: var(--miya-text); padding: 0.3rem 0.5rem; font-size: 0.7rem; outline: none; }
-.sr-search:focus { border-color: rgba(0, 173, 181, 0.3); }
-.sr-btn { padding: 0.25rem 0.5rem; font-size: 0.65rem; border: 1px solid rgba(0, 173, 181, 0.15); border-radius: 0.25rem; background: rgba(0, 173, 181, 0.03); color: rgba(0, 173, 181, 0.5); cursor: pointer; transition: all 0.2s; }
-.sr-btn:hover { background: rgba(0, 173, 181, 0.08); border-color: rgba(0, 173, 181, 0.3); }
-.sr-btn.active { background: rgba(0, 173, 181, 0.1); color: rgba(0, 173, 181, 0.8); }
+.sr-toolbar { display: flex; align-items: center; gap: 0.4rem; padding: 0.4rem 1rem; border-bottom: 1px solid rgba(113, 157, 230, 0.04); flex-shrink: 0; flex-wrap: wrap; position: relative; z-index: 10; }
+.sr-search { flex: 1; max-width: 200px; background: rgba(10,18,32,0.8); border: 1px solid rgba(113, 157, 230, 0.12); border-radius: 0.3rem; color: var(--miya-text); padding: 0.3rem 0.5rem; font-size: 0.7rem; outline: none; }
+.sr-search:focus { border-color: rgba(113, 157, 230, 0.3); }
+.sr-btn { padding: 0.25rem 0.5rem; font-size: 0.65rem; border: 1px solid rgba(113, 157, 230, 0.15); border-radius: 0.25rem; background: rgba(113, 157, 230, 0.03); color: rgba(113, 157, 230, 0.5); cursor: pointer; transition: all 0.2s; }
+.sr-btn:hover { background: rgba(113, 157, 230, 0.08); border-color: rgba(113, 157, 230, 0.3); }
+.sr-btn.active { background: rgba(113, 157, 230, 0.1); color: rgba(113, 157, 230, 0.8); }
 .sr-btn-reset { border-color: rgba(255,255,255,0.05); color: var(--miya-text-dim); }
 .sr-legend { display: flex; gap: 0.6rem; margin-left: auto; font-size: 0.55rem; color: var(--miya-text-dim); }
 .legend-item { display: flex; align-items: center; gap: 0.15rem; }
@@ -486,14 +486,14 @@ onUnmounted(() => cancelAnimationFrame(animId))
 .sr-canvas:active { cursor: grabbing; }
 .sr-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--miya-text-dim); font-size: 0.9rem; }
 
-.sr-detail { position: absolute; top: 10px; right: 10px; width: 250px; max-height: 70%; overflow-y: auto; background: rgba(8,16,28,0.96); border: 1px solid rgba(0, 173, 181, 0.15); border-radius: 0.4rem; padding: 0.7rem; z-index: 20; box-shadow: 0 0 30px rgba(0,0,0,0.5); }
+.sr-detail { position: absolute; top: 10px; right: 10px; width: 250px; max-height: 70%; overflow-y: auto; background: rgba(8,16,28,0.96); border: 1px solid rgba(113, 157, 230, 0.15); border-radius: 0.4rem; padding: 0.7rem; z-index: 20; box-shadow: 0 0 30px rgba(0,0,0,0.5); }
 .detail-close { position: absolute; top: 0.3rem; right: 0.3rem; width: 18px; height: 18px; border: none; background: none; color: var(--miya-text-dim); cursor: pointer; font-size: 0.7rem; }
 .detail-header { display: flex; align-items: center; gap: 0.3rem; margin-bottom: 0.4rem; }
 .detail-star { font-size: 1rem; }
 .detail-name { font-weight: 600; font-size: 0.85rem; }
 .detail-anchor-badge { font-size: 0.5rem; color: var(--miya-comp-mind-anchor, #ffd700); border: 1px solid color-mix(in srgb, var(--miya-comp-mind-anchor, #ffd700) 30%, transparent); border-radius: 0.15rem; padding: 0.03rem 0.25rem; }
 .detail-meta { display: flex; flex-wrap: wrap; gap: 0.2rem; margin-bottom: 0.4rem; }
-.meta-tag { font-size: 0.55rem; padding: 0.08rem 0.3rem; border-radius: 0.15rem; background: rgba(0, 173, 181, 0.06); color: rgba(0, 173, 181, 0.5); }
+.meta-tag { font-size: 0.55rem; padding: 0.08rem 0.3rem; border-radius: 0.15rem; background: rgba(113, 157, 230, 0.06); color: rgba(113, 157, 230, 0.5); }
 .detail-content { font-size: 0.72rem; color: var(--miya-text); line-height: 1.5; margin: 0 0 0.4rem; }
 .detail-relations small { color: rgba(255,215,0,0.5); font-size: 0.55rem; }
 </style>

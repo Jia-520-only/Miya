@@ -16,8 +16,8 @@ const model = defineModel<string | number | null>()
 }
 
 .miya-input-text:focus {
-  border-color: color-mix(in srgb, var(--miya-accent, #00adb5) 55%, transparent) !important;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--miya-accent, #00adb5) 12%, transparent);
+  border-color: color-mix(in srgb, var(--miya-accent, #719DE6) 55%, transparent) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--miya-accent, #719DE6) 12%, transparent);
 }
 
 .miya-input-text:disabled {

@@ -83,7 +83,7 @@ function handleShortcut(s: Shortcut) {
 .bottom-item:hover {
   color: var(--miya-text-strong);
   transform: translateY(-1px);
-  background: rgba(120, 207, 209, 0.07);
+  background: rgba(113, 157, 230, 0.07);
 }
 
 /* Floating command dock: keep the canvas open instead of drawing a full-width bar. */
@@ -99,20 +99,20 @@ function handleShortcut(s: Shortcut) {
   width: 54px;
   border-radius: 0;
   background: rgba(8, 17, 27, 0.5);
-  border: 1px solid rgba(162, 245, 238, 0.06);
+  border: 1px solid rgba(203, 220, 245, 0.06);
   clip-path: polygon(6px 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%, 0 6px);
 }
 
 .bottom-item:hover,
 .bottom-item.active {
-  background: linear-gradient(180deg, rgba(120, 207, 209, 0.16), rgba(8, 17, 27, 0.72));
-  border-color: rgba(162, 245, 238, 0.18);
-  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.18), inset 0 2px rgba(162, 245, 238, 0.32);
+  background: linear-gradient(180deg, rgba(113, 157, 230, 0.16), rgba(8, 17, 27, 0.72));
+  border-color: rgba(203, 220, 245, 0.18);
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.18), inset 0 2px rgba(203, 220, 245, 0.32);
 }
 
 .bottom-item.active {
   color: var(--miya-accent-bright);
-  background: rgba(120, 207, 209, 0.08);
+  background: rgba(113, 157, 230, 0.08);
 }
 
 .bottom-item::after {

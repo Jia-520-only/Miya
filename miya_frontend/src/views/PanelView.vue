@@ -237,6 +237,7 @@ const quickModules: QuickModule[] = [
   { id: 'community', label: '社区', desc: '共鸣网络', icon: '✧', path: '/community' },
   { id: 'earth', label: '地球', desc: 'ONLINE', icon: '◎', path: '/earth' },
   { id: 'terminal', label: '终端', desc: '引擎接口', icon: '▤', path: '/terminal' },
+  { id: 'observatory', label: '观测台', desc: '状态视界', icon: '◉', path: '/observatory' },
   { id: 'senses', label: '感知', desc: '待接入', icon: '⊙', reserved: true },
 ]
 
@@ -334,10 +335,53 @@ function activateModule(module: QuickModule) {
 }
 
 const chatExpanded = ref(false)
+const observatoryExpanded = ref(false)
+const observatoryAnchor = ref<DOMRect | null>(null)
+const observatoryPopover = ref<HTMLElement | null>(null)
+const homeAmbientEnabled = useStorage('miya-haloflux-ambient-enabled', false)
+
+watch(homeAmbientEnabled, (enabled) => {
+  window.dispatchEvent(new CustomEvent('miya-haloflux-ambient-change', { detail: enabled }))
+})
 
 function toggleChat() {
   chatExpanded.value = !chatExpanded.value
 }
+
+function toggleObservatory(event: MouseEvent) {
+  observatoryAnchor.value = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  observatoryExpanded.value = !observatoryExpanded.value
+}
+
+const observatoryPopoverStyle = computed(() => {
+  const anchor = observatoryAnchor.value
+  const width = Math.min(230, window.innerWidth - 32)
+  const right = anchor ? Math.max(16, window.innerWidth - anchor.right) : 16
+  const estimatedHeight = observatoryPopover.value?.offsetHeight ?? 190
+  const below = anchor ? anchor.bottom + 8 : 80
+  const top = Math.min(below, window.innerHeight - estimatedHeight - 16)
+  return { top: `${Math.max(16, top)}px`, right: `${Math.min(right, window.innerWidth - width - 16)}px`, width: `${width}px` }
+})
+
+function updateObservatoryAnchor() {
+  if (!observatoryExpanded.value)
+    return
+  const button = document.querySelector('.observatory-icon')
+  if (button)
+    observatoryAnchor.value = button.getBoundingClientRect()
+}
+
+watch(observatoryExpanded, (expanded) => {
+  if (expanded) {
+    window.addEventListener('resize', updateObservatoryAnchor)
+    window.addEventListener('scroll', updateObservatoryAnchor, true)
+    requestAnimationFrame(updateObservatoryAnchor)
+  }
+  else {
+    window.removeEventListener('resize', updateObservatoryAnchor)
+    window.removeEventListener('scroll', updateObservatoryAnchor, true)
+  }
+})
 </script>
 
 <template>
@@ -483,6 +527,19 @@ function toggleChat() {
             <button class="cmd-time-icn" title="消息收件箱" @click="navigate('/inbox')">
               <span class="cmd-time-icn-symbol">✉</span><small>MAIL</small>
             </button>
+            <div class="observatory-control">
+              <button
+                class="cmd-time-icn observatory-icon"
+                :class="{ active: backendOnline, expanded: observatoryExpanded }"
+                title="弥娅状态"
+                aria-label="弥娅状态"
+                :aria-expanded="observatoryExpanded"
+                aria-controls="observatory-status-popover"
+                @click="toggleObservatory"
+              >
+                <span class="cmd-time-icn-symbol"><i class="observatory-peek-dot" :class="{ online: backendOnline }" /></span><small>MIYA</small>
+              </button>
+            </div>
             <button class="cmd-time-icn" title="灵魂调谐与设置" @click="navigate('/config')">
               <span class="cmd-time-icn-symbol">⚙</span><small>SET</small>
             </button>
@@ -520,7 +577,7 @@ function toggleChat() {
             <div class="cmd-battle-left">
               <h1>对话</h1>
               <span class="cmd-battle-tip">灵魂共鸣</span>
-              <span class="cmd-battle-nd" :style="{ color: backendOnline ? 'rgba(0,255,245,0.6)' : 'rgba(255,100,100,0.5)' }">
+              <span class="cmd-battle-nd" :style="{ color: backendOnline ? 'rgba(203, 220, 245,0.6)' : 'rgba(255,100,100,0.5)' }">
                 {{ backendOnline ? '弥娅在线' : '弥娅离线' }}
               </span>
             </div>
@@ -592,6 +649,25 @@ function toggleChat() {
 
     </div>
 
+    <Teleport to="body">
+      <section
+        v-if="observatoryExpanded"
+        id="observatory-status-popover"
+        ref="observatoryPopover"
+        class="observatory-status-popover"
+        :style="observatoryPopoverStyle"
+        aria-label="弥娅状态摘要"
+        @click.stop
+      >
+        <div class="observatory-status-heading"><span>弥娅状态</span><strong :class="{ online: backendOnline }">{{ backendOnline ? '在线' : '离线' }}</strong></div>
+        <div class="observatory-status-row"><span>人格 / 情绪</span><strong>{{ miyaPersona }} · {{ emotionName }}</strong></div>
+        <div class="observatory-status-row"><span>记忆条目</span><strong>{{ memoryTotal }}</strong></div>
+        <div class="observatory-status-row"><span>已接入平台</span><strong>{{ miyaPlatforms }} 个</strong></div>
+        <label class="observatory-ambient-toggle"><span>动态背景</span><input v-model="homeAmbientEnabled" type="checkbox"></label>
+        <button class="observatory-open" @click="navigate('/observatory')">打开观测台 <span>↗</span></button>
+      </section>
+    </Teleport>
+
     <Transition name="notice-rise">
       <div v-if="reservedNotice" class="cmd-reserved-notice">
         <span class="cmd-reserved-mark">◇</span>
@@ -626,6 +702,22 @@ function toggleChat() {
   padding: 0.2rem 3% 0;
   position: relative;
 }
+
+.observatory-control { position: relative; display: flex; flex: none; }
+.observatory-icon .cmd-time-icn-symbol { display: grid; place-items: center; }
+.observatory-peek-dot { width: 6px; height: 6px; border-radius: 50%; background: #e77f86; box-shadow: 0 0 6px rgba(231, 127, 134, 0.35); }
+.observatory-peek-dot.online { background: #79d7b2; box-shadow: 0 0 8px rgba(121, 215, 178, 0.6); }
+.observatory-icon.active .observatory-peek-dot { background: #79d7b2; }
+.observatory-status-popover { position: fixed; z-index: 10001; display: grid; gap: 0.55rem; padding: 0.7rem; border: 1px solid rgba(203, 220, 245, 0.2); color: var(--miya-text-body); background: rgba(5, 12, 19, 0.96); box-shadow: 0 12px 34px rgba(0, 0, 0, 0.38); backdrop-filter: blur(14px); }
+.observatory-status-heading, .observatory-status-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; font-size: 0.59rem; }
+.observatory-status-heading { padding-bottom: 0.35rem; border-bottom: 1px solid rgba(203, 220, 245, 0.12); color: #e8f2f3; font-weight: 600; }
+.observatory-status-heading strong { color: #e77f86; font-size: 0.56rem; font-weight: 500; }
+.observatory-status-heading strong.online { color: #79d7b2; }
+.observatory-status-row > span { color: var(--miya-text-muted); }
+.observatory-status-row > strong { max-width: 140px; overflow: hidden; font-weight: 500; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.observatory-ambient-toggle { display: flex; align-items: center; justify-content: space-between; color: var(--miya-text-muted); font-size: 0.58rem; }
+.observatory-ambient-toggle input { width: 14px; height: 14px; accent-color: var(--miya-accent-bright); }
+.observatory-open { display: flex; justify-content: space-between; padding: 0.45rem 0 0; border: 0; border-top: 1px solid rgba(203, 220, 245, 0.09); background: transparent; color: var(--miya-accent-bright); cursor: pointer; font: inherit; font-size: 0.6rem; text-align: left; }
 
 @keyframes cmd-enter {
   from { opacity: 0; transform: scale(0.98); }
@@ -682,22 +774,22 @@ function toggleChat() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, var(--miya-accent, #00ADB5) 15%, transparent);
-  border: 1px solid color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 25%, transparent);
+  background: color-mix(in srgb, var(--miya-accent, #719DE6) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 25%, transparent);
   cursor: pointer;
   transition: all 0.4s ease;
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 55%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 55%, transparent);
   font-size: 1rem;
   font-family: inherit;
   user-select: none;
 }
 
 .cmd-show-btn:hover {
-  background: color-mix(in srgb, var(--miya-accent, #00ADB5) 30%, transparent);
-  border-color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 50%, transparent);
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 85%, transparent);
+  background: color-mix(in srgb, var(--miya-accent, #719DE6) 30%, transparent);
+  border-color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 50%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 85%, transparent);
   transform: translateY(-50%) scale(1.1);
-  box-shadow: 0 0 16px color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 15%, transparent);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 15%, transparent);
 }
 
 .show-btn-enter-active,
@@ -725,7 +817,7 @@ function toggleChat() {
 
 .cmd-level:hover {
   letter-spacing: 0.15em;
-  background: color-mix(in srgb, var(--miya-accent, #00ADB5) 6%, transparent);
+  background: color-mix(in srgb, var(--miya-accent, #719DE6) 6%, transparent);
   border-radius: 2px;
 }
 
@@ -743,11 +835,11 @@ function toggleChat() {
 }
 
 .cmd-level:hover .cmd-level-label {
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 40%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 40%, transparent);
 }
 
 .cmd-level-val {
-  color: var(--miya-text, #E4ECF0);
+  color: var(--miya-text, #ECF1F9);
   font-size: clamp(1.2rem, 2.5vw, 1.8rem);
   font-weight: 700;
   font-family: 'Noto Serif SC', serif;
@@ -756,13 +848,13 @@ function toggleChat() {
 }
 
 .cmd-level:hover .cmd-level-val {
-  text-shadow: 0 0 12px color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 25%, transparent);
+  text-shadow: 0 0 12px color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 25%, transparent);
 }
 
 .cmd-level-bar {
   width: 28%;
   height: 3px;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 40%, transparent) 50%, rgba(57, 62, 70, 0.4) 50%);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 40%, transparent) 50%, rgba(57, 62, 70, 0.4) 50%);
   margin-top: 0.15rem;
   transition: width 0.5s ease;
 }
@@ -773,9 +865,9 @@ function toggleChat() {
 
 .cmd-level-fill {
   height: 100%;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 55%, transparent), color-mix(in srgb, var(--miya-accent, #00ADB5) 70%, transparent));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 55%, transparent), color-mix(in srgb, var(--miya-accent, #719DE6) 70%, transparent));
   transition: width 0.6s ease;
-  box-shadow: 0 0 4px color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 30%, transparent);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 30%, transparent);
 }
 
 .cmd-name {
@@ -786,7 +878,7 @@ function toggleChat() {
 }
 
 .cmd-name-main {
-  color: var(--miya-text, #E4ECF0);
+  color: var(--miya-text, #ECF1F9);
   font-size: clamp(1rem, 2.2vw, 1.3rem);
   font-weight: 700;
   font-family: 'Noto Serif SC', serif;
@@ -797,12 +889,12 @@ function toggleChat() {
 
 .cmd-name:hover .cmd-name-main {
   letter-spacing: 0.3em;
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 90%, transparent);
-  text-shadow: 0 0 15px color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 30%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 90%, transparent);
+  text-shadow: 0 0 15px color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 30%, transparent);
 }
 
 .cmd-name-sub {
-  color: color-mix(in srgb, var(--miya-accent, #00ADB5) 50%, transparent);
+  color: color-mix(in srgb, var(--miya-accent, #719DE6) 50%, transparent);
   font-size: clamp(0.4rem, 0.9vw, 0.55rem);
   font-family: 'JetBrains Mono', monospace;
   letter-spacing: 0.06em;
@@ -811,7 +903,7 @@ function toggleChat() {
 
 .cmd-name:hover .cmd-name-sub {
   letter-spacing: 0.18em;
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 60%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 60%, transparent);
 }
 
 /* ═══ 左面板: 中间 (弹性填充) ═══ */
@@ -843,14 +935,14 @@ function toggleChat() {
   cursor: pointer;
   transition: all 0.4s ease;
   flex-shrink: 0;
-  color: color-mix(in srgb, var(--miya-accent, #00ADB5) 30%, transparent);
+  color: color-mix(in srgb, var(--miya-accent, #719DE6) 30%, transparent);
   font-size: 0.85rem;
   font-family: inherit;
 }
 
 .cmd-toggle-btn:hover {
-  background: color-mix(in srgb, var(--miya-accent, #00ADB5) 12%, transparent);
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 65%, transparent);
+  background: color-mix(in srgb, var(--miya-accent, #719DE6) 12%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 65%, transparent);
   transform: skewX(-8deg);
 }
 
@@ -865,22 +957,22 @@ function toggleChat() {
 
 /* 陀螺仪按钮状态 */
 .cmd-gyro-btn {
-  color: color-mix(in srgb, var(--miya-accent, #00ADB5) 15%, transparent);
+  color: color-mix(in srgb, var(--miya-accent, #719DE6) 15%, transparent);
 }
 
 .cmd-gyro-btn.active {
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 45%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 45%, transparent);
 }
 
 .cmd-gyro-btn.active:hover {
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 70%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 70%, transparent);
 }
 
 .cmd-music-wrap { position: relative; margin-left: 0.5rem; flex-shrink: 0; min-width: 0; }
 .cmd-music { display: flex; align-items: center; gap: 0.3rem; width: clamp(150px, 17vw, 220px); min-width: 0; padding: 0.1rem 0.15rem; cursor: pointer; }
-.cmd-music:hover { background: color-mix(in srgb, var(--miya-accent, #00ADB5) 8%, transparent); }
-.cmd-music-icon { width: 20px; height: 20px; display: grid; place-items: center; color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 35%, transparent); }
-.cmd-music-icon.playing { color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 70%, transparent); animation: music-pulse 1.5s ease-in-out infinite; }
+.cmd-music:hover { background: color-mix(in srgb, var(--miya-accent, #719DE6) 8%, transparent); }
+.cmd-music-icon { width: 20px; height: 20px; display: grid; place-items: center; color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 35%, transparent); }
+.cmd-music-icon.playing { color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 70%, transparent); animation: music-pulse 1.5s ease-in-out infinite; }
 .cmd-music-scroll { overflow: hidden; flex: 1 1 auto; min-width: 0; }
 .cmd-music-text { display: block; width: max-content; min-width: 100%; color: color-mix(in srgb, var(--miya-accent, var(--miya-text)) 65%, transparent); font-size: clamp(0.5rem, 1vw, 0.6rem); white-space: nowrap; animation: music-scroll 8s linear infinite; }
 .cmd-music-expand { border: 0; background: transparent; color: var(--miya-text-muted); cursor: pointer; }
@@ -890,22 +982,22 @@ function toggleChat() {
 .cmd-music-filters button,
 .cmd-music-nav button { border: 0; background: transparent; color: var(--miya-text-muted); cursor: pointer; white-space: nowrap; }
 .cmd-music-filters button { padding: 0.28rem 0.38rem; font-size: 0.62rem; }
-.cmd-music-filters button.active { color: var(--miya-chat-ai, #00FFF5); border-bottom: 1px solid currentColor; }
+.cmd-music-filters button.active { color: var(--miya-chat-ai, #CBDCF5); border-bottom: 1px solid currentColor; }
 .cmd-music-filters button small { margin-left: 0.12rem; font-size: 0.5rem; opacity: 0.7; }
 .cmd-music-modes { display: flex; flex-shrink: 0; gap: 0.08rem; }
 .cmd-music-modes button { display: grid; place-items: center; min-width: 31px; height: 25px; padding: 0.1rem 0.16rem; border: 1px solid transparent; background: transparent; color: var(--miya-text-muted); cursor: pointer; font-family: inherit; }
 .cmd-music-modes button span { font-size: 0.75rem; line-height: 1; }
 .cmd-music-modes button small { font-size: 0.42rem; line-height: 1; }
-.cmd-music-modes button.active { color: var(--miya-chat-ai, #00FFF5); border-color: rgba(162, 245, 238, 0.3); background: rgba(120, 207, 209, 0.11); }
-.cmd-music-modes button:hover { color: var(--miya-chat-ai, #00FFF5); border-color: rgba(162, 245, 238, 0.2); }
+.cmd-music-modes button.active { color: var(--miya-chat-ai, #CBDCF5); border-color: rgba(203, 220, 245, 0.3); background: rgba(113, 157, 230, 0.11); }
+.cmd-music-modes button:hover { color: var(--miya-chat-ai, #CBDCF5); border-color: rgba(203, 220, 245, 0.2); }
 .cmd-music-nav { display: flex; flex-shrink: 0; gap: 0.1rem; }
 .cmd-music-nav button { width: 24px; height: 24px; padding: 0; font-size: 1.1rem; line-height: 1; }
 .cmd-music-nav button:disabled { cursor: not-allowed; opacity: 0.3; }
-.cmd-music-section-label { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; padding: 0.18rem 0.6rem 0.1rem; border-top: 1px solid color-mix(in srgb, var(--miya-accent) 18%, transparent); color: var(--miya-chat-ai, #00FFF5); font-size: 0.62rem; letter-spacing: 0.05em; }
+.cmd-music-section-label { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; padding: 0.18rem 0.6rem 0.1rem; border-top: 1px solid color-mix(in srgb, var(--miya-accent) 18%, transparent); color: var(--miya-chat-ai, #CBDCF5); font-size: 0.62rem; letter-spacing: 0.05em; }
 .cmd-music-section-label small { color: var(--miya-text-muted); font-size: 0.52rem; letter-spacing: 0; }
 .cmd-music-list { height: clamp(120px, 27vh, 230px); min-height: 72px; overflow-y: scroll; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-gutter: stable; }
 .cmd-music-list button { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; width: 100%; padding: 0.45rem 0.6rem; border: 0; background: transparent; color: var(--miya-text-body); text-align: left; cursor: pointer; }
-.cmd-music-list button.active { color: var(--miya-chat-ai, #00FFF5); background: color-mix(in srgb, var(--miya-accent) 12%, transparent); }
+.cmd-music-list button.active { color: var(--miya-chat-ai, #CBDCF5); background: color-mix(in srgb, var(--miya-accent) 12%, transparent); }
 .cmd-music-list button.is-material { cursor: not-allowed; opacity: 0.48; }
 .cmd-music-list button.is-material:hover { background: transparent; }
 .cmd-music-track-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -913,7 +1005,7 @@ function toggleChat() {
 .cmd-music-list button:hover { background: color-mix(in srgb, var(--miya-accent) 18%, transparent); }
 .cmd-music-error { padding: 0.45rem 0.6rem; color: var(--miya-danger, #f88); font-size: 0.68rem; }
 .cmd-music-status { padding: 0.45rem 0.6rem; color: var(--miya-text-muted); font-size: 0.68rem; }
-.cmd-music-retry { color: var(--miya-accent, #00ADB5) !important; }
+.cmd-music-retry { color: var(--miya-accent, #719DE6) !important; }
 @keyframes music-pulse { 50% { transform: scale(1.15); opacity: 1; } }
 @keyframes music-scroll { 0% { transform: translateX(100%); } 100% { transform: translateX(-120%); } }
 
@@ -934,8 +1026,8 @@ function toggleChat() {
   justify-content: center;
   align-items: flex-start;
   padding: 0.35rem;
-  background: color-mix(in srgb, var(--miya-bg, #222831) 55%, transparent);
-  border: 1px solid color-mix(in srgb, var(--miya-accent, #00ADB5) 10%, transparent);
+  background: color-mix(in srgb, var(--miya-bg, #0D1830) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--miya-accent, #719DE6) 10%, transparent);
   cursor: pointer;
   transition: all 0.4s cubic-bezier(0.22, 1, 0.36, 1);
   font-family: inherit;
@@ -945,26 +1037,26 @@ function toggleChat() {
   transform: rotateX(calc(3deg + var(--gyro-rx, 0deg))) rotateY(calc(-5deg + var(--gyro-ry, 0deg)));
   box-shadow:
     2px 4px 12px rgba(0, 0, 0, 0.3),
-    0 1px 0 color-mix(in srgb, var(--miya-accent, #00ADB5) 6%, transparent);
+    0 1px 0 color-mix(in srgb, var(--miya-accent, #719DE6) 6%, transparent);
 }
 
 .cmd-nav-card::before {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 6%, transparent), transparent 60%);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 6%, transparent), transparent 60%);
   opacity: 0;
   transition: opacity 0.4s ease;
   pointer-events: none;
 }
 
 .cmd-nav-card:hover {
-  background: color-mix(in srgb, var(--miya-accent, #00ADB5) 18%, transparent);
+  background: color-mix(in srgb, var(--miya-accent, #719DE6) 18%, transparent);
   transform: rotateX(calc(1deg + var(--gyro-rx, 0deg))) rotateY(calc(-8deg + var(--gyro-ry, 0deg))) scale(1.04) translateY(-3px);
-  border-color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 30%, transparent);
+  border-color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 30%, transparent);
   box-shadow:
-    3px 6px 20px color-mix(in srgb, var(--miya-accent, #00ADB5) 15%, transparent),
-    0 2px 0 color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 12%, transparent);
+    3px 6px 20px color-mix(in srgb, var(--miya-accent, #719DE6) 15%, transparent),
+    0 2px 0 color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 12%, transparent);
 }
 
 .cmd-nav-card:active {
@@ -977,19 +1069,19 @@ function toggleChat() {
 }
 
 .cmd-nav-icon {
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 30%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 30%, transparent);
   font-size: clamp(0.6rem, 1.2vw, 0.8rem);
   margin-bottom: 0.15rem;
   transition: all 0.4s ease;
 }
 
 .cmd-nav-card:hover .cmd-nav-icon {
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 65%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 65%, transparent);
   transform: scale(1.15);
 }
 
 .cmd-nav-title {
-  color: var(--miya-text, #E4ECF0);
+  color: var(--miya-text, #ECF1F9);
   font-size: clamp(0.7rem, 1.4vw, 0.9rem);
   font-weight: 700;
   margin-bottom: 0.25rem;
@@ -997,7 +1089,7 @@ function toggleChat() {
 }
 
 .cmd-nav-card:hover .cmd-nav-title {
-  text-shadow: 0 0 8px color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 20%, transparent);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 20%, transparent);
 }
 
 .cmd-nav-desc {
@@ -1026,12 +1118,12 @@ function toggleChat() {
   cursor: pointer;
   position: relative;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--miya-accent, #00ADB5) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--miya-accent, #719DE6) 4%, transparent);
   flex-shrink: 0;
 }
 
 .cmd-banner:hover {
-  border-color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 12%, transparent);
+  border-color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 12%, transparent);
 }
 
 .cmd-banner:hover .cmd-banner-img {
@@ -1042,7 +1134,7 @@ function toggleChat() {
   width: 100%;
   aspect-ratio: 2.8 / 1;
   overflow: hidden;
-  background: color-mix(in srgb, var(--miya-bg, #222831) 40%, transparent);
+  background: color-mix(in srgb, var(--miya-bg, #0D1830) 40%, transparent);
   position: relative;
 }
 
@@ -1060,19 +1152,19 @@ function toggleChat() {
 
 .cmd-banner-placeholder {
   width: 100%; height: 100%; display: grid; place-content: center; justify-items: center; gap: 0.35rem;
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 58%, transparent);
-  background: radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--miya-accent, #00ADB5) 18%, transparent), transparent 38%), repeating-linear-gradient(135deg, transparent 0 14px, color-mix(in srgb, var(--miya-accent, #00ADB5) 5%, transparent) 14px 15px);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 58%, transparent);
+  background: radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--miya-accent, #719DE6) 18%, transparent), transparent 38%), repeating-linear-gradient(135deg, transparent 0 14px, color-mix(in srgb, var(--miya-accent, #719DE6) 5%, transparent) 14px 15px);
 }
 .cmd-banner-placeholder span { font-size: 2rem; line-height: 1; }
 .cmd-banner-placeholder small { font-size: 0.45rem; letter-spacing: 0.2em; }
 .cmd-banner-nav { position: absolute; right: 0.35rem; bottom: 0.3rem; z-index: 3; display: flex; align-items: center; gap: 0.3rem; opacity: 0; transition: opacity 0.2s; }
 .cmd-banner:hover .cmd-banner-nav { opacity: 1; }
-.cmd-banner-nav button { width: 20px; height: 20px; padding: 0; border: 1px solid color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 35%, transparent); background: rgba(3,8,12,0.7); color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 72%, transparent); cursor: pointer; line-height: 1; }
+.cmd-banner-nav button { width: 20px; height: 20px; padding: 0; border: 1px solid color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 35%, transparent); background: rgba(3,8,12,0.7); color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 72%, transparent); cursor: pointer; line-height: 1; }
 .cmd-banner-nav span { padding: 2px 4px; background: rgba(3,8,12,0.64); color: rgba(255,255,255,0.58); font-size: 0.42rem; letter-spacing: 0.08em; }
 
 .cmd-banner-label {
   padding: 0.25rem 0.5rem;
-  background: color-mix(in srgb, var(--miya-bg, #222831) 35%, transparent);
+  background: color-mix(in srgb, var(--miya-bg, #0D1830) 35%, transparent);
   min-height: 1.4em;
   display: flex;
   align-items: center;
@@ -1082,7 +1174,7 @@ function toggleChat() {
 .cmd-banner-copy small { overflow: hidden; color: color-mix(in srgb, var(--miya-text, #eee) 35%, transparent); font-size: 0.46rem; text-overflow: ellipsis; white-space: nowrap; }
 
 .cmd-banner-text {
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 50%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 50%, transparent);
   font-size: clamp(0.45rem, 0.9vw, 0.55rem);
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -1120,8 +1212,8 @@ function toggleChat() {
 .cmd-chat {
   display: flex;
   align-items: flex-start;
-  background: color-mix(in srgb, var(--miya-bg, #222831) 25%, transparent);
-  border: 1px solid color-mix(in srgb, var(--miya-accent, #00ADB5) 3%, transparent);
+  background: color-mix(in srgb, var(--miya-bg, #0D1830) 25%, transparent);
+  border: 1px solid color-mix(in srgb, var(--miya-accent, #719DE6) 3%, transparent);
   cursor: pointer;
   position: relative;
   flex-shrink: 0;
@@ -1129,8 +1221,8 @@ function toggleChat() {
 }
 
 .cmd-chat:hover {
-  background: color-mix(in srgb, var(--miya-bg, #222831) 40%, transparent);
-  border-color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 8%, transparent);
+  background: color-mix(in srgb, var(--miya-bg, #0D1830) 40%, transparent);
+  border-color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 8%, transparent);
 }
 
 .cmd-chat-icon {
@@ -1139,15 +1231,15 @@ function toggleChat() {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 35%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 35%, transparent);
   font-size: 0.75rem;
   flex-shrink: 0;
   transition: all 0.4s ease;
 }
 
 .cmd-chat-icon:hover {
-  background: color-mix(in srgb, var(--miya-accent, #00ADB5) 12%, transparent);
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 65%, transparent);
+  background: color-mix(in srgb, var(--miya-accent, #719DE6) 12%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 65%, transparent);
 }
 
 .cmd-chat-text {
@@ -1171,7 +1263,7 @@ function toggleChat() {
   background: rgba(0, 0, 0, 0.5);
   position: relative;
   bottom: 140px;
-  border: 1px solid color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 8%, transparent);
 }
 
 /* ═══ 右面板: 资源栏 (固定高度) ═══ */
@@ -1188,8 +1280,8 @@ function toggleChat() {
   align-items: center;
   height: clamp(24px, 3.5vh, 30px);
   flex: 1;
-  background: color-mix(in srgb, var(--miya-bg, #222831) 55%, transparent);
-  border: 1px solid color-mix(in srgb, var(--miya-accent, #00ADB5) 8%, transparent);
+  background: color-mix(in srgb, var(--miya-bg, #0D1830) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--miya-accent, #719DE6) 8%, transparent);
   padding: 0 0.25rem;
   cursor: pointer;
   transition: all 0.35s cubic-bezier(0.22, 1, 0.36, 1);
@@ -1200,10 +1292,10 @@ function toggleChat() {
 }
 
 .cmd-res-item:hover {
-  background: color-mix(in srgb, var(--miya-accent, #00ADB5) 14%, transparent);
-  border-color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 25%, transparent);
+  background: color-mix(in srgb, var(--miya-accent, #719DE6) 14%, transparent);
+  border-color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 25%, transparent);
   transform: rotateX(calc(0deg + var(--gyro-rx, 0deg))) rotateY(calc(-5deg + var(--gyro-ry, 0deg))) scale(1.03);
-  box-shadow: 1px 3px 12px color-mix(in srgb, var(--miya-accent, #00ADB5) 12%, transparent);
+  box-shadow: 1px 3px 12px color-mix(in srgb, var(--miya-accent, #719DE6) 12%, transparent);
 }
 
 .cmd-res-item:active {
@@ -1216,20 +1308,20 @@ function toggleChat() {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 40%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 40%, transparent);
   font-size: 0.75rem;
   flex-shrink: 0;
   transition: all 0.4s ease;
 }
 
 .cmd-res-item:hover .cmd-res-icon {
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 65%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 65%, transparent);
   transform: scale(1.15);
 }
 
 .cmd-res-val {
   flex: 1;
-  color: var(--miya-text, #E4ECF0);
+  color: var(--miya-text, #ECF1F9);
   font-size: clamp(0.65rem, 1.2vw, 0.8rem);
   font-family: 'JetBrains Mono', monospace;
   padding: 0 0.3rem;
@@ -1238,7 +1330,7 @@ function toggleChat() {
 }
 
 .cmd-res-item:hover .cmd-res-val {
-  text-shadow: 0 0 6px color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 20%, transparent);
+  text-shadow: 0 0 6px color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 20%, transparent);
 }
 
 .time-font {
@@ -1251,8 +1343,8 @@ function toggleChat() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, var(--miya-accent, #00ADB5) 18%, transparent);
-  color: var(--miya-text, #E4ECF0);
+  background: color-mix(in srgb, var(--miya-accent, #719DE6) 18%, transparent);
+  color: var(--miya-text, #ECF1F9);
   font-size: 1.2rem;
   font-weight: 700;
   flex-shrink: 0;
@@ -1260,7 +1352,7 @@ function toggleChat() {
 }
 
 .cmd-res-item:hover .cmd-res-plus {
-  background: color-mix(in srgb, var(--miya-accent, #00ADB5) 35%, transparent);
+  background: color-mix(in srgb, var(--miya-accent, #719DE6) 35%, transparent);
 }
 
 /* ═══ 右面板: 中间内容 (弹性) ═══ */
@@ -1284,19 +1376,19 @@ function toggleChat() {
 
 .cmd-time-icon {
   font-size: 0.9rem;
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 20%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 20%, transparent);
   cursor: pointer;
   transition: all 0.4s ease;
   flex-shrink: 0;
 }
 
 .cmd-time-icon.active {
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 45%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 45%, transparent);
 }
 
 .cmd-time-icon:hover {
   transform: skewX(-10deg) scale(1.1);
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 55%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 55%, transparent);
 }
 
 .cmd-time-val {
@@ -1309,9 +1401,9 @@ function toggleChat() {
 }
 
 .cmd-time-val:hover {
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 85%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 85%, transparent);
   font-size: clamp(1rem, 2vw, 1.4rem);
-  text-shadow: 0 0 10px color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 25%, transparent);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 25%, transparent);
 }
 
 .cmd-time-icons {
@@ -1326,13 +1418,13 @@ function toggleChat() {
   align-items: center;
   justify-content: center;
   font-size: 0.8rem;
-  color: color-mix(in srgb, var(--miya-accent, #00ADB5) 25%, transparent);
+  color: color-mix(in srgb, var(--miya-accent, #719DE6) 25%, transparent);
   cursor: pointer;
   transition: all 0.4s ease;
 }
 
 .cmd-time-icn:hover {
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 65%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 65%, transparent);
   transform: skewX(-8deg) scale(1.1);
 }
 
@@ -1364,8 +1456,8 @@ function toggleChat() {
   position: relative;
   cursor: pointer;
   overflow: hidden;
-  background: color-mix(in srgb, var(--miya-bg, #222831) 30%, transparent);
-  border: 1px solid color-mix(in srgb, var(--miya-accent, #00ADB5) 6%, transparent);
+  background: color-mix(in srgb, var(--miya-bg, #0D1830) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--miya-accent, #719DE6) 6%, transparent);
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -1379,7 +1471,7 @@ function toggleChat() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--miya-accent, #00ADB5) 12%, transparent), color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 4%, transparent));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--miya-accent, #719DE6) 12%, transparent), color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 4%, transparent));
   transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -1391,14 +1483,14 @@ function toggleChat() {
   font-family: 'Noto Serif SC', serif;
   font-size: clamp(1.5rem, 3vw, 2rem);
   font-weight: 700;
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 65%, transparent);
-  text-shadow: 0 0 12px color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 25%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 65%, transparent);
+  text-shadow: 0 0 12px color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 25%, transparent);
   transition: all 0.5s ease;
 }
 
 .cmd-portrait:hover .cmd-portrait-char {
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 90%, transparent);
-  text-shadow: 0 0 20px color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 40%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 90%, transparent);
+  text-shadow: 0 0 20px color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 40%, transparent);
 }
 
 .cmd-portrait-gloss {
@@ -1429,15 +1521,15 @@ function toggleChat() {
 }
 
 .cmd-portrait:hover {
-  background: color-mix(in srgb, var(--miya-accent, #00ADB5) 8%, transparent);
+  background: color-mix(in srgb, var(--miya-accent, #719DE6) 8%, transparent);
 }
 
 .cmd-battle-info {
   flex: 1;
   height: 100%;
   display: flex;
-  background: color-mix(in srgb, var(--miya-bg, #222831) 55%, transparent);
-  border: 1px solid color-mix(in srgb, var(--miya-accent, #00ADB5) 8%, transparent);
+  background: color-mix(in srgb, var(--miya-bg, #0D1830) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--miya-accent, #719DE6) 8%, transparent);
   padding: 0.25rem 0.4rem;
   cursor: pointer;
   transition: all 0.4s cubic-bezier(0.22, 1, 0.36, 1);
@@ -1445,16 +1537,16 @@ function toggleChat() {
   transform: rotateX(calc(2deg + var(--gyro-rx, 0deg))) rotateY(calc(-4deg + var(--gyro-ry, 0deg)));
   box-shadow:
     2px 3px 10px rgba(0, 0, 0, 0.3),
-    0 1px 0 color-mix(in srgb, var(--miya-accent, #00ADB5) 6%, transparent);
+    0 1px 0 color-mix(in srgb, var(--miya-accent, #719DE6) 6%, transparent);
 }
 
 .cmd-battle-info:hover {
-  background: color-mix(in srgb, var(--miya-accent, #00ADB5) 14%, transparent);
-  border-color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 25%, transparent);
+  background: color-mix(in srgb, var(--miya-accent, #719DE6) 14%, transparent);
+  border-color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 25%, transparent);
   transform: rotateX(calc(1deg + var(--gyro-rx, 0deg))) rotateY(calc(-7deg + var(--gyro-ry, 0deg))) scale(1.02);
   box-shadow:
-    3px 5px 18px color-mix(in srgb, var(--miya-accent, #00ADB5) 12%, transparent),
-    0 2px 0 color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 12%, transparent);
+    3px 5px 18px color-mix(in srgb, var(--miya-accent, #719DE6) 12%, transparent),
+    0 2px 0 color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 12%, transparent);
 }
 
 .cmd-battle-info:active {
@@ -1471,7 +1563,7 @@ function toggleChat() {
 }
 
 .cmd-battle-left h1 {
-  color: var(--miya-text, #E4ECF0);
+  color: var(--miya-text, #ECF1F9);
   font-size: clamp(1rem, 2vw, 1.4rem);
   font-weight: 700;
   line-height: 1.2;
@@ -1480,7 +1572,7 @@ function toggleChat() {
 }
 
 .cmd-battle-info:hover .cmd-battle-left h1 {
-  text-shadow: 0 0 8px color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 20%, transparent);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 20%, transparent);
 }
 
 .cmd-battle-tip {
@@ -1505,19 +1597,19 @@ function toggleChat() {
   justify-content: center;
   width: clamp(36px, 9%, 48px);
   height: clamp(36px, 9%, 48px);
-  border: 2px solid color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 20%, transparent);
+  border: 2px solid color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 20%, transparent);
   border-radius: 50%;
   flex-shrink: 0;
   transition: all 0.4s ease;
 }
 
 .cmd-battle-info:hover .cmd-battle-right {
-  border-color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 45%, transparent);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 15%, transparent);
+  border-color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 45%, transparent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 15%, transparent);
 }
 
 .cmd-battle-pct {
-  color: var(--miya-text, #E4ECF0);
+  color: var(--miya-text, #ECF1F9);
   font-size: clamp(0.7rem, 1.3vw, 0.9rem);
   font-weight: 700;
   margin: 0;
@@ -1554,13 +1646,13 @@ function toggleChat() {
 }
 
 .cmd-mascot-icon {
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 35%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 35%, transparent);
   font-size: clamp(0.8rem, 1.5vw, 1.1rem);
   transition: all 0.4s ease;
 }
 
 .cmd-mascot:hover .cmd-mascot-icon {
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 70%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 70%, transparent);
 }
 
 .cmd-mascot-label {
@@ -1575,14 +1667,14 @@ function toggleChat() {
 }
 
 .cmd-mascot-val {
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 40%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 40%, transparent);
   font-size: clamp(0.35rem, 0.6vw, 0.4rem);
   font-family: 'JetBrains Mono', monospace;
   transition: color 0.3s;
 }
 
 .cmd-mascot:hover .cmd-mascot-val {
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 80%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 80%, transparent);
 }
 
 /* boxline2: 任务卡 (flex: 1.3) */
@@ -1605,9 +1697,9 @@ function toggleChat() {
 }
 
 .cmd-quest:hover {
-  background: color-mix(in srgb, var(--miya-accent, #00ADB5) 10%, transparent);
+  background: color-mix(in srgb, var(--miya-accent, #719DE6) 10%, transparent);
   transform: rotateX(calc(1deg + var(--gyro-rx, 0deg))) rotateY(calc(-6deg + var(--gyro-ry, 0deg))) scale(1.02);
-  box-shadow: 2px 4px 14px color-mix(in srgb, var(--miya-accent, #00ADB5) 10%, transparent);
+  box-shadow: 2px 4px 14px color-mix(in srgb, var(--miya-accent, #719DE6) 10%, transparent);
 }
 
 .cmd-quest:active {
@@ -1617,7 +1709,7 @@ function toggleChat() {
 
 .cmd-quest-left {
   width: 25%;
-  background: color-mix(in srgb, var(--miya-accent, #00ADB5) 8%, transparent);
+  background: color-mix(in srgb, var(--miya-accent, #719DE6) 8%, transparent);
   padding: 0.25rem;
   display: flex;
   flex-direction: column;
@@ -1626,11 +1718,11 @@ function toggleChat() {
 }
 
 .cmd-quest:hover .cmd-quest-left {
-  background: color-mix(in srgb, var(--miya-accent, #00ADB5) 16%, transparent);
+  background: color-mix(in srgb, var(--miya-accent, #719DE6) 16%, transparent);
 }
 
 .cmd-quest-left h2 {
-  color: var(--miya-text, #E4ECF0);
+  color: var(--miya-text, #ECF1F9);
   font-size: clamp(0.7rem, 1.3vw, 0.85rem);
   font-weight: 700;
   margin: 0;
@@ -1647,7 +1739,7 @@ function toggleChat() {
 
 .cmd-quest-right {
   flex: 1;
-  background: color-mix(in srgb, var(--miya-bg, #222831) 55%, transparent);
+  background: color-mix(in srgb, var(--miya-bg, #0D1830) 55%, transparent);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1658,7 +1750,7 @@ function toggleChat() {
 }
 
 .cmd-quest:hover .cmd-quest-right {
-  background: color-mix(in srgb, var(--miya-bg, #222831) 70%, transparent);
+  background: color-mix(in srgb, var(--miya-bg, #0D1830) 70%, transparent);
 }
 
 .cmd-quest-right p {
@@ -1677,7 +1769,7 @@ function toggleChat() {
 }
 
 .cmd-quest-check {
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 40%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 40%, transparent);
   font-size: clamp(0.7rem, 1.2vw, 0.85rem);
   position: absolute;
   right: 4px;
@@ -1687,7 +1779,7 @@ function toggleChat() {
 }
 
 .cmd-quest:hover .cmd-quest-check {
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 75%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 75%, transparent);
   transform: scale(1.2);
 }
 
@@ -1696,8 +1788,8 @@ function toggleChat() {
   min-width: 45px;
   max-width: 70px;
   height: 60%;
-  background: color-mix(in srgb, var(--miya-bg, #222831) 20%, transparent);
-  border: 1px solid color-mix(in srgb, var(--miya-accent, #00ADB5) 2%, transparent);
+  background: color-mix(in srgb, var(--miya-bg, #0D1830) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--miya-accent, #719DE6) 2%, transparent);
   align-self: flex-end;
   flex-shrink: 0;
   transition: background 0.4s;
@@ -1714,8 +1806,8 @@ function toggleChat() {
 .cmd-feat-card {
   flex: 1;
   height: 100%;
-  background: color-mix(in srgb, var(--miya-bg, #222831) 55%, transparent);
-  border: 1px solid color-mix(in srgb, var(--miya-accent, #00ADB5) 8%, transparent);
+  background: color-mix(in srgb, var(--miya-bg, #0D1830) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--miya-accent, #719DE6) 8%, transparent);
   padding: 0.3rem;
   cursor: pointer;
   transition: all 0.4s cubic-bezier(0.22, 1, 0.36, 1);
@@ -1727,26 +1819,26 @@ function toggleChat() {
   transform: rotateX(calc(3deg + var(--gyro-rx, 0deg))) rotateY(calc(-4deg + var(--gyro-ry, 0deg)));
   box-shadow:
     2px 4px 10px rgba(0, 0, 0, 0.3),
-    0 1px 0 color-mix(in srgb, var(--miya-accent, #00ADB5) 6%, transparent);
+    0 1px 0 color-mix(in srgb, var(--miya-accent, #719DE6) 6%, transparent);
 }
 
 .cmd-feat-card::before {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 5%, transparent), transparent 50%);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 5%, transparent), transparent 50%);
   opacity: 0;
   transition: opacity 0.4s ease;
   pointer-events: none;
 }
 
 .cmd-feat-card:hover {
-  background: color-mix(in srgb, var(--miya-accent, #00ADB5) 15%, transparent);
+  background: color-mix(in srgb, var(--miya-accent, #719DE6) 15%, transparent);
   transform: rotateX(calc(1deg + var(--gyro-rx, 0deg))) rotateY(calc(-7deg + var(--gyro-ry, 0deg))) scale(1.03) translateY(-3px);
-  border-color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 28%, transparent);
+  border-color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 28%, transparent);
   box-shadow:
-    3px 6px 18px color-mix(in srgb, var(--miya-accent, #00ADB5) 12%, transparent),
-    0 2px 0 color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 12%, transparent);
+    3px 6px 18px color-mix(in srgb, var(--miya-accent, #719DE6) 12%, transparent),
+    0 2px 0 color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 12%, transparent);
 }
 
 .cmd-feat-card:active {
@@ -1755,11 +1847,11 @@ function toggleChat() {
 }
 
 .cmd-feat-card:hover::before { opacity: 1; }
-.cmd-feat-card:hover h1 { color: var(--miya-text, #E4ECF0); text-shadow: 0 0 10px color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 25%, transparent); }
+.cmd-feat-card:hover h1 { color: var(--miya-text, #ECF1F9); text-shadow: 0 0 10px color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 25%, transparent); }
 .cmd-feat-card:hover span { color: color-mix(in srgb, var(--miya-accent, var(--miya-text)) 65%, transparent); }
 
 .cmd-feat-card h1 {
-  color: var(--miya-text, #E4ECF0);
+  color: var(--miya-text, #ECF1F9);
   font-size: clamp(0.65rem, 1.3vw, 0.85rem);
   font-weight: 700;
   margin: 0 0 0.1rem 0;
@@ -1776,7 +1868,7 @@ function toggleChat() {
   position: absolute;
   right: 4px;
   top: 4px;
-  background: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 60%, transparent);
+  background: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 60%, transparent);
   color: #111;
   font-size: clamp(0.3rem, 0.5vw, 0.35rem);
   font-weight: bold;
@@ -1786,7 +1878,7 @@ function toggleChat() {
 }
 
 .cmd-feat-card:hover .cmd-feat-badge {
-  background: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 80%, transparent);
+  background: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 80%, transparent);
   transform: scale(1.1);
 }
 
@@ -1795,8 +1887,8 @@ function toggleChat() {
   min-width: 40px;
   max-width: 60px;
   height: 100%;
-  background: color-mix(in srgb, var(--miya-bg, #222831) 20%, transparent);
-  border: 1px solid color-mix(in srgb, var(--miya-accent, #00ADB5) 2%, transparent);
+  background: color-mix(in srgb, var(--miya-bg, #0D1830) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--miya-accent, #719DE6) 2%, transparent);
   flex-shrink: 0;
 }
 
@@ -1804,8 +1896,8 @@ function toggleChat() {
 .cmd-boxline4 {
   flex: 1;
   width: 70%;
-  background: color-mix(in srgb, var(--miya-bg, #222831) 50%, transparent);
-  border: 1px solid color-mix(in srgb, var(--miya-accent, #00ADB5) 8%, transparent);
+  background: color-mix(in srgb, var(--miya-bg, #0D1830) 50%, transparent);
+  border: 1px solid color-mix(in srgb, var(--miya-accent, #719DE6) 8%, transparent);
   padding: 0 0.6rem;
   cursor: pointer;
   transition: all 0.4s cubic-bezier(0.22, 1, 0.36, 1);
@@ -1817,21 +1909,21 @@ function toggleChat() {
 }
 
 .cmd-boxline4:hover {
-  background: color-mix(in srgb, var(--miya-accent, #00ADB5) 14%, transparent);
-  border-color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 20%, transparent);
+  background: color-mix(in srgb, var(--miya-accent, #719DE6) 14%, transparent);
+  border-color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 20%, transparent);
   width: 100%;
-  box-shadow: 0 0 14px color-mix(in srgb, var(--miya-accent, #00ADB5) 8%, transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--miya-accent, #719DE6) 8%, transparent);
 }
 
 .cmd-guild-title {
-  color: var(--miya-text, #E4ECF0);
+  color: var(--miya-text, #ECF1F9);
   font-size: clamp(0.6rem, 1.1vw, 0.7rem);
   font-weight: 700;
   transition: color 0.3s, text-shadow 0.3s;
 }
 
 .cmd-boxline4:hover .cmd-guild-title {
-  text-shadow: 0 0 10px color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 30%, transparent);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 30%, transparent);
 }
 
 .cmd-guild-desc {
@@ -1863,8 +1955,8 @@ function toggleChat() {
   padding: 0.3rem 0.15rem;
   cursor: pointer;
   transition: all 0.35s cubic-bezier(0.22, 1, 0.36, 1);
-  background: color-mix(in srgb, var(--miya-bg, #222831) 40%, transparent);
-  border: 1px solid color-mix(in srgb, var(--miya-accent, #00ADB5) 6%, transparent);
+  background: color-mix(in srgb, var(--miya-bg, #0D1830) 40%, transparent);
+  border: 1px solid color-mix(in srgb, var(--miya-accent, #719DE6) 6%, transparent);
   font-family: inherit;
   color: inherit;
   overflow: hidden;
@@ -1874,9 +1966,9 @@ function toggleChat() {
 }
 
 .cmd-bottom-item:hover {
-  background: color-mix(in srgb, var(--miya-accent, #00ADB5) 15%, transparent);
-  border-color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 20%, transparent);
-  box-shadow: 3px 5px 16px rgba(0, 0, 0, 0.35), 0 0 10px color-mix(in srgb, var(--miya-accent, #00ADB5) 10%, transparent);
+  background: color-mix(in srgb, var(--miya-accent, #719DE6) 15%, transparent);
+  border-color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 20%, transparent);
+  box-shadow: 3px 5px 16px rgba(0, 0, 0, 0.35), 0 0 10px color-mix(in srgb, var(--miya-accent, #719DE6) 10%, transparent);
   transform: rotateX(calc(1deg + var(--gyro-rx, 0deg))) rotateY(calc(-6deg + var(--gyro-ry, 0deg))) translateY(-3px);
 }
 
@@ -1886,22 +1978,22 @@ function toggleChat() {
 }
 
 .cmd-bottom-item:hover h1 {
-  text-shadow: 0 0 12px color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 35%, transparent);
+  text-shadow: 0 0 12px color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 35%, transparent);
 }
 
 .cmd-bottom-icon {
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 25%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 25%, transparent);
   font-size: clamp(0.5rem, 0.9vw, 0.6rem);
   transition: all 0.4s ease;
 }
 
 .cmd-bottom-item:hover .cmd-bottom-icon {
-  color: color-mix(in srgb, var(--miya-chat-ai, #00FFF5) 60%, transparent);
+  color: color-mix(in srgb, var(--miya-chat-ai, #CBDCF5) 60%, transparent);
   transform: scale(1.1);
 }
 
 .cmd-bottom-item h1 {
-  color: var(--miya-text, #E4ECF0);
+  color: var(--miya-text, #ECF1F9);
   font-size: clamp(0.5rem, 1vw, 0.6rem);
   font-weight: 700;
   margin: 0;
@@ -1932,8 +2024,8 @@ function toggleChat() {
   position: relative;
   border-radius: 0;
   box-shadow:
-    inset 2px 0 rgba(120, 207, 209, 0.22),
-    inset -1px 0 rgba(120, 207, 209, 0.08),
+    inset 2px 0 rgba(113, 157, 230, 0.22),
+    inset -1px 0 rgba(113, 157, 230, 0.08),
     0 22px 56px rgba(0, 0, 0, 0.32);
   backdrop-filter: blur(16px);
 }
@@ -1945,8 +2037,8 @@ function toggleChat() {
   right: 0;
   width: 52px;
   height: 18px;
-  border-top: 2px solid rgba(162, 245, 238, 0.55);
-  border-right: 2px solid rgba(162, 245, 238, 0.55);
+  border-top: 2px solid rgba(203, 220, 245, 0.55);
+  border-right: 2px solid rgba(203, 220, 245, 0.55);
   clip-path: polygon(18px 0, 100% 0, 100% 100%, calc(100% - 2px) 100%, calc(100% - 2px) 2px, 20px 2px);
   pointer-events: none;
 }
@@ -1958,8 +2050,8 @@ function toggleChat() {
   bottom: 0;
   width: 38%;
   height: 2px;
-  background: linear-gradient(90deg, var(--miya-accent-soft), rgba(120, 207, 209, 0.08), transparent);
-  box-shadow: 0 0 10px rgba(120, 207, 209, 0.22);
+  background: linear-gradient(90deg, var(--miya-accent-soft), rgba(113, 157, 230, 0.08), transparent);
+  box-shadow: 0 0 10px rgba(113, 157, 230, 0.22);
   pointer-events: none;
 }
 
@@ -1970,11 +2062,11 @@ function toggleChat() {
   width: auto;
   height: auto;
   padding: 4px 9px 3px 24px;
-  color: rgba(162, 245, 238, 0.5);
-  background: linear-gradient(90deg, transparent, rgba(120, 207, 209, 0.07));
+  color: rgba(203, 220, 245, 0.5);
+  background: linear-gradient(90deg, transparent, rgba(113, 157, 230, 0.07));
   border: 0;
-  border-top: 1px solid rgba(162, 245, 238, 0.3);
-  border-right: 2px solid rgba(162, 245, 238, 0.48);
+  border-top: 1px solid rgba(203, 220, 245, 0.3);
+  border-right: 2px solid rgba(203, 220, 245, 0.48);
   clip-path: polygon(14px 0, 100% 0, 100% 100%, 0 100%);
   font: 500 0.45rem/1.2 'JetBrains Mono', monospace;
   letter-spacing: 0.14em;
@@ -1987,9 +2079,9 @@ function toggleChat() {
   border-color: var(--miya-line-soft);
   border-radius: 0;
   background:
-    linear-gradient(135deg, rgba(120, 207, 209, 0.1), transparent 36%),
+    linear-gradient(135deg, rgba(113, 157, 230, 0.1), transparent 36%),
     rgba(10, 18, 28, 0.78);
-  box-shadow: inset 0 -2px rgba(120, 207, 209, 0.08), 0 8px 24px rgba(0, 0, 0, 0.18);
+  box-shadow: inset 0 -2px rgba(113, 157, 230, 0.08), 0 8px 24px rgba(0, 0, 0, 0.18);
   clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
   transform: none;
 }
@@ -1997,7 +2089,7 @@ function toggleChat() {
 .cmd-nav-card:hover {
   transform: translateY(-3px) skewX(-2deg);
   border-color: var(--miya-line-strong);
-  background: rgba(120, 207, 209, 0.09);
+  background: rgba(113, 157, 230, 0.09);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.24);
 }
 
@@ -2007,7 +2099,7 @@ function toggleChat() {
 .cmd-feat-card,
 .cmd-boxline4 {
   border-radius: 0;
-  border-color: rgba(120, 207, 209, 0.13);
+  border-color: rgba(113, 157, 230, 0.13);
   background-color: rgba(8, 15, 24, 0.74);
 }
 
@@ -2059,8 +2151,8 @@ function toggleChat() {
   inset: 5% 31% 8%;
   pointer-events: none;
   background:
-    linear-gradient(90deg, transparent 49.8%, rgba(162, 245, 238, 0.13) 50%, transparent 50.2%),
-    linear-gradient(180deg, rgba(162, 245, 238, 0.08), transparent 22%, transparent 76%, rgba(216, 189, 130, 0.08));
+    linear-gradient(90deg, transparent 49.8%, rgba(203, 220, 245, 0.13) 50%, transparent 50.2%),
+    linear-gradient(180deg, rgba(203, 220, 245, 0.08), transparent 22%, transparent 76%, rgba(216, 189, 130, 0.08));
   mask-image: linear-gradient(180deg, transparent, black 15%, black 84%, transparent);
 }
 
@@ -2069,8 +2161,8 @@ function toggleChat() {
   overflow: visible;
   padding: 0.8rem;
   background: linear-gradient(180deg, rgba(8, 15, 24, 0.34), rgba(8, 15, 24, 0.08));
-  border-color: rgba(162, 245, 238, 0.07);
-  box-shadow: inset 2px 0 rgba(120, 207, 209, 0.2), 0 24px 60px rgba(0, 0, 0, 0.16);
+  border-color: rgba(203, 220, 245, 0.07);
+  box-shadow: inset 2px 0 rgba(113, 157, 230, 0.2), 0 24px 60px rgba(0, 0, 0, 0.16);
   backdrop-filter: blur(5px);
 }
 
@@ -2082,12 +2174,12 @@ function toggleChat() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  color: rgba(162, 245, 238, 0.38);
+  color: rgba(203, 220, 245, 0.38);
   font: 500 0.42rem/1 'JetBrains Mono', monospace;
   letter-spacing: 0.16em;
 }
 
-.cmd-eyebrow { margin: 0 0 0.45rem; padding-bottom: 0.35rem; border-bottom: 1px solid rgba(162, 245, 238, 0.12); }
+.cmd-eyebrow { margin: 0 0 0.45rem; padding-bottom: 0.35rem; border-bottom: 1px solid rgba(203, 220, 245, 0.12); }
 .cmd-right-heading { margin: 0.48rem 0 0.15rem; padding: 0 0.15rem; }
 .cmd-right-sequence { color: rgba(216, 189, 130, 0.58); }
 
@@ -2101,14 +2193,14 @@ function toggleChat() {
   position: relative;
   overflow: hidden;
   background-color: rgba(6, 13, 21, 0.68);
-  border-color: rgba(162, 245, 238, 0.14);
+  border-color: rgba(203, 220, 245, 0.14);
   backdrop-filter: blur(10px);
 }
 
 .cmd-battle-info {
   flex: 1.45;
-  border-left: 2px solid rgba(162, 245, 238, 0.62);
-  background: linear-gradient(112deg, rgba(120, 207, 209, 0.17), transparent 48%), rgba(6, 13, 21, 0.82);
+  border-left: 2px solid rgba(203, 220, 245, 0.62);
+  background: linear-gradient(112deg, rgba(113, 157, 230, 0.17), transparent 48%), rgba(6, 13, 21, 0.82);
 }
 
 .cmd-battle-info::after {
@@ -2116,15 +2208,15 @@ function toggleChat() {
   position: absolute;
   top: 5px;
   right: 7px;
-  color: rgba(162, 245, 238, 0.27);
+  color: rgba(203, 220, 245, 0.27);
   font: 0.36rem 'JetBrains Mono', monospace;
   letter-spacing: 0.12em;
 }
 
 .cmd-quest-spacer,
 .cmd-feat-spacer {
-  background: repeating-linear-gradient(135deg, rgba(120, 207, 209, 0.07) 0 2px, transparent 2px 8px), rgba(7, 14, 22, 0.3);
-  border-color: rgba(120, 207, 209, 0.08);
+  background: repeating-linear-gradient(135deg, rgba(113, 157, 230, 0.07) 0 2px, transparent 2px 8px), rgba(7, 14, 22, 0.3);
+  border-color: rgba(113, 157, 230, 0.08);
 }
 
 .cmd-bottom-nav { gap: 0.3rem; padding-top: 0.45rem; }
@@ -2227,9 +2319,9 @@ function toggleChat() {
 .cmd-eyebrow,
 .cmd-right-heading {
   padding-inline: 0;
-  border-color: rgba(162, 245, 238, 0.09);
+  border-color: rgba(203, 220, 245, 0.09);
   background: transparent;
-  text-shadow: 0 0 10px rgba(120, 207, 209, 0.22);
+  text-shadow: 0 0 10px rgba(113, 157, 230, 0.22);
 }
 
 .cmd-nav-card,
@@ -2242,7 +2334,7 @@ function toggleChat() {
   backdrop-filter: blur(7px);
   box-shadow:
     2px 4px 12px rgba(0, 0, 0, 0.34),
-    inset 0 1px rgba(162, 245, 238, 0.06);
+    inset 0 1px rgba(203, 220, 245, 0.06);
 }
 
 .cmd-nav-card { transform: rotateX(calc(3deg + var(--gyro-rx, 0deg))) rotateY(calc(-5deg + var(--gyro-ry, 0deg))); }
@@ -2253,15 +2345,15 @@ function toggleChat() {
   min-width: 76px;
   padding: 0 0.48rem;
   gap: 0.32rem;
-  border: 1px solid rgba(162, 245, 238, 0.15);
+  border: 1px solid rgba(203, 220, 245, 0.15);
   background: rgba(5, 13, 21, 0.58);
   clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%);
 }
 
 .cmd-mode-btn.active {
-  border-color: rgba(162, 245, 238, 0.4);
-  background: linear-gradient(90deg, rgba(120, 207, 209, 0.15), rgba(5, 13, 21, 0.58));
-  box-shadow: inset 2px 0 rgba(162, 245, 238, 0.65), 0 0 12px rgba(120, 207, 209, 0.08);
+  border-color: rgba(203, 220, 245, 0.4);
+  background: linear-gradient(90deg, rgba(113, 157, 230, 0.15), rgba(5, 13, 21, 0.58));
+  box-shadow: inset 2px 0 rgba(203, 220, 245, 0.65), 0 0 12px rgba(113, 157, 230, 0.08);
 }
 
 .cmd-toggle-label {
@@ -2284,7 +2376,7 @@ function toggleChat() {
   width: 36px;
   height: 30px;
   padding: 0;
-  border: 1px solid rgba(162, 245, 238, 0.12);
+  border: 1px solid rgba(203, 220, 245, 0.12);
   background: rgba(5, 13, 21, 0.52);
   flex-direction: column;
   gap: 1px;
@@ -2292,15 +2384,15 @@ function toggleChat() {
 }
 .cmd-time-icn small { color: rgba(127, 145, 154, 0.6); font: 0.28rem/1 'JetBrains Mono', monospace; letter-spacing: 0.08em; }
 .cmd-time-icn-symbol { font-size: 0.66rem; line-height: 1; }
-.cmd-time-icn:hover { border-color: rgba(162, 245, 238, 0.35); background: rgba(120, 207, 209, 0.11); }
+.cmd-time-icn:hover { border-color: rgba(203, 220, 245, 0.35); background: rgba(113, 157, 230, 0.11); }
 .cmd-mode-icn { width: 40px; }
 .cmd-mode-icn.active {
-  color: var(--miya-accent-bright, #a2f5ee);
-  border-color: rgba(162, 245, 238, 0.4);
-  background: linear-gradient(180deg, rgba(120, 207, 209, 0.15), rgba(5, 13, 21, 0.52));
-  box-shadow: inset 2px 0 rgba(162, 245, 238, 0.65), 0 0 12px rgba(120, 207, 209, 0.08);
+  color: var(--miya-accent-bright, #CBDCF5);
+  border-color: rgba(203, 220, 245, 0.4);
+  background: linear-gradient(180deg, rgba(113, 157, 230, 0.15), rgba(5, 13, 21, 0.52));
+  box-shadow: inset 2px 0 rgba(203, 220, 245, 0.65), 0 0 12px rgba(113, 157, 230, 0.08);
 }
-.cmd-mode-icn:not(.active) { color: rgba(162, 245, 238, 0.3); }
+.cmd-mode-icn:not(.active) { color: rgba(203, 220, 245, 0.3); }
 .cmd-hide-icn { width: 28px; }
 
 .cmd-toggle-row { position: relative; z-index: 5; }

@@ -912,7 +912,7 @@ function resetComponentGroup(id: string) {
 const earthTheme = ref<EarthTheme | null>(null)
 const earthThemeSaved = ref(false)
 const EARTH_THEME_PRESETS: Array<[string, string, string]> = [
-  ['Miya OS', '#78cfd1', '#a2f5ee'],
+  ['Miya OS', '#719de6', '#cbdcf5'],
   ['鎏金', '#c9ac67', '#e8d5a3'],
   ['月白', '#9fb4d8', '#d3e0f5'],
   ['青碧', '#3fd0c9', '#a8f0ec'],
@@ -1802,7 +1802,7 @@ function getRouteModel(key: string): string {
               type="color"
               :value="live2dCfg.bgColor"
               class="cp-input"
-              style="width:48px;height:36px;border-radius:6px;border:1px solid rgba(0, 173, 181, 0.2)"
+              style="width:48px;height:36px;border-radius:6px;border:1px solid rgba(113, 157, 230, 0.2)"
               @input="setLive2dBg($event)"
             >
             <span style="font-size:0.75rem;color:var(--miya-text-dim)">{{ live2dCfg.bgColor }}</span>
@@ -1894,15 +1894,15 @@ function getRouteModel(key: string): string {
 .config-sidebar {
   width: 140px; flex-shrink: 0;
   background: rgba(0, 0, 0, 0.55);
-  border-right: 1px solid rgba(0, 173, 181, 0.08);
+  border-right: 1px solid rgba(113, 157, 230, 0.08);
   box-shadow:
     4px 0 12px rgba(0, 60, 70, 0.4),
     -1px 0 0 rgba(0, 200, 210, 0.08);
   display: flex; flex-direction: column; padding: 0.8rem 0;
 }
-.sidebar-header { display: flex; align-items: center; gap: 0.5rem; padding: 0 0.8rem 0.6rem; border-bottom: 1px solid rgba(0, 173, 181, 0.08); }
+.sidebar-header { display: flex; align-items: center; gap: 0.5rem; padding: 0 0.8rem 0.6rem; border-bottom: 1px solid rgba(113, 157, 230, 0.08); }
 .sidebar-title { font-family: 'Noto Serif SC', serif; font-size: 0.9rem; color: #ffffff; font-weight: 700; letter-spacing: 0.1em; }
-.sidebar-version { margin-top: auto; padding: 0.6rem 0.8rem 0; font-size: 0.6rem; color: rgba(200, 200, 200, 0.5); border-top: 1px solid rgba(0, 173, 181, 0.06); }
+.sidebar-version { margin-top: auto; padding: 0.6rem 0.8rem 0; font-size: 0.6rem; color: rgba(200, 200, 200, 0.5); border-top: 1px solid rgba(113, 157, 230, 0.06); }
 
 .sidebar-nav { display: flex; flex-direction: column; padding: 0.4rem; gap: 1px; }
 .tab-btn {
@@ -1912,13 +1912,13 @@ function getRouteModel(key: string): string {
   font-size: 0.78rem; transition: all 0.35s cubic-bezier(0.22, 1, 0.36, 1); text-align: left;
 }
 .tab-btn:hover {
-  background: rgba(0, 173, 181, 0.15);
+  background: rgba(113, 157, 230, 0.15);
   color: rgba(255, 255, 255, 0.9);
   transform: skewX(-6deg);
   box-shadow: 2px 2px 8px rgba(0, 60, 70, 0.3);
 }
 .tab-btn.active {
-  background: rgba(0, 173, 181, 0.18);
+  background: rgba(113, 157, 230, 0.18);
   color: #ffffff;
   font-weight: 700;
   box-shadow: 2px 2px 8px rgba(0, 60, 70, 0.35), -1px -1px 4px rgba(0, 200, 210, 0.1);
@@ -1931,7 +1931,7 @@ function getRouteModel(key: string): string {
 .config-page h2 {
   font-family: 'Noto Serif SC', serif; font-size: 1.3rem; font-weight: 700;
   color: #ffffff; margin: 0 0 1.2rem; letter-spacing: 0.08em;
-  text-shadow: 0 0 12px rgba(0, 255, 245, 0.15);
+  text-shadow: 0 0 12px rgba(203, 220, 245, 0.15);
 }
 
 /* ═══ 配置章节 — PGR 卡片风格 ═══ */
@@ -1939,7 +1939,7 @@ function getRouteModel(key: string): string {
   margin-bottom: 1.4rem;
   padding: 0.9rem 1rem;
   background: rgba(0, 0, 0, 0.45);
-  border: 1px solid rgba(0, 173, 181, 0.06);
+  border: 1px solid rgba(113, 157, 230, 0.06);
   box-shadow:
     3px 3px 10px rgba(0, 60, 70, 0.35),
     -2px -2px 8px rgba(0, 200, 210, 0.08);
@@ -1947,13 +1947,13 @@ function getRouteModel(key: string): string {
 }
 .config-section:hover {
   background: rgba(0, 0, 0, 0.55);
-  border-color: rgba(0, 255, 245, 0.12);
+  border-color: rgba(203, 220, 245, 0.12);
   box-shadow:
     4px 4px 14px rgba(0, 60, 70, 0.45),
     -2px -2px 10px rgba(0, 200, 210, 0.12);
 }
 .config-section h3 {
-  font-size: 0.75rem; font-weight: 700; color: rgba(0, 255, 245, 0.55);
+  font-size: 0.75rem; font-weight: 700; color: rgba(203, 220, 245, 0.55);
   margin: 0 0 0.6rem; letter-spacing: 0.1em; text-transform: uppercase;
 }
 .hint { font-size: 0.68rem; color: rgba(200, 200, 200, 0.4); margin-bottom: 0.6rem; }
@@ -1962,17 +1962,17 @@ function getRouteModel(key: string): string {
 .config-item label { display: block; font-size: 0.75rem; color: rgba(228, 236, 240, 0.7); margin-bottom: 0.25rem; }
 .slider-row { display: flex; align-items: center; gap: 0.6rem; }
 .slider-row :first-child { flex: 1; }
-.slider-val { font-size: 0.7rem; color: rgba(0, 255, 245, 0.45); min-width: 2.5rem; text-align: right; font-family: 'JetBrains Mono', monospace; }
+.slider-val { font-size: 0.7rem; color: rgba(203, 220, 245, 0.45); min-width: 2.5rem; text-align: right; font-family: 'JetBrains Mono', monospace; }
 
-.input-sm { width: 100%; max-width: 280px; background: rgba(0, 0, 0, 0.5) !important; border: 1px solid rgba(0, 173, 181, 0.15) !important; color: rgba(228, 236, 240, 0.9) !important; padding: 0.3rem 0.5rem !important; font-size: 0.75rem; }
+.input-sm { width: 100%; max-width: 280px; background: rgba(0, 0, 0, 0.5) !important; border: 1px solid rgba(113, 157, 230, 0.15) !important; color: rgba(228, 236, 240, 0.9) !important; padding: 0.3rem 0.5rem !important; font-size: 0.75rem; }
 
 .back-btn {
   display: flex; align-items: center; justify-content: center;
   width: 24px; height: 24px;
-  border: 1px solid rgba(0, 173, 181, 0.15); background: rgba(0, 173, 181, 0.06);
-  color: rgba(0, 173, 181, 0.6); cursor: pointer; transition: all 0.3s ease;
+  border: 1px solid rgba(113, 157, 230, 0.15); background: rgba(113, 157, 230, 0.06);
+  color: rgba(113, 157, 230, 0.6); cursor: pointer; transition: all 0.3s ease;
 }
-.back-btn:hover { background: rgba(0, 173, 181, 0.18); border-color: rgba(0, 255, 245, 0.35); color: rgba(0, 255, 245, 0.9); transform: skewX(-6deg); }
+.back-btn:hover { background: rgba(113, 157, 230, 0.18); border-color: rgba(203, 220, 245, 0.35); color: rgba(203, 220, 245, 0.9); transform: skewX(-6deg); }
 
 /* 背景 */
 .bg-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.3rem; }
@@ -1985,8 +1985,8 @@ function getRouteModel(key: string): string {
   transition: all 0.3s ease;
 }
 .bg-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.bg-thumb:hover { border-color: rgba(0, 255, 245, 0.25); transform: scale(1.04); }
-.bg-thumb.active { border-color: rgba(0, 255, 245, 0.5); box-shadow: 0 0 10px rgba(0, 255, 245, 0.15); }
+.bg-thumb:hover { border-color: rgba(203, 220, 245, 0.25); transform: scale(1.04); }
+.bg-thumb.active { border-color: rgba(203, 220, 245, 0.5); box-shadow: 0 0 10px rgba(203, 220, 245, 0.15); }
 .bg-default { font-size: 0.6rem; color: rgba(200, 200, 200, 0.4); }
 .bg-actions { margin-top: 0.4rem; }
 .bg-actions { display: flex; align-items: center; gap: var(--miya-space-3); }
@@ -2012,29 +2012,29 @@ function getRouteModel(key: string): string {
 .gallery-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .gallery-toggle-row .hint { margin: 0.2rem 0 0; }
 .miya-gallery-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.45rem; margin: 0.7rem 0; }
-.miya-gallery-thumb { position: relative; aspect-ratio: 2 / 3; overflow: hidden; border: 1px solid rgba(0, 173, 181, 0.16); background: rgba(0,0,0,0.5); }
+.miya-gallery-thumb { position: relative; aspect-ratio: 2 / 3; overflow: hidden; border: 1px solid rgba(113, 157, 230, 0.16); background: rgba(0,0,0,0.5); }
 .miya-gallery-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.miya-gallery-thumb.selected { border-color: rgba(0,255,245,0.62); box-shadow: 0 0 12px rgba(0,255,245,0.16); }
+.miya-gallery-thumb.selected { border-color: rgba(203, 220, 245,0.62); box-shadow: 0 0 12px rgba(203, 220, 245,0.16); }
 .miya-gallery-thumb button { position: absolute; top: 4px; right: 4px; display: grid; width: 22px; height: 22px; padding: 0; place-items: center; border: 1px solid rgba(255,255,255,0.22); background: rgba(0,0,0,0.72); color: rgba(255,255,255,0.8); cursor: pointer; }
 .miya-gallery-thumb button:hover { border-color: rgba(255,100,100,0.7); color: #ff8f8f; }
 .miya-gallery-thumb span { position: absolute; left: 5px; bottom: 4px; color: rgba(255,255,255,0.65); font-family: 'JetBrains Mono', monospace; font-size: 0.56rem; text-shadow: 0 1px 4px #000; }
-.miya-gallery-empty { margin: 0.65rem 0; padding: 1rem; border: 1px dashed rgba(0,173,181,0.14); color: rgba(200,200,200,0.42); font-size: 0.68rem; text-align: center; }
-.gallery-message { margin-left: 0.7rem; color: rgba(0,255,245,0.55); font-size: 0.65rem; }
-.miya-gallery-editor { margin-top: 0.75rem; padding: 0.75rem; border-left: 2px solid rgba(0,255,245,0.4); background: rgba(0,173,181,0.045); }
-.miya-gallery-editor textarea { width: 100%; resize: vertical; border: 1px solid rgba(0,173,181,0.15); background: rgba(0,0,0,0.5); color: rgba(228,236,240,0.9); padding: 0.45rem 0.55rem; font: inherit; line-height: 1.55; }
+.miya-gallery-empty { margin: 0.65rem 0; padding: 1rem; border: 1px dashed rgba(113, 157, 230,0.14); color: rgba(200,200,200,0.42); font-size: 0.68rem; text-align: center; }
+.gallery-message { margin-left: 0.7rem; color: rgba(203, 220, 245,0.55); font-size: 0.65rem; }
+.miya-gallery-editor { margin-top: 0.75rem; padding: 0.75rem; border-left: 2px solid rgba(203, 220, 245,0.4); background: rgba(113, 157, 230,0.045); }
+.miya-gallery-editor textarea { width: 100%; resize: vertical; border: 1px solid rgba(113, 157, 230,0.15); background: rgba(0,0,0,0.5); color: rgba(228,236,240,0.9); padding: 0.45rem 0.55rem; font: inherit; line-height: 1.55; }
 .home-briefing-config h3 small { margin-left: 0.45rem; color: rgba(200,200,200,0.38); font-size: 0.58rem; font-weight: 400; letter-spacing: 0.08em; }
 .briefing-greeting-input { max-width: 520px; }
 .home-briefing-list { display: grid; gap: 0.5rem; margin: 0.75rem 0; }
-.home-briefing-editor { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; align-items: stretch; gap: 0.6rem; padding: 0.5rem; border: 1px solid rgba(0,173,181,0.13); background: rgba(0,0,0,0.26); }
-.home-briefing-preview { position: relative; min-height: 64px; overflow: hidden; display: grid; place-items: center; color: rgba(0,255,245,0.48); background: repeating-linear-gradient(135deg, rgba(0,173,181,0.08) 0 1px, transparent 1px 12px); }
+.home-briefing-editor { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; align-items: stretch; gap: 0.6rem; padding: 0.5rem; border: 1px solid rgba(113, 157, 230,0.13); background: rgba(0,0,0,0.26); }
+.home-briefing-preview { position: relative; min-height: 64px; overflow: hidden; display: grid; place-items: center; color: rgba(203, 220, 245,0.48); background: repeating-linear-gradient(135deg, rgba(113, 157, 230,0.08) 0 1px, transparent 1px 12px); }
 .home-briefing-preview img { width: 100%; height: 100%; object-fit: cover; }
 .home-briefing-preview > span { font-size: 1.7rem; }
 .home-briefing-preview small { position: absolute; right: 4px; bottom: 3px; padding: 1px 4px; background: rgba(0,0,0,0.66); color: rgba(255,255,255,0.62); font-size: 0.5rem; }
 .home-briefing-fields { min-width: 0; display: grid; align-content: center; gap: 0.35rem; }
 .home-briefing-fields :deep(input) { width: 100%; }
 .home-briefing-actions { display: flex; align-items: center; gap: 0.25rem; }
-.home-briefing-actions button { width: 27px; height: 27px; padding: 0; border: 1px solid rgba(0,173,181,0.18); background: rgba(0,0,0,0.42); color: rgba(220,235,238,0.68); cursor: pointer; }
-.home-briefing-actions button:hover:not(:disabled) { border-color: rgba(0,255,245,0.45); color: rgba(0,255,245,0.9); }
+.home-briefing-actions button { width: 27px; height: 27px; padding: 0; border: 1px solid rgba(113, 157, 230,0.18); background: rgba(0,0,0,0.42); color: rgba(220,235,238,0.68); cursor: pointer; }
+.home-briefing-actions button:hover:not(:disabled) { border-color: rgba(203, 220, 245,0.45); color: rgba(203, 220, 245,0.9); }
 .home-briefing-actions button.danger:hover { border-color: rgba(255,100,100,0.55); color: #ff8f8f; }
 .home-briefing-actions button:disabled { opacity: 0.22; cursor: not-allowed; }
 @media (max-width: 980px) { .miya-gallery-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
@@ -2042,12 +2042,12 @@ function getRouteModel(key: string): string {
 
 .action-btn {
   padding: 0.25rem 0.7rem; font-size: 0.68rem;
-  border: 1px solid rgba(0, 173, 181, 0.15); background: rgba(0, 173, 181, 0.04);
-  color: rgba(0, 173, 181, 0.45); cursor: pointer; transition: all 0.3s ease;
+  border: 1px solid rgba(113, 157, 230, 0.15); background: rgba(113, 157, 230, 0.04);
+  color: rgba(113, 157, 230, 0.45); cursor: pointer; transition: all 0.3s ease;
 }
 .action-btn:hover {
-  border-color: rgba(0, 255, 245, 0.3); background: rgba(0, 173, 181, 0.1);
-  color: rgba(0, 255, 245, 0.75); transform: skewX(-4deg);
+  border-color: rgba(203, 220, 245, 0.3); background: rgba(113, 157, 230, 0.1);
+  color: rgba(203, 220, 245, 0.75); transform: skewX(-4deg);
 }
 .ml-a { margin-left: auto; }
 
@@ -2055,21 +2055,21 @@ function getRouteModel(key: string): string {
 .color-modes { display: flex; gap: 0.3rem; flex-wrap: wrap; }
 .color-btn {
   display: flex; align-items: center; gap: 0.25rem; padding: 0.25rem 0.6rem;
-  cursor: pointer; border: 1px solid rgba(0, 173, 181, 0.08);
+  cursor: pointer; border: 1px solid rgba(113, 157, 230, 0.08);
   background: rgba(0, 0, 0, 0.35); color: rgba(200, 200, 200, 0.5);
   font-size: 0.7rem; transition: all 0.3s ease;
 }
 .color-btn:hover {
-  border-color: rgba(0, 255, 245, 0.2);
-  background: rgba(0, 173, 181, 0.08);
+  border-color: rgba(203, 220, 245, 0.2);
+  background: rgba(113, 157, 230, 0.08);
   color: rgba(255, 255, 255, 0.8);
   transform: skewX(-4deg);
 }
 .color-btn.active {
-  border-color: rgba(0, 255, 245, 0.4);
-  background: rgba(0, 173, 181, 0.12);
+  border-color: rgba(203, 220, 245, 0.4);
+  background: rgba(113, 157, 230, 0.12);
   color: #ffffff;
-  box-shadow: 0 0 8px rgba(0, 255, 245, 0.1);
+  box-shadow: 0 0 8px rgba(203, 220, 245, 0.1);
 }
 .color-dots { display: flex; gap: 1px; }
 
@@ -2088,8 +2088,8 @@ function getRouteModel(key: string): string {
   transition: all 0.2s;
   background: rgba(0, 0, 0, 0.35);
 }
-.earth-theme-wall:hover { border-color: rgba(0, 255, 245, 0.25); }
-.earth-theme-wall.active { border-color: rgba(0, 255, 245, 0.55); box-shadow: 0 0 10px rgba(0, 255, 245, 0.15); }
+.earth-theme-wall:hover { border-color: rgba(203, 220, 245, 0.25); }
+.earth-theme-wall.active { border-color: rgba(203, 220, 245, 0.55); box-shadow: 0 0 10px rgba(203, 220, 245, 0.15); }
 .earth-theme-wall-img { display: block; width: 100%; height: 100%; background-size: cover; background-position: center; }
 .earth-theme-wall-none { display: grid; place-items: center; width: 100%; height: 100%; font-size: 0.66rem; color: rgba(200, 200, 200, 0.45); }
 .dot { width: 6px; height: 6px; border-radius: 50%; }
@@ -2098,32 +2098,32 @@ function getRouteModel(key: string): string {
 .model-item {
   display: flex; justify-content: space-between; align-items: center;
   padding: 0.45rem 0.4rem;
-  border-bottom: 1px solid rgba(0, 173, 181, 0.04);
+  border-bottom: 1px solid rgba(113, 157, 230, 0.04);
   font-size: 0.75rem;
   cursor: default;
   transition: all 0.3s ease;
 }
 .model-item:hover {
-  background: rgba(0, 173, 181, 0.08);
+  background: rgba(113, 157, 230, 0.08);
 }
 .model-name { color: rgba(200, 200, 200, 0.6); }
 .model-val { color: rgba(228, 236, 240, 0.85); font-size: 0.7rem; font-family: 'JetBrains Mono', monospace; }
-.status-on { color: rgba(0, 255, 245, 0.65); }
+.status-on { color: rgba(203, 220, 245, 0.65); }
 
 .offline-hint {
   padding: 1.5rem; text-align: center;
   color: rgba(200, 200, 200, 0.35); font-size: 0.8rem;
   background: rgba(0, 0, 0, 0.4);
-  border: 1px dashed rgba(0, 173, 181, 0.08);
+  border: 1px dashed rgba(113, 157, 230, 0.08);
 }
 
 /* 声音 */
 .toggle-row {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0.4rem 0; border-bottom: 1px solid rgba(0, 173, 181, 0.04);
+  padding: 0.4rem 0; border-bottom: 1px solid rgba(113, 157, 230, 0.04);
   cursor: pointer;
 }
-.toggle-row:hover { background: rgba(0, 173, 181, 0.04); }
+.toggle-row:hover { background: rgba(113, 157, 230, 0.04); }
 .file-btn-audio { font-size: 0.68rem; }
 
 /* 调色 */
@@ -2131,25 +2131,25 @@ function getRouteModel(key: string): string {
 .color-picker-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; margin-top: 0.4rem; }
 .color-picker-item {
   padding: 0.4rem; background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(0, 173, 181, 0.05);
+  border: 1px solid rgba(113, 157, 230, 0.05);
   transition: all 0.3s ease;
 }
-.color-picker-item:hover { border-color: rgba(0, 255, 245, 0.15); background: rgba(0, 0, 0, 0.45); }
+.color-picker-item:hover { border-color: rgba(203, 220, 245, 0.15); background: rgba(0, 0, 0, 0.45); }
 .cp-label { display: block; font-size: 0.65rem; color: rgba(200, 200, 200, 0.5); margin-bottom: 0.3rem; }
 .cp-row { display: flex; align-items: center; gap: 0.4rem; }
-.cp-input { width: 28px; height: 22px; border: 1px solid rgba(0, 173, 181, 0.15); border-radius: 0.2rem; background: transparent; cursor: pointer; padding: 1px; }
-.cp-val { font-size: 0.6rem; color: rgba(0, 255, 245, 0.4); font-family: 'JetBrains Mono', monospace; }
+.cp-input { width: 28px; height: 22px; border: 1px solid rgba(113, 157, 230, 0.15); border-radius: 0.2rem; background: transparent; cursor: pointer; padding: 1px; }
+.cp-val { font-size: 0.6rem; color: rgba(203, 220, 245, 0.4); font-family: 'JetBrains Mono', monospace; }
 
-.hud-extras { margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px solid rgba(0, 173, 181, 0.06); display: flex; flex-direction: column; gap: 0.5rem; }
+.hud-extras { margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px solid rgba(113, 157, 230, 0.06); display: flex; flex-direction: column; gap: 0.5rem; }
 .hud-extra-row { display: flex; align-items: center; gap: 0.6rem; }
 .he-label { font-size: 0.68rem; color: rgba(200, 200, 200, 0.5); min-width: 56px; }
 .he-slider { flex: 1; }
-.he-val { font-size: 0.6rem; color: rgba(0, 255, 245, 0.4); font-family: 'JetBrains Mono', monospace; min-width: 32px; text-align: right; }
+.he-val { font-size: 0.6rem; color: rgba(203, 220, 245, 0.4); font-family: 'JetBrains Mono', monospace; min-width: 32px; text-align: right; }
 
 /* Live2D 配置 */
 .live2d-color-row { display: flex; align-items: center; gap: 0.6rem; }
 .live2d-package-list { display: flex; flex-direction: column; gap: 0.45rem; margin-top: 0.7rem; }
-.live2d-package-item { display: flex; align-items: center; gap: 0.5rem; padding: 0.55rem 0.65rem; border: 1px solid rgba(0,173,181,0.1); border-radius: 0.35rem; background: rgba(0,0,0,0.12); }
+.live2d-package-item { display: flex; align-items: center; gap: 0.5rem; padding: 0.55rem 0.65rem; border: 1px solid rgba(113, 157, 230,0.1); border-radius: 0.35rem; background: rgba(0,0,0,0.12); }
 .live2d-package-info { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 0.15rem; }
 .live2d-package-info small { overflow: hidden; color: var(--miya-text-dim); font-size: 0.65rem; text-overflow: ellipsis; white-space: nowrap; }
 .live2d-active-badge { color: var(--miya-accent); font-size: 0.68rem; }
@@ -2159,21 +2159,21 @@ function getRouteModel(key: string): string {
 .file-btn {
   display: flex; justify-content: space-between; align-items: center;
   padding: 0.35rem 0.5rem; cursor: pointer;
-  background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(0, 173, 181, 0.04);
+  background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(113, 157, 230, 0.04);
   color: rgba(200, 200, 200, 0.55); font-size: 0.7rem; transition: all 0.3s ease;
 }
-.file-btn:hover { background: rgba(0, 173, 181, 0.08); color: rgba(255, 255, 255, 0.8); }
-.file-btn.active { background: rgba(0, 173, 181, 0.12); border-color: rgba(0, 255, 245, 0.25); color: #ffffff; }
-.file-size { font-size: 0.6rem; color: rgba(0, 255, 245, 0.3); font-family: 'JetBrains Mono', monospace; }
+.file-btn:hover { background: rgba(113, 157, 230, 0.08); color: rgba(255, 255, 255, 0.8); }
+.file-btn.active { background: rgba(113, 157, 230, 0.12); border-color: rgba(203, 220, 245, 0.25); color: #ffffff; }
+.file-size { font-size: 0.6rem; color: rgba(203, 220, 245, 0.3); font-family: 'JetBrains Mono', monospace; }
 
-.editor-area { border: 1px solid rgba(0, 173, 181, 0.08); background: rgba(0, 0, 0, 0.4); }
+.editor-area { border: 1px solid rgba(113, 157, 230, 0.08); background: rgba(0, 0, 0, 0.4); }
 .editor-header {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 0.3rem 0.6rem; border-bottom: 1px solid rgba(0, 173, 181, 0.06);
+  padding: 0.3rem 0.6rem; border-bottom: 1px solid rgba(113, 157, 230, 0.06);
 }
-.editor-path { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; color: rgba(0, 255, 245, 0.4); }
+.editor-path { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; color: rgba(203, 220, 245, 0.4); }
 .editor-actions { display: flex; gap: 0.3rem; align-items: center; }
-.saved-msg { font-size: 0.6rem; color: rgba(0, 255, 245, 0.5); }
+.saved-msg { font-size: 0.6rem; color: rgba(203, 220, 245, 0.5); }
 .editor-text {
   width: 100%; background: rgba(0, 0, 0, 0.6); border: none; outline: none;
   color: rgba(228, 236, 240, 0.85); font-family: 'JetBrains Mono', monospace;
@@ -2182,23 +2182,23 @@ function getRouteModel(key: string): string {
 
 /* ═══ 配置面板 ═══ */
 .effect-tag {
-  font-size: 0.6rem; font-weight: 400; color: rgba(0, 255, 245, 0.4);
+  font-size: 0.6rem; font-weight: 400; color: rgba(203, 220, 245, 0.4);
   margin-left: 0.5rem; letter-spacing: normal; text-transform: none;
 }
 .secret-row {
   display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap;
-  padding: 0.45rem 0.4rem; border-bottom: 1px solid rgba(0, 173, 181, 0.04);
+  padding: 0.45rem 0.4rem; border-bottom: 1px solid rgba(113, 157, 230, 0.04);
   transition: background 0.3s ease;
 }
-.secret-row:hover { background: rgba(0, 173, 181, 0.06); }
+.secret-row:hover { background: rgba(113, 157, 230, 0.06); }
 .secret-label { display: flex; flex-direction: column; gap: 1px; min-width: 150px; flex: 1; }
 .secret-name { font-size: 0.75rem; color: rgba(228, 236, 240, 0.85); }
-.secret-key { font-size: 0.6rem; color: rgba(0, 255, 245, 0.35); font-family: 'JetBrains Mono', monospace; }
+.secret-key { font-size: 0.6rem; color: rgba(203, 220, 245, 0.35); font-family: 'JetBrains Mono', monospace; }
 .secret-masked {
   font-size: 0.68rem; color: rgba(200, 200, 200, 0.35);
   font-family: 'JetBrains Mono', monospace; min-width: 110px;
 }
-.secret-masked.configured { color: rgba(0, 255, 245, 0.55); }
+.secret-masked.configured { color: rgba(203, 220, 245, 0.55); }
 .secret-input { display: flex; align-items: center; gap: 0.4rem; }
 .secret-field { max-width: 220px; }
 
@@ -2207,22 +2207,22 @@ function getRouteModel(key: string): string {
 @media (max-width: 800px) { .persona-grid { grid-template-columns: repeat(2, 1fr); } }
 .persona-card {
   padding: 0.6rem 0.7rem; cursor: pointer; position: relative;
-  background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(0, 173, 181, 0.08);
+  background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(113, 157, 230, 0.08);
   transition: all 0.3s ease; display: flex; flex-direction: column; gap: 0.3rem;
 }
 .persona-card:hover {
-  border-color: rgba(0, 255, 245, 0.25); background: rgba(0, 173, 181, 0.06);
+  border-color: rgba(203, 220, 245, 0.25); background: rgba(113, 157, 230, 0.06);
   transform: translateY(-2px);
 }
 .persona-card.active {
-  border-color: rgba(0, 255, 245, 0.5); background: rgba(0, 173, 181, 0.1);
-  box-shadow: 0 0 12px rgba(0, 255, 245, 0.1);
+  border-color: rgba(203, 220, 245, 0.5); background: rgba(113, 157, 230, 0.1);
+  box-shadow: 0 0 12px rgba(203, 220, 245, 0.1);
 }
 .persona-card-head { display: flex; align-items: center; justify-content: space-between; gap: 0.4rem; }
 .persona-name { font-size: 0.78rem; color: rgba(228, 236, 240, 0.9); font-weight: 700; }
 .persona-current {
   font-size: 0.58rem; padding: 0.05rem 0.4rem; color: #001f24;
-  background: rgba(0, 255, 245, 0.7); border-radius: 2px; flex-shrink: 0;
+  background: rgba(203, 220, 245, 0.7); border-radius: 2px; flex-shrink: 0;
 }
 .persona-desc {
   font-size: 0.65rem; color: rgba(200, 200, 200, 0.45);
@@ -2231,30 +2231,30 @@ function getRouteModel(key: string): string {
 }
 .persona-card-actions { display: flex; justify-content: flex-end; }
 .persona-editor {
-  margin-top: 0.8rem; padding: 0.7rem; border-left: 2px solid rgba(0, 255, 245, 0.4);
-  background: rgba(0, 173, 181, 0.045);
+  margin-top: 0.8rem; padding: 0.7rem; border-left: 2px solid rgba(203, 220, 245, 0.4);
+  background: rgba(113, 157, 230, 0.045);
 }
 
 .admin-person {
-  padding: 0.5rem 0.4rem; border-bottom: 1px solid rgba(0, 173, 181, 0.04);
+  padding: 0.5rem 0.4rem; border-bottom: 1px solid rgba(113, 157, 230, 0.04);
 }
 .admin-person-name { font-size: 0.75rem; color: rgba(228, 236, 240, 0.85); margin-bottom: 0.35rem; }
 .admin-id-row { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.35rem; }
 .admin-platform {
-  font-size: 0.68rem; color: rgba(0, 255, 245, 0.45); min-width: 90px;
+  font-size: 0.68rem; color: rgba(203, 220, 245, 0.45); min-width: 90px;
   font-family: 'JetBrains Mono', monospace;
 }
 
 /* ═══ 模型池 ═══ */
 .model-row {
   display: flex; align-items: center; justify-content: space-between; gap: 0.8rem;
-  padding: 0.5rem 0.4rem; border-bottom: 1px solid rgba(0, 173, 181, 0.04);
+  padding: 0.5rem 0.4rem; border-bottom: 1px solid rgba(113, 157, 230, 0.04);
   transition: background 0.3s ease; flex-wrap: wrap;
 }
-.model-row:hover { background: rgba(0, 173, 181, 0.06); }
+.model-row:hover { background: rgba(113, 157, 230, 0.06); }
 .model-info { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 240px; }
 .model-title { font-size: 0.78rem; color: rgba(228, 236, 240, 0.9); display: flex; align-items: center; gap: 0.4rem; }
-.model-meta { font-size: 0.62rem; color: rgba(0, 255, 245, 0.35); font-family: 'JetBrains Mono', monospace; }
+.model-meta { font-size: 0.62rem; color: rgba(203, 220, 245, 0.35); font-family: 'JetBrains Mono', monospace; }
 .model-off {
   font-size: 0.56rem; padding: 0.05rem 0.35rem; border-radius: 2px;
   color: rgba(255, 160, 120, 0.8); border: 1px solid rgba(255, 160, 120, 0.35);
@@ -2267,17 +2267,17 @@ function getRouteModel(key: string): string {
 
 .route-row {
   display: flex; align-items: center; gap: 0.8rem;
-  padding: 0.3rem 0.4rem; border-bottom: 1px solid rgba(0, 173, 181, 0.04);
+  padding: 0.3rem 0.4rem; border-bottom: 1px solid rgba(113, 157, 230, 0.04);
 }
 .route-task { font-size: 0.72rem; color: rgba(200, 200, 200, 0.6); min-width: 64px; }
 .route-selects { display: flex; gap: 0.4rem; flex: 1; flex-wrap: wrap; }
 .route-select {
   flex: 1; min-width: 120px; padding: 0.25rem 0.4rem;
-  background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(0, 173, 181, 0.15);
+  background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(113, 157, 230, 0.15);
   color: rgba(228, 236, 240, 0.9); font-size: 0.7rem;
   font-family: 'JetBrains Mono', monospace; outline: none;
 }
-.route-select:focus { border-color: rgba(0, 255, 245, 0.4); }
+.route-select:focus { border-color: rgba(203, 220, 245, 0.4); }
 
 /* Miya OS: 高密度设置页采用稳定的双栏工作台规范。 */
 .config-layout {
@@ -2311,13 +2311,13 @@ function getRouteModel(key: string): string {
 }
 .tab-btn:hover {
   color: var(--miya-text-strong);
-  background: rgba(120, 207, 209, 0.07);
+  background: rgba(113, 157, 230, 0.07);
   transform: none;
   box-shadow: none;
 }
 .tab-btn.active {
   color: var(--miya-accent-bright);
-  background: linear-gradient(90deg, rgba(120, 207, 209, 0.14), rgba(120, 207, 209, 0.04));
+  background: linear-gradient(90deg, rgba(113, 157, 230, 0.14), rgba(113, 157, 230, 0.04));
   box-shadow: inset 2px 0 var(--miya-accent-soft);
 }
 
@@ -2354,14 +2354,14 @@ function getRouteModel(key: string): string {
 .action-btn,
 .back-btn {
   color: var(--miya-accent-soft);
-  background: rgba(120, 207, 209, 0.05);
+  background: rgba(113, 157, 230, 0.05);
   border-color: var(--miya-line);
   border-radius: var(--miya-radius-sm);
 }
 .action-btn:hover,
 .back-btn:hover {
   color: var(--miya-accent-bright);
-  background: rgba(120, 207, 209, 0.1);
+  background: rgba(113, 157, 230, 0.1);
   border-color: var(--miya-line-strong);
   transform: none;
 }

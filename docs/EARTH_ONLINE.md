@@ -203,7 +203,7 @@
   background 壁纸/background_opacity 透明度/glass 磨砂玻璃开关），全部鎏金色 CSS 变量化
   （`var(--pv-gold)` + `color-mix` 相对色，212 处），顶栏「◐ 外观设置」弹窗：
   6 套预置色板（鎏金/月白/青碧/绯樱/星紫/琥珀）+ 自定义取色器 + 壁纸选择（premium-assets/backgrounds）
-  + 透明度滑块 + 磨砂玻璃开关，默认跟随 Miya OS 青碧配色；API `GET/PUT /api/earth/theme`
+  + 透明度滑块 + 磨砂玻璃开关，默认跟随 Miya OS 青花瓷蓝白配色；API `GET/PUT /api/earth/theme`
 - **壁纸与玻璃**: 全局壁纸背景层（可调透明度），各板块背景半透明化透出壁纸，
   主要面板卡片启用 backdrop-filter 磨砂玻璃（开关控制）
 - **卡片缩小**: 背包照片墙 6 列（1400px 5 列 / 1100px 4 列 / 850px 3 列 / 600px 2 列），
@@ -214,7 +214,7 @@
 - **主题配置入口移到「弥娅调谐」**: 调色板块新增「◎ 地球online 主题」区块
   （预置色板/主色·亮色·深色取色器/壁纸选择/透明度/磨砂玻璃开关），
   「保存主题」与「恢复默认值」按钮；前台顶栏 ◐ 外观弹窗保留快捷入口；
-  新增 `POST /api/earth/theme/reset` 恢复默认 Miya OS 青碧配色
+  新增 `POST /api/earth/theme/reset` 恢复默认 Miya OS 青花瓷蓝白配色
 - **剧情编辑**: 后台剧情卡片新增「✎ 编辑」，弹窗区分「记录/编辑剧情」；
   新增 `PUT /api/earth/story/{id}`（标题/内容/类型/关联/时间/图片均可改），
   编辑后写入动态流「编辑剧情」

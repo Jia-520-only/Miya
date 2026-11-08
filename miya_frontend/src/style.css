@@ -6,19 +6,19 @@
   color: var(--miya-text-body);
   background-color: var(--miya-bg-void);
 
-  --miya-accent: #00ADB5;
-  --miya-home: #00ADB5;
-  --miya-chat-ai: #00FFF5;
-  --miya-chat-user: #00ADB5;
-  --miya-chat-bg: #222831;
-  --miya-border: #00ADB5;
-  --miya-bg: #222831;
-  --miya-surface: rgba(57, 62, 70, 0.85);
+  --miya-accent: #719DE6;
+  --miya-home: #719DE6;
+  --miya-chat-ai: #CBDCF5;
+  --miya-chat-user: #719DE6;
+  --miya-chat-bg: #0D1830;
+  --miya-border: #719DE6;
+  --miya-bg: #0D1830;
+  --miya-surface: rgba(20, 39, 70, 0.88);
   --miya-primary: var(--miya-accent);
   --miya-glow: color-mix(in srgb, var(--miya-accent) 30%, transparent);
-  --miya-gold: rgba(0, 255, 245, 0.35);
-  --miya-text: #E4ECF0;
-  --miya-text-dim: rgba(228, 236, 240, 0.45);
+  --miya-gold: rgba(182, 208, 243, 0.42);
+  --miya-text: #ECF1F9;
+  --miya-text-dim: rgba(199, 211, 231, 0.55);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -72,7 +72,7 @@ select:focus-visible,
 
 ::selection {
   color: var(--miya-text-strong);
-  background: rgba(120, 207, 209, 0.28);
+  background: rgba(148, 184, 239, 0.3);
 }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -83,7 +83,7 @@ select:focus-visible,
   border-radius: var(--miya-radius-pill);
   background-clip: padding-box;
 }
-::-webkit-scrollbar-thumb:hover { background-color: rgba(120, 207, 209, 0.34); }
+::-webkit-scrollbar-thumb:hover { background-color: rgba(148, 184, 239, 0.38); }
 
 .box {
   background: var(--miya-surface-1);
@@ -97,7 +97,7 @@ select:focus-visible,
 blockquote {
   margin: 1em 0;
   padding: 0.25em 1em;
-  background-color: rgba(0, 173, 181, 0.1);
+  background-color: rgba(113, 157, 230, 0.12);
   border-left: 0.25em solid var(--miya-primary);
 }
 

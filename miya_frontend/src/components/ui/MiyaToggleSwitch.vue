@@ -58,18 +58,18 @@ function toggle() {
 }
 
 .miya-toggle.checked {
-  border-color: color-mix(in srgb, var(--miya-accent, #00adb5) 65%, transparent);
-  background: color-mix(in srgb, var(--miya-accent, #00adb5) 28%, rgba(0, 0, 0, 0.42));
+  border-color: color-mix(in srgb, var(--miya-accent, #719DE6) 65%, transparent);
+  background: color-mix(in srgb, var(--miya-accent, #719DE6) 28%, rgba(0, 0, 0, 0.42));
 }
 
 .miya-toggle.checked .miya-toggle-thumb {
   transform: translateX(16px);
-  background: var(--miya-accent, #00adb5);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--miya-accent, #00adb5) 55%, transparent);
+  background: var(--miya-accent, #719DE6);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--miya-accent, #719DE6) 55%, transparent);
 }
 
 .miya-toggle:focus-visible {
-  outline: 1px solid var(--miya-accent, #00adb5);
+  outline: 1px solid var(--miya-accent, #719DE6);
   outline-offset: 2px;
 }
 

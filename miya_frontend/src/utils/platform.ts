@@ -33,7 +33,7 @@ export const PLATFORM_COLORS: Record<string, string> = {
   misskey: '#86B300',
   satori: '#FF6B9D',
   mobile: '#FF6B35',
-  desktop: '#00ADB5',
+  desktop: '#719DE6',
   terminal: '#7C8B9E',
   wecom_ai_bot: '#07C160',
   qqofficial_webhook: '#12B7F5',

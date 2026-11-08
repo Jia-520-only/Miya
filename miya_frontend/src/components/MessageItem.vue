@@ -40,7 +40,7 @@ const soulBars = computed(() => {
   return emos.slice(0, 5).map(e => ({
     name: e.name,
     intensity: e.intensity,
-    color: ec[e.name] || '#00ADB5',
+    color: ec[e.name] || '#719DE6',
     width: Math.round((e.intensity / total) * 100),
   }))
 })
@@ -49,7 +49,7 @@ const emotionList = computed(() => {
   const ec = buildEmotionColorMap()
   const emos = props.soulData?.emotions
   if (emos?.length)
-    return emos.slice(0, 5).map(e => ({ name: e.name, pct: e.intensity, color: ec[e.name] || '#00ADB5' }))
+    return emos.slice(0, 5).map(e => ({ name: e.name, pct: e.intensity, color: ec[e.name] || '#719DE6' }))
   return []
 })
 
@@ -308,11 +308,11 @@ function toolBody(event: ToolEvent): string {
 }
 
 .msg-card {
-  --ai: var(--miya-comp-message-ai, #00ADB5);
-  --usr: var(--miya-comp-message-user, #00ADB5);
-  --bg: var(--miya-comp-message-bg, #222831);
-  --in: var(--miya-comp-message-input, #00ADB5);
-  --tx: var(--miya-comp-message-text, #E4ECF0);
+  --ai: var(--miya-comp-message-ai, #719DE6);
+  --usr: var(--miya-comp-message-user, #719DE6);
+  --bg: var(--miya-comp-message-bg, #0D1830);
+  --in: var(--miya-comp-message-input, #719DE6);
+  --tx: var(--miya-comp-message-text, #ECF1F9);
 
   position: relative;
   padding: .85rem 1.2rem .65rem 1rem;
@@ -342,23 +342,23 @@ function toolBody(event: ToolEvent): string {
 }
 
 .msg-card.generating {
-  border-color: color-mix(in srgb, var(--ai) 22%, rgba(0,255,245,0.08));
+  border-color: color-mix(in srgb, var(--ai) 22%, rgba(203, 220, 245,0.08));
   animation: card-glow 2.5s ease-in-out infinite;
 }
 
 .msg-card.user.generating {
-  border-color: color-mix(in srgb, var(--usr) 22%, rgba(0,255,245,0.08));
+  border-color: color-mix(in srgb, var(--usr) 22%, rgba(203, 220, 245,0.08));
   animation: card-glow-u 2.5s ease-in-out infinite;
 }
 
 @keyframes card-glow {
-  0%,100% { border-color: color-mix(in srgb, var(--ai) 12%, rgba(0,255,245,0.04)); }
-  50% { border-color: color-mix(in srgb, var(--ai) 35%, rgba(0,255,245,0.12)); }
+  0%,100% { border-color: color-mix(in srgb, var(--ai) 12%, rgba(203, 220, 245,0.04)); }
+  50% { border-color: color-mix(in srgb, var(--ai) 35%, rgba(203, 220, 245,0.12)); }
 }
 
 @keyframes card-glow-u {
-  0%,100% { border-color: color-mix(in srgb, var(--usr) 12%, rgba(0,255,245,0.04)); }
-  50% { border-color: color-mix(in srgb, var(--usr) 35%, rgba(0,255,245,0.12)); }
+  0%,100% { border-color: color-mix(in srgb, var(--usr) 12%, rgba(203, 220, 245,0.04)); }
+  50% { border-color: color-mix(in srgb, var(--usr) 35%, rgba(203, 220, 245,0.12)); }
 }
 
 /* ═══ PGR 扫光 ═══ */
@@ -401,8 +401,8 @@ function toolBody(event: ToolEvent): string {
 .card-corner.tl {
   top: 1px; left: 1px;
   width: 14px; height: 14px;
-  border-top: 2px solid color-mix(in srgb, var(--ai) 30%, rgba(0,255,245,0.25));
-  border-left: 2px solid color-mix(in srgb, var(--ai) 30%, rgba(0,255,245,0.25));
+  border-top: 2px solid color-mix(in srgb, var(--ai) 30%, rgba(203, 220, 245,0.25));
+  border-left: 2px solid color-mix(in srgb, var(--ai) 30%, rgba(203, 220, 245,0.25));
 }
 
 .card-corner.tr {
@@ -422,12 +422,12 @@ function toolBody(event: ToolEvent): string {
 .card-corner.br {
   bottom: 1px; right: 1px;
   width: 10px; height: 10px;
-  border-bottom: 1px solid color-mix(in srgb, var(--ai) 25%, rgba(0,255,245,0.15));
-  border-right: 1px solid color-mix(in srgb, var(--ai) 25%, rgba(0,255,245,0.15));
+  border-bottom: 1px solid color-mix(in srgb, var(--ai) 25%, rgba(203, 220, 245,0.15));
+  border-right: 1px solid color-mix(in srgb, var(--ai) 25%, rgba(203, 220, 245,0.15));
 }
 
 .msg-card.user .card-corner.tl {
-  border-color: color-mix(in srgb, var(--usr) 25%, rgba(0,255,245,0.2)) color-mix(in srgb, var(--usr) 25%, rgba(0,255,245,0.2)) transparent transparent;
+  border-color: color-mix(in srgb, var(--usr) 25%, rgba(203, 220, 245,0.2)) color-mix(in srgb, var(--usr) 25%, rgba(203, 220, 245,0.2)) transparent transparent;
 }
 
 .msg-card.user .card-corner.tr {
@@ -439,17 +439,17 @@ function toolBody(event: ToolEvent): string {
 }
 
 .msg-card.user .card-corner.br {
-  border-color: transparent transparent color-mix(in srgb, var(--usr) 20%, rgba(0,255,245,0.12)) color-mix(in srgb, var(--usr) 20%, rgba(0,255,245,0.12));
+  border-color: transparent transparent color-mix(in srgb, var(--usr) 20%, rgba(203, 220, 245,0.12)) color-mix(in srgb, var(--usr) 20%, rgba(203, 220, 245,0.12));
 }
 
 .msg-card:hover .card-corner.tl,
 .msg-card:hover .card-corner.br {
-  border-color: color-mix(in srgb, var(--ai) 55%, rgba(0,255,245,0.45)) color-mix(in srgb, var(--ai) 55%, rgba(0,255,245,0.45)) transparent transparent;
+  border-color: color-mix(in srgb, var(--ai) 55%, rgba(203, 220, 245,0.45)) color-mix(in srgb, var(--ai) 55%, rgba(203, 220, 245,0.45)) transparent transparent;
 }
 
 .msg-card.user:hover .card-corner.tl,
 .msg-card.user:hover .card-corner.br {
-  border-color: color-mix(in srgb, var(--usr) 55%, rgba(0,255,245,0.45));
+  border-color: color-mix(in srgb, var(--usr) 55%, rgba(203, 220, 245,0.45));
 }
 
 /* ═══ 顶栏 ═══ */
@@ -471,7 +471,7 @@ function toolBody(event: ToolEvent): string {
 }
 
 .bar-id {
-  color: color-mix(in srgb, var(--ai) 55%, rgba(0,255,245,0.35));
+  color: color-mix(in srgb, var(--ai) 55%, rgba(203, 220, 245,0.35));
   font-weight: 700;
   letter-spacing: .1em;
   border-right: 1px solid color-mix(in srgb, var(--ai) 10%, transparent);
@@ -479,7 +479,7 @@ function toolBody(event: ToolEvent): string {
 }
 
 .msg-card.user .bar-id {
-  color: color-mix(in srgb, var(--usr) 55%, rgba(0,255,245,0.35));
+  color: color-mix(in srgb, var(--usr) 55%, rgba(203, 220, 245,0.35));
   border-color: color-mix(in srgb, var(--usr) 10%, transparent);
 }
 
@@ -528,20 +528,20 @@ function toolBody(event: ToolEvent): string {
   align-items: center;
   gap: .3rem;
   margin-left: auto;
-  color: color-mix(in srgb, var(--ai) 35%, rgba(0,255,245,0.3));
+  color: color-mix(in srgb, var(--ai) 35%, rgba(203, 220, 245,0.3));
   font-size: .6rem;
 }
 
 .bar-pulse {
   width: 5px; height: 5px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--ai) 55%, rgba(0,255,245,0.5));
+  background: color-mix(in srgb, var(--ai) 55%, rgba(203, 220, 245,0.5));
   animation: dot-pulse 1.2s ease-in-out infinite;
 }
 
 @keyframes dot-pulse {
   0%,100% { opacity: .2; box-shadow: none; }
-  50% { opacity: 1; box-shadow: 0 0 8px color-mix(in srgb, var(--ai) 60%, rgba(0,255,245,0.6)); }
+  50% { opacity: 1; box-shadow: 0 0 8px color-mix(in srgb, var(--ai) 60%, rgba(203, 220, 245,0.6)); }
 }
 
 /* ═══ 扫描线 ═══ */
@@ -550,7 +550,7 @@ function toolBody(event: ToolEvent): string {
   left: 2%;
   width: 96%;
   height: 1px;
-  background: linear-gradient(90deg, transparent 5%, color-mix(in srgb, var(--ai) 18%, rgba(0,255,245,0.08)) 30%, color-mix(in srgb, var(--ai) 18%, rgba(0,255,245,0.08)) 70%, transparent 95%);
+  background: linear-gradient(90deg, transparent 5%, color-mix(in srgb, var(--ai) 18%, rgba(203, 220, 245,0.08)) 30%, color-mix(in srgb, var(--ai) 18%, rgba(203, 220, 245,0.08)) 70%, transparent 95%);
   top: 0;
   opacity: 1;
   pointer-events: none;
@@ -582,18 +582,18 @@ function toolBody(event: ToolEvent): string {
   user-select: none;
   font-family: 'JetBrains Mono', monospace;
   font-size: .65rem;
-  color: color-mix(in srgb, var(--ai) 30%, rgba(0,255,245,0.25));
+  color: color-mix(in srgb, var(--ai) 30%, rgba(203, 220, 245,0.25));
   transition: color .2s;
 }
 
 .reason-toggle:hover {
-  color: color-mix(in srgb, var(--ai) 65%, rgba(0,255,245,0.55));
+  color: color-mix(in srgb, var(--ai) 65%, rgba(203, 220, 245,0.55));
 }
 
 .reason-dot {
   width: 5px; height: 5px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--ai) 30%, rgba(0,255,245,0.25));
+  background: color-mix(in srgb, var(--ai) 30%, rgba(203, 220, 245,0.25));
 }
 
 .reason-dot.pulse {
@@ -628,7 +628,7 @@ function toolBody(event: ToolEvent): string {
 .card-body :deep(pre) {
   background: rgba(0,0,0,0.45);
   border: 1px solid color-mix(in srgb, var(--ai) 8%, transparent);
-  border-left: 2px solid color-mix(in srgb, var(--ai) 28%, rgba(0,255,245,0.2));
+  border-left: 2px solid color-mix(in srgb, var(--ai) 28%, rgba(203, 220, 245,0.2));
   padding: .6rem .8rem;
   overflow-x: auto;
   font-family: 'JetBrains Mono', monospace;
@@ -638,12 +638,12 @@ function toolBody(event: ToolEvent): string {
 
 .msg-card.user .card-body :deep(pre) {
   border-color: color-mix(in srgb, var(--usr) 8%, transparent);
-  border-left-color: color-mix(in srgb, var(--usr) 28%, rgba(0,255,245,0.2));
+  border-left-color: color-mix(in srgb, var(--usr) 28%, rgba(203, 220, 245,0.2));
 }
 
 .card-body :deep(code) {
   background: color-mix(in srgb, var(--ai) 4%, transparent);
-  color: color-mix(in srgb, var(--ai) 75%, rgba(0,255,245,0.7));
+  color: color-mix(in srgb, var(--ai) 75%, rgba(203, 220, 245,0.7));
   padding: .12em .35em;
   font-size: .85em;
 }
@@ -656,18 +656,18 @@ function toolBody(event: ToolEvent): string {
 
 .msg-card.user .card-body :deep(code) {
   background: color-mix(in srgb, var(--usr) 4%, transparent);
-  color: color-mix(in srgb, var(--usr) 75%, rgba(0,255,245,0.7));
+  color: color-mix(in srgb, var(--usr) 75%, rgba(203, 220, 245,0.7));
 }
 
 .card-body :deep(blockquote) {
-  border-left: 2px solid color-mix(in srgb, var(--ai) 25%, rgba(0,255,245,0.2));
-  background: color-mix(in srgb, var(--ai) 3%, rgba(0,255,245,0.02));
+  border-left: 2px solid color-mix(in srgb, var(--ai) 25%, rgba(203, 220, 245,0.2));
+  background: color-mix(in srgb, var(--ai) 3%, rgba(203, 220, 245,0.02));
   padding: .35rem .7rem;
   margin: .4rem 0;
 }
 
 .msg-card.user .card-body :deep(blockquote) {
-  border-left-color: color-mix(in srgb, var(--usr) 25%, rgba(0,255,245,0.2));
+  border-left-color: color-mix(in srgb, var(--usr) 25%, rgba(203, 220, 245,0.2));
 }
 
 /* ═══ 等待状态 ═══ */
@@ -675,14 +675,14 @@ function toolBody(event: ToolEvent): string {
   display: flex;
   align-items: center;
   gap: .4rem;
-  color: color-mix(in srgb, var(--ai) 35%, rgba(0,255,245,0.3));
+  color: color-mix(in srgb, var(--ai) 35%, rgba(203, 220, 245,0.3));
   font-family: 'JetBrains Mono', monospace;
   font-size: .75rem;
 }
 
 .wait-cursor {
   animation: blinker .7s step-end infinite;
-  color: color-mix(in srgb, var(--ai) 55%, rgba(0,255,245,0.5));
+  color: color-mix(in srgb, var(--ai) 55%, rgba(203, 220, 245,0.5));
 }
 
 @keyframes blinker {
@@ -700,7 +700,7 @@ function toolBody(event: ToolEvent): string {
 .tool-block {
   margin: .15rem 0;
   font-size: .7rem;
-  color: color-mix(in srgb, var(--ai) 30%, rgba(0,255,245,0.25));
+  color: color-mix(in srgb, var(--ai) 30%, rgba(203, 220, 245,0.25));
 }
 
 .tool-block summary {
@@ -709,7 +709,7 @@ function toolBody(event: ToolEvent): string {
 }
 
 .tool-block summary:hover {
-  color: color-mix(in srgb, var(--ai) 60%, rgba(0,255,245,0.5));
+  color: color-mix(in srgb, var(--ai) 60%, rgba(203, 220, 245,0.5));
 }
 
 .tool-block pre {
@@ -742,7 +742,7 @@ function toolBody(event: ToolEvent): string {
 .info-text {
   font-family: 'JetBrains Mono', monospace;
   font-size: .6rem;
-  color: color-mix(in srgb, var(--ai) 22%, rgba(0,255,245,0.2));
+  color: color-mix(in srgb, var(--ai) 22%, rgba(203, 220, 245,0.2));
   white-space: nowrap;
 }
 
@@ -776,7 +776,7 @@ function toolBody(event: ToolEvent): string {
   border: 1px solid color-mix(in srgb, var(--ai) 18%, transparent);
   border-radius: 3px;
   background: color-mix(in srgb, var(--ai) 8%, rgba(0,0,0,0.5));
-  color: color-mix(in srgb, var(--ai) 50%, rgba(0,255,245,0.45));
+  color: color-mix(in srgb, var(--ai) 50%, rgba(203, 220, 245,0.45));
   cursor: pointer;
   font-size: .55rem;
   line-height: 1.4;
@@ -787,17 +787,17 @@ function toolBody(event: ToolEvent): string {
 }
 
 .bar-expand-btn:hover {
-  border-color: color-mix(in srgb, var(--ai) 45%, rgba(0,255,245,0.4));
-  color: color-mix(in srgb, var(--ai) 80%, rgba(0,255,245,0.75));
+  border-color: color-mix(in srgb, var(--ai) 45%, rgba(203, 220, 245,0.4));
+  color: color-mix(in srgb, var(--ai) 80%, rgba(203, 220, 245,0.75));
   background: rgba(129,191,241,0.15);
   transform: skewX(-5deg);
 }
 
 /* ═══ 灵魂内联面板（始终展开） ═══ */
 .soul-detail {
-  --sp: var(--miya-comp-soul-primary, #00ADB5);
+  --sp: var(--miya-comp-soul-primary, #719DE6);
   --spo: var(--miya-comp-soul-positive, #ff6b9d);
-  --sth: var(--miya-comp-soul-thought, #00ADB5);
+  --sth: var(--miya-comp-soul-thought, #719DE6);
   --stk: var(--miya-comp-soul-think, #4ade80);
   position: relative;
   z-index: 2;

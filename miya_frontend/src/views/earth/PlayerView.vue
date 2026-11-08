@@ -747,15 +747,15 @@ function formatEarthMoney(amount: number): string {
   return `$ ${usd.toFixed(2)}`
 }
 
-// 前台主题 (默认跟随 Miya OS 青碧配色, 可在设置中自定义)
-const theme = ref<EarthTheme>({ accent: '#78cfd1', accent_light: '#a2f5ee', accent_deep: '#4f9fa5', background: '', background_opacity: 0.25, glass: true })
+// 前台主题 (默认跟随 Miya OS 青花瓷配色, 可在设置中自定义)
+const theme = ref<EarthTheme>({ accent: '#719de6', accent_light: '#cbdcf5', accent_deep: '#5279b4', background: '', background_opacity: 0.25, glass: true })
 const themeVars = computed(() => ({
   '--pv-gold': theme.value.accent,
   '--pv-gold-light': theme.value.accent_light,
   '--pv-gold-deep': theme.value.accent_deep,
   '--pv-glass': theme.value.glass ? 'blur(14px) saturate(1.25)' : 'none',
 }))
-const isMiyaDefaultTheme = computed(() => theme.value.accent.toLowerCase() === '#78cfd1' && theme.value.accent_light.toLowerCase() === '#a2f5ee' && theme.value.accent_deep.toLowerCase() === '#4f9fa5')
+const isMiyaDefaultTheme = computed(() => theme.value.accent.toLowerCase() === '#719de6' && theme.value.accent_light.toLowerCase() === '#cbdcf5' && theme.value.accent_deep.toLowerCase() === '#5279b4')
 
 // ── 弥娅关怀按钮: 到期提醒 / 一键签到 / 动态流 ──
 function onCareClick() {
@@ -788,7 +788,7 @@ const QUEST_TYPE_LABELS: Record<string, string> = {
   main: '主线', branch: '支线', daily: '日常', optional: '可选',
 }
 const QUEST_TYPE_COLORS: Record<string, string> = {
-  main: '#ffb300', branch: '#00adb5', daily: '#29b6f6', optional: '#ab47bc',
+  main: '#ffb300', branch: '#719DE6', daily: '#29b6f6', optional: '#ab47bc',
 }
 const RELATIONSHIP_LABELS: Record<string, string> = {
   family: '家人', friend: '朋友', colleague: '同事', partner: '恋人', other: '其他',
@@ -3504,8 +3504,8 @@ function achievementShown(a: EarthAchievement) {
   gap: 2px;
   min-height: 28px;
   padding: 2px 4px;
-  border: 1px solid rgba(162, 245, 238, .12);
-  border-top-color: rgba(162, 245, 238, .05);
+  border: 1px solid rgba(203, 220, 245, .12);
+  border-top-color: rgba(203, 220, 245, .05);
   background: rgba(5, 13, 21, .72);
   box-shadow: 0 8px 22px rgba(0, 0, 0, .2);
   backdrop-filter: blur(12px);
@@ -3526,7 +3526,7 @@ function achievementShown(a: EarthAchievement) {
   min-height: 24px;
   padding: 3px 10px;
   border: 0;
-  border-left: 1px solid rgba(162, 245, 238, .08);
+  border-left: 1px solid rgba(203, 220, 245, .08);
   color: var(--miya-text-muted);
   background: transparent;
   cursor: pointer;
@@ -3535,9 +3535,9 @@ function achievementShown(a: EarthAchievement) {
   transition: color .2s, background .2s;
 }
 .pv-context-item span { font-size: .65rem; }
-.pv-context-item small { color: rgba(162, 245, 238, .45); font: .42rem/1 'JetBrains Mono', monospace; letter-spacing: .08em; }
+.pv-context-item small { color: rgba(203, 220, 245, .45); font: .42rem/1 'JetBrains Mono', monospace; letter-spacing: .08em; }
 .pv-context-item:hover,
-.pv-context-item.active { color: var(--earth-accent-light); background: rgba(120, 207, 209, .1); }
+.pv-context-item.active { color: var(--earth-accent-light); background: rgba(113, 157, 230, .1); }
 .pv-context-item.active { box-shadow: inset 0 -1px var(--earth-accent-light); }
 .pv-nav-avatar {
   width: 30px; height: 30px;
@@ -5304,7 +5304,7 @@ function achievementShown(a: EarthAchievement) {
 .pv.miya-skin {
   --pv-gold: var(--miya-accent-soft);
   --pv-gold-light: var(--miya-accent-bright);
-  --pv-gold-deep: #4f9fa5;
+  --pv-gold-deep: #5279B4;
   --pv-panel: rgba(12, 20, 31, 0.82);
   --pv-panel-strong: rgba(17, 28, 42, 0.94);
   background: var(--miya-bg-void);
@@ -5324,7 +5324,7 @@ function achievementShown(a: EarthAchievement) {
 .pv.miya-skin .pv-nav-avatar {
   color: #071018;
   background: linear-gradient(135deg, var(--miya-accent-bright), var(--miya-accent-soft));
-  box-shadow: 0 0 18px rgba(120, 207, 209, 0.18);
+  box-shadow: 0 0 18px rgba(113, 157, 230, 0.18);
 }
 .pv.miya-skin .pv-nav-logo-text,
 .pv.miya-skin .pv-nav-center a:hover,
@@ -5332,7 +5332,7 @@ function achievementShown(a: EarthAchievement) {
 .pv.miya-skin .pv-nav-more:hover,
 .pv.miya-skin .pv-nav-more.active {
   color: var(--miya-accent-bright);
-  text-shadow: 0 0 14px rgba(120, 207, 209, 0.18);
+  text-shadow: 0 0 14px rgba(113, 157, 230, 0.18);
 }
 .pv.miya-skin .nv-deco::before,
 .pv.miya-skin .nv-deco::after { border-color: var(--miya-accent-soft); }
@@ -5345,7 +5345,7 @@ function achievementShown(a: EarthAchievement) {
 .pv.miya-skin .pv-world-head h2,
 .pv.miya-skin .pv-pull-title,
 .pv.miya-skin .pv-ticket-text { color: var(--miya-text-strong); }
-.pv.miya-skin .pv-stage { scrollbar-color: rgba(120, 207, 209, 0.44) transparent; }
+.pv.miya-skin .pv-stage { scrollbar-color: rgba(113, 157, 230, 0.44) transparent; }
 .pv.miya-skin .pv-section {
   background-color: rgba(7, 11, 18, 0.72);
 }
@@ -5354,11 +5354,11 @@ function achievementShown(a: EarthAchievement) {
 }
 .pv.miya-skin .pv-home-veil {
   background:
-    radial-gradient(ellipse at 50% 28%, rgba(120, 207, 209, 0.1), transparent 58%),
+    radial-gradient(ellipse at 50% 28%, rgba(113, 157, 230, 0.1), transparent 58%),
     linear-gradient(180deg, rgba(7, 11, 18, 0.25), rgba(7, 11, 18, 0.93));
 }
 .pv.miya-skin .pv-home-title {
-  text-shadow: 0 0 34px rgba(120, 207, 209, 0.2);
+  text-shadow: 0 0 34px rgba(113, 157, 230, 0.2);
 }
 .pv.miya-skin .pv-board-wrap,
 .pv.miya-skin .pv-quest-show,
@@ -5379,8 +5379,8 @@ function achievementShown(a: EarthAchievement) {
 .pv.miya-skin .pv-board-item:hover,
 .pv.miya-skin .pv-board-item.active {
   border-color: var(--miya-line-strong);
-  background-color: rgba(120, 207, 209, 0.08);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28), inset 2px 0 rgba(162, 245, 238, 0.55);
+  background-color: rgba(113, 157, 230, 0.08);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28), inset 2px 0 rgba(203, 220, 245, 0.55);
 }
 .pv.miya-skin .pv-home-card-name,
 .pv.miya-skin .pv-home-welcome,
@@ -5392,11 +5392,11 @@ function achievementShown(a: EarthAchievement) {
 .pv.miya-skin .pv-btn-accept {
   color: #071018;
   background: linear-gradient(135deg, var(--miya-accent-bright), var(--miya-accent-soft));
-  box-shadow: 0 8px 20px rgba(120, 207, 209, 0.16);
+  box-shadow: 0 8px 20px rgba(113, 157, 230, 0.16);
 }
 .pv.miya-skin .pv-btn-ghost {
   color: var(--miya-text-body);
-  background: rgba(120, 207, 209, 0.06);
+  background: rgba(113, 157, 230, 0.06);
   border-color: var(--miya-line);
 }
 .pv.miya-skin .pv-btn-ghost:hover,
@@ -5408,19 +5408,19 @@ function achievementShown(a: EarthAchievement) {
 .pv.miya-skin .pv-filter-chip.active,
 .pv.miya-skin .pv-nav-coin.miya {
   color: var(--miya-accent-bright);
-  border-color: rgba(120, 207, 209, 0.34);
-  background: rgba(120, 207, 209, 0.09);
+  border-color: rgba(113, 157, 230, 0.34);
+  background: rgba(113, 157, 230, 0.09);
 }
 .pv.miya-skin .pv-home-checkin {
-  border-color: rgba(120, 207, 209, 0.4);
+  border-color: rgba(113, 157, 230, 0.4);
   background: rgba(12, 20, 31, 0.82);
 }
-.pv.miya-skin .pv-home-checkin:hover { background: rgba(120, 207, 209, 0.12); }
+.pv.miya-skin .pv-home-checkin:hover { background: rgba(113, 157, 230, 0.12); }
 .pv.miya-skin .pv-home-checkin-main { color: var(--miya-text-strong); }
 .pv.miya-skin .pv-home-checkin-sub { color: var(--miya-accent-soft); }
-.pv.miya-skin .pv-profile-avatar { box-shadow: 0 0 28px rgba(120, 207, 209, 0.18); }
+.pv.miya-skin .pv-profile-avatar { box-shadow: 0 0 28px rgba(113, 157, 230, 0.18); }
 .pv.miya-skin .pv-wall-cover,
-.pv.miya-skin .pv-char-card-cover { background: rgba(120, 207, 209, 0.08); }
+.pv.miya-skin .pv-char-card-cover { background: rgba(113, 157, 230, 0.08); }
 
 @media (max-width: 900px) {
   .pv.miya-skin .pv-nav { background: rgba(7, 11, 18, 0.88); }
@@ -5476,7 +5476,7 @@ function achievementShown(a: EarthAchievement) {
   color: #041014;
 }
 .pv-nav-logo-text { font-family: 'Noto Sans SC', sans-serif; font-size: .82rem; letter-spacing: 1px; }
-.pv-nav-center { gap: 4px; padding: 3px; border: 1px solid var(--miya-line-soft); background: rgba(120, 207, 209, 0.025); }
+.pv-nav-center { gap: 4px; padding: 3px; border: 1px solid var(--miya-line-soft); background: rgba(113, 157, 230, 0.025); }
 .pv-nav-center a, .pv-nav-more { padding: 7px 13px; font-family: 'Noto Sans SC', sans-serif; font-size: .7rem; letter-spacing: 0; }
 .pv-nav-center a.active, .pv-nav-more.active { background: color-mix(in srgb, var(--pv-gold) 12%, transparent); }
 .nv-deco { display: none; }
@@ -5608,8 +5608,8 @@ function achievementShown(a: EarthAchievement) {
 .pv-board, .pv-items, .pv-chars, .pv-story, .pv-profile, .pv-stats, .pv-world, .pv-shop {
   background:
     linear-gradient(90deg, rgba(5, 10, 16, .86), rgba(5, 10, 16, .56)),
-    repeating-linear-gradient(90deg, transparent 0 119px, rgba(120, 207, 209, .025) 120px),
-    repeating-linear-gradient(0deg, transparent 0 79px, rgba(120, 207, 209, .018) 80px);
+    repeating-linear-gradient(90deg, transparent 0 119px, rgba(113, 157, 230, .025) 120px),
+    repeating-linear-gradient(0deg, transparent 0 79px, rgba(113, 157, 230, .018) 80px);
 }
 .pv-board-title, .pv-items-title, .pv-world-head h2, .pv-profile-name, .pv-story-cur-title { color: var(--miya-text-strong); text-shadow: 0 0 18px color-mix(in srgb, var(--pv-gold) 16%, transparent); }
 .pv-board-en, .pv-items-en, .pv-story-en, .pv-story-en, .pv-world-head .pv-story-en { color: var(--earth-cyan); }
@@ -5794,7 +5794,7 @@ function achievementShown(a: EarthAchievement) {
 }
 .pv-world-head h2 { margin-top: .22rem; font-size: clamp(1.55rem, 3.2vw, 2.45rem); }
 .pv-world-head p:not(.pv-story-en) { max-width: 64ch; font-size: .72rem; }
-.pv-world-count { align-self: center; padding: .45rem .65rem; border: 1px solid var(--miya-line); color: var(--earth-cyan); background: rgba(120, 207, 209, .06); font-size: .62rem; }
+.pv-world-count { align-self: center; padding: .45rem .65rem; border: 1px solid var(--miya-line); color: var(--earth-cyan); background: rgba(113, 157, 230, .06); font-size: .62rem; }
 .pv-world-atmosphere {
   display: flex;
   align-items: center;
@@ -5996,7 +5996,7 @@ function achievementShown(a: EarthAchievement) {
   .pv-world-atmosphere { grid-template-columns: 1fr; }
 }
 
-/* ── Miya shell integration: cyan signal, warm life accent, full-bleed stage ── */
+/* ── Miya shell integration: porcelain blue signal, cool life accent, full-bleed stage ── */
 .pv {
   background: transparent;
   color: var(--miya-text-body);
@@ -6009,8 +6009,8 @@ function achievementShown(a: EarthAchievement) {
   pointer-events: none;
   opacity: .34;
   background:
-    linear-gradient(90deg, rgba(120, 207, 209, .035) 1px, transparent 1px),
-    linear-gradient(rgba(120, 207, 209, .024) 1px, transparent 1px);
+    linear-gradient(90deg, rgba(113, 157, 230, .035) 1px, transparent 1px),
+    linear-gradient(rgba(113, 157, 230, .024) 1px, transparent 1px);
   background-size: 96px 96px;
   mask-image: linear-gradient(180deg, rgba(0, 0, 0, .95), transparent 82%);
 }
@@ -6018,7 +6018,7 @@ function achievementShown(a: EarthAchievement) {
 .pv-nav {
   height: 58px;
   padding-top: 9px;
-  border-bottom: 1px solid rgba(162, 245, 238, .1);
+  border-bottom: 1px solid rgba(203, 220, 245, .1);
   background: linear-gradient(180deg, rgba(5, 10, 16, .62), rgba(5, 10, 16, .14));
   backdrop-filter: blur(10px);
 }
@@ -6052,7 +6052,7 @@ function achievementShown(a: EarthAchievement) {
 .pv-home-en, .pv-home-card-en, .pv-panel-kicker, .pv-home-status-label { color: var(--earth-accent-light); }
 .pv-home-rule span { background: linear-gradient(90deg, transparent, var(--earth-accent), transparent); }
 .pv-home-player, .pv-home-action, .pv-home-status-block {
-  border-color: rgba(162, 245, 238, .17);
+  border-color: rgba(203, 220, 245, .17);
   background: linear-gradient(145deg, rgba(16, 36, 45, .56), rgba(7, 15, 24, .78));
   box-shadow: 0 18px 42px rgba(0, 0, 0, .3), inset 0 1px rgba(255, 255, 255, .04);
 }
@@ -6070,7 +6070,7 @@ function achievementShown(a: EarthAchievement) {
   position: relative;
   overflow: hidden;
   background:
-    linear-gradient(120deg, rgba(120, 207, 209, .1), transparent 52%),
+    linear-gradient(120deg, rgba(113, 157, 230, .1), transparent 52%),
     linear-gradient(145deg, rgba(16, 36, 45, .62), rgba(7, 15, 24, .8));
 }
 .pv-home-status-world::after {
@@ -6080,9 +6080,9 @@ function achievementShown(a: EarthAchievement) {
   bottom: -26px;
   width: 92px;
   height: 92px;
-  border: 1px solid rgba(162, 245, 238, .18);
+  border: 1px solid rgba(203, 220, 245, .18);
   border-radius: 50%;
-  box-shadow: 0 0 0 10px rgba(162, 245, 238, .035), 0 0 0 20px rgba(162, 245, 238, .02);
+  box-shadow: 0 0 0 10px rgba(203, 220, 245, .035), 0 0 0 20px rgba(203, 220, 245, .02);
   pointer-events: none;
 }
 .pv-world-signal-main {
@@ -6111,7 +6111,7 @@ function achievementShown(a: EarthAchievement) {
   margin-top: .48rem;
   padding: .22rem 0;
   border: 0;
-  border-bottom: 1px solid rgba(162, 245, 238, .28);
+  border-bottom: 1px solid rgba(203, 220, 245, .28);
   color: var(--earth-accent-light);
   background: transparent;
   font-size: .55rem;
@@ -6145,8 +6145,8 @@ function achievementShown(a: EarthAchievement) {
 .pv-world {
   background:
     linear-gradient(90deg, rgba(5, 10, 16, .88), rgba(5, 10, 16, .58)),
-    repeating-linear-gradient(90deg, transparent 0 119px, rgba(120, 207, 209, .026) 120px),
-    repeating-linear-gradient(0deg, transparent 0 79px, rgba(120, 207, 209, .018) 80px);
+    repeating-linear-gradient(90deg, transparent 0 119px, rgba(113, 157, 230, .026) 120px),
+    repeating-linear-gradient(0deg, transparent 0 79px, rgba(113, 157, 230, .018) 80px);
 }
 .pv-board-wrap { gap: 1.15rem; }
 .pv-board-left {
@@ -6166,13 +6166,13 @@ function achievementShown(a: EarthAchievement) {
 .pv-board-title { letter-spacing: .16em; }
 .pv-board-tabs { border-bottom: 1px solid var(--miya-line-soft); }
 .pv-board-tabs > a.active { color: var(--earth-accent-light); }
-.pv-tab-underline { background: var(--earth-accent-light); box-shadow: 0 0 9px rgba(162, 245, 238, .35); }
-.pv-board-type-filter a.active { color: var(--earth-accent-light); border-color: rgba(162, 245, 238, .42); background: rgba(120, 207, 209, .07); }
+.pv-tab-underline { background: var(--earth-accent-light); box-shadow: 0 0 9px rgba(203, 220, 245, .35); }
+.pv-board-type-filter a.active { color: var(--earth-accent-light); border-color: rgba(203, 220, 245, .42); background: rgba(113, 157, 230, .07); }
 .pv-board-list::-webkit-scrollbar { width: 4px; }
-.pv-board-list::-webkit-scrollbar-thumb { background: rgba(162, 245, 238, .28); }
+.pv-board-list::-webkit-scrollbar-thumb { background: rgba(203, 220, 245, .28); }
 .pv-board-item { min-height: 52px; }
-.pv-board-item.active { background: linear-gradient(90deg, rgba(120, 207, 209, .13), rgba(120, 207, 209, .025)); }
-.pv-board-item-underline { background: var(--earth-accent-light); box-shadow: 0 0 10px rgba(162, 245, 238, .3); }
+.pv-board-item.active { background: linear-gradient(90deg, rgba(113, 157, 230, .13), rgba(113, 157, 230, .025)); }
+.pv-board-item-underline { background: var(--earth-accent-light); box-shadow: 0 0 10px rgba(203, 220, 245, .3); }
 .pv-board-right { position: relative; }
 .pv-quest-show {
   position: relative;
@@ -6181,19 +6181,19 @@ function achievementShown(a: EarthAchievement) {
   clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%);
   background:
     linear-gradient(145deg, rgba(18, 40, 49, .64), rgba(5, 12, 20, .88)),
-    repeating-linear-gradient(135deg, transparent 0 18px, rgba(162, 245, 238, .025) 19px 20px);
+    repeating-linear-gradient(135deg, transparent 0 18px, rgba(203, 220, 245, .025) 19px 20px);
 }
 .pv-quest-show::after {
   content: 'FIELD DIRECTIVE / LIVE';
   position: absolute;
   right: 1rem;
   bottom: .78rem;
-  color: rgba(162, 245, 238, .38);
+  color: rgba(203, 220, 245, .38);
   font-size: .45rem;
   letter-spacing: .16em;
   pointer-events: none;
 }
-.pv-quest-show-type { color: var(--earth-accent-light) !important; border-color: rgba(162, 245, 238, .5) !important; background: rgba(120, 207, 209, .08); }
+.pv-quest-show-type { color: var(--earth-accent-light) !important; border-color: rgba(203, 220, 245, .5) !important; background: rgba(113, 157, 230, .08); }
 .pv-quest-show-title { color: var(--miya-text-strong); letter-spacing: .06em; }
 .pv-quest-subtasks { border-color: var(--miya-line); background: rgba(5, 12, 20, .56); }
 
@@ -6209,9 +6209,9 @@ function achievementShown(a: EarthAchievement) {
 .pv-world-head h2 { letter-spacing: .1em; }
 .pv-world-count {
   padding: .48rem .65rem;
-  border: 1px solid rgba(162, 245, 238, .28);
+  border: 1px solid rgba(203, 220, 245, .28);
   color: var(--earth-accent-light);
-  background: rgba(120, 207, 209, .06);
+  background: rgba(113, 157, 230, .06);
   font-size: .62rem;
 }
 .pv-world-atmosphere {
@@ -6225,21 +6225,21 @@ function achievementShown(a: EarthAchievement) {
 .pv-weather-query { padding: .7rem; border-inline: 1px solid var(--miya-line-soft); border-bottom: 1px solid var(--miya-line-soft); background: rgba(5, 14, 22, .66); }
 .pv-weather-query-controls { display: grid; grid-template-columns: auto minmax(160px, 1fr) auto; align-items: center; gap: .6rem; }
 .pv-weather-query-controls > span { color: var(--earth-accent-light); font-size: .65rem; }
-.pv-weather-query-controls input { min-width: 0; height: 34px; padding: 0 .7rem; border: 1px solid rgba(120, 207, 209, .22); border-radius: 0; outline: 0; color: var(--miya-text-strong); background: rgba(2, 10, 17, .72); font: inherit; font-size: .68rem; }
-.pv-weather-query-controls input:focus { border-color: rgba(162, 245, 238, .6); }
-.pv-weather-query-result { margin-top: .65rem; padding-top: .65rem; border-top: 1px solid rgba(120, 207, 209, .12); }
+.pv-weather-query-controls input { min-width: 0; height: 34px; padding: 0 .7rem; border: 1px solid rgba(113, 157, 230, .22); border-radius: 0; outline: 0; color: var(--miya-text-strong); background: rgba(2, 10, 17, .72); font: inherit; font-size: .68rem; }
+.pv-weather-query-controls input:focus { border-color: rgba(203, 220, 245, .6); }
+.pv-weather-query-result { margin-top: .65rem; padding-top: .65rem; border-top: 1px solid rgba(113, 157, 230, .12); }
 .pv-weather-query-now { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .55rem; }
 .pv-weather-query-now span, .pv-weather-forecast span { min-width: 0; }
 .pv-weather-query-now small, .pv-weather-query-now b, .pv-weather-forecast small, .pv-weather-forecast b, .pv-weather-forecast em { display: block; overflow-wrap: anywhere; }
 .pv-weather-query-now small, .pv-weather-forecast small { color: var(--miya-text-dim); font-size: .54rem; }
 .pv-weather-query-now b { margin-top: .18rem; color: var(--miya-text-strong); font-size: .66rem; font-weight: 600; }
 .pv-weather-forecast { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .45rem; margin-top: .65rem; }
-.pv-weather-forecast span { padding: .45rem .55rem; border-left: 2px solid rgba(120, 207, 209, .34); background: rgba(120, 207, 209, .045); }
+.pv-weather-forecast span { padding: .45rem .55rem; border-left: 2px solid rgba(113, 157, 230, .34); background: rgba(113, 157, 230, .045); }
 .pv-weather-forecast b { margin-top: .15rem; color: var(--earth-accent-light); font-size: .64rem; }
 .pv-weather-forecast em { margin-top: .12rem; color: var(--miya-text-muted); font-size: .59rem; font-style: normal; }
 .pv-weather-observed-at { display: block; margin-top: .55rem; color: var(--miya-text-dim); font-size: .54rem; }
 .pv-weather-query-error { margin-top: .6rem; color: #ffb2a7; font-size: .62rem; }
-.pv-world-grid { box-shadow: inset 0 1px rgba(162, 245, 238, .06), 0 18px 42px rgba(0, 0, 0, .22); }
+.pv-world-grid { box-shadow: inset 0 1px rgba(203, 220, 245, .06), 0 18px 42px rgba(0, 0, 0, .22); }
 .pv-world-region {
   position: relative;
   transition: transform .24s ease, border-color .24s ease, box-shadow .24s ease;
@@ -6259,9 +6259,9 @@ function achievementShown(a: EarthAchievement) {
 .pv-world-region:hover { transform: translateY(-2px); }
 .pv-world-region.locked::after { opacity: .28; }
 .pv-world-region h3 { letter-spacing: .06em; }
-.pv-world-progress { background: rgba(162, 245, 238, .1); }
-.pv-world-resonance-bar { background: rgba(162, 245, 238, .08); }
-.pv-world-message, .pv-world-companion, .pv-world-choice { border-radius: 0; border-left: 2px solid var(--earth-accent); background: rgba(120, 207, 209, .07); }
+.pv-world-progress { background: rgba(203, 220, 245, .1); }
+.pv-world-resonance-bar { background: rgba(203, 220, 245, .08); }
+.pv-world-message, .pv-world-companion, .pv-world-choice { border-radius: 0; border-left: 2px solid var(--earth-accent); background: rgba(113, 157, 230, .07); }
 
 @media (max-width: 900px) {
   .pv-quest-show { min-height: 320px; }
@@ -6282,7 +6282,7 @@ function achievementShown(a: EarthAchievement) {
 .pv-nav-center {
   gap: 3px;
   padding: 3px;
-  border-color: rgba(162, 245, 238, .11);
+  border-color: rgba(203, 220, 245, .11);
   background: rgba(5, 13, 21, .58);
   backdrop-filter: blur(14px);
 }
@@ -6293,7 +6293,7 @@ function achievementShown(a: EarthAchievement) {
 }
 .pv-nav-center a.active {
   color: var(--earth-accent-light);
-  background: linear-gradient(180deg, rgba(120, 207, 209, .13), rgba(120, 207, 209, .035));
+  background: linear-gradient(180deg, rgba(113, 157, 230, .13), rgba(113, 157, 230, .035));
   box-shadow: inset 0 -2px var(--earth-accent-light);
 }
 .pv-home .pv-command-deck {
@@ -6415,32 +6415,32 @@ function achievementShown(a: EarthAchievement) {
 
 /* ── v6 player HUD polish: information hierarchy over decoration ── */
 .pv-nav-id { min-width: 82px; }
-.pv-nav-xp { display: block; width: 100%; height: 2px; margin-top: 4px; overflow: hidden; background: rgba(162, 245, 238, .12); }
-.pv-nav-xp em { display: block; height: 100%; background: var(--earth-accent-light); box-shadow: 0 0 8px rgba(162, 245, 238, .5); }
+.pv-nav-xp { display: block; width: 100%; height: 2px; margin-top: 4px; overflow: hidden; background: rgba(203, 220, 245, .12); }
+.pv-nav-xp em { display: block; height: 100%; background: var(--earth-accent-light); box-shadow: 0 0 8px rgba(203, 220, 245, .5); }
 .pv-nav-coin { white-space: nowrap; }
 
 .pv-board-tabs > a { display: inline-flex; align-items: center; gap: .28rem; }
 .pv-tab-count { min-width: 1.1em; padding: .08rem .3rem; border: 1px solid var(--miya-line-soft); color: var(--miya-text-muted); font: 600 .62rem/1.2 'Noto Sans SC', sans-serif; text-align: center; }
-.pv-board-tabs > a.active .pv-tab-count { color: var(--earth-accent-light); border-color: rgba(162, 245, 238, .32); background: rgba(120, 207, 209, .08); }
+.pv-board-tabs > a.active .pv-tab-count { color: var(--earth-accent-light); border-color: rgba(203, 220, 245, .32); background: rgba(113, 157, 230, .08); }
 .pv-board-item-meta { display: inline-flex; align-items: center; gap: .42rem; flex: 0 0 auto; color: var(--earth-life); font-size: .58rem; letter-spacing: .08em; }
 .pv-board-item-meta small { padding-left: .42rem; border-left: 1px solid var(--miya-line-soft); color: var(--miya-text-muted); font-size: .58rem; letter-spacing: 0; }
 .pv-board-item.active .pv-board-item-meta { color: var(--earth-accent-light); }
 .pv-quest-show-kicker { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin: -.25rem 0 -.1rem; color: var(--miya-text-faint); font-size: .5rem; letter-spacing: .16em; }
 .pv-quest-show-kicker b { padding: .18rem .42rem; border: 1px solid var(--miya-line); color: var(--miya-text-muted); font-size: .5rem; font-weight: 600; letter-spacing: .08em; }
-.pv-quest-show-kicker b.status-pending, .pv-quest-show-kicker b.status-ongoing { color: var(--earth-accent-light); border-color: rgba(162, 245, 238, .3); }
+.pv-quest-show-kicker b.status-pending, .pv-quest-show-kicker b.status-ongoing { color: var(--earth-accent-light); border-color: rgba(203, 220, 245, .3); }
 .pv-quest-show-kicker b.status-completed { color: var(--miya-success); }
 .pv-quest-show-kicker b.status-failed { color: var(--miya-danger); }
 .pv-quest-more { position: relative; }
 .pv-quest-more-toggle { min-width: 76px; }
 .pv-quest-more-menu { position: absolute; right: 0; bottom: calc(100% + .45rem); z-index: 3; display: flex; flex-direction: column; min-width: 128px; padding: .28rem; border: 1px solid var(--miya-line-strong); background: rgba(8, 16, 25, .98); box-shadow: 0 10px 24px rgba(0, 0, 0, .38); }
 .pv-quest-more-menu button { width: 100%; padding: .42rem .55rem; border: 0; text-align: left; }
-.pv-quest-more-menu button:hover { background: rgba(120, 207, 209, .1); }
+.pv-quest-more-menu button:hover { background: rgba(113, 157, 230, .1); }
 
 .pv-world-region { min-height: 320px; padding: 1.05rem; background-color: rgba(8, 16, 25, .78); cursor: pointer; }
 .pv-world-region::before { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(5, 10, 16, .04) 22%, rgba(5, 10, 16, .68) 100%); }
 .pv-world-region > * { position: relative; z-index: 1; }
 .pv-world-region-top-actions { gap: .55rem; }
-.pv-world-state { padding: .18rem .36rem; border: 1px solid rgba(162, 245, 238, .28); color: var(--earth-accent-light); font-size: .48rem; letter-spacing: .12em; }
+.pv-world-state { padding: .18rem .36rem; border: 1px solid rgba(203, 220, 245, .28); color: var(--earth-accent-light); font-size: .48rem; letter-spacing: .12em; }
 .pv-world-state.complete { color: var(--miya-success); border-color: rgba(114, 214, 177, .34); }
 .pv-world-state.locked { color: var(--miya-text-faint); border-color: var(--miya-line-soft); }
 .pv-world-region.locked { filter: saturate(.6); }
@@ -6451,7 +6451,7 @@ function achievementShown(a: EarthAchievement) {
 .pv-world-commission { min-height: 32px; }
 .pv-region-drawer-icon { display: grid; place-items: center; height: 100%; color: var(--world-color); font-size: 4rem; text-shadow: 0 0 24px color-mix(in srgb, var(--world-color) 60%, transparent); }
 .pv-drawer-cover-region { background-size: cover; background-position: center; }
-.pv-drawer-region-state { position: absolute; right: .8rem; bottom: .7rem; padding: .24rem .45rem; border: 1px solid rgba(162, 245, 238, .3); color: var(--earth-accent-light); font-size: .52rem; letter-spacing: .14em; }
+.pv-drawer-region-state { position: absolute; right: .8rem; bottom: .7rem; padding: .24rem .45rem; border: 1px solid rgba(203, 220, 245, .3); color: var(--earth-accent-light); font-size: .52rem; letter-spacing: .14em; }
 .pv-drawer-region-state.complete { color: var(--miya-success); border-color: rgba(114, 214, 177, .34); }
 .pv-drawer-region-state.locked { color: var(--miya-text-faint); border-color: var(--miya-line-soft); }
 .pv-region-drawer-progress { display: flex; flex-direction: column; gap: .4rem; margin-top: .45rem; }
@@ -6506,15 +6506,15 @@ function achievementShown(a: EarthAchievement) {
   .pv-world-region { min-height: 290px; height: auto; }
 }
 
-.pv-real-map-shell { display: grid; grid-template-columns: minmax(0, 1fr) 270px; margin: 1.2rem 0 1.5rem; border: 1px solid rgba(120, 207, 209, .22); background: rgba(5, 14, 22, .62); }
+.pv-real-map-shell { display: grid; grid-template-columns: minmax(0, 1fr) 270px; margin: 1.2rem 0 1.5rem; border: 1px solid rgba(113, 157, 230, .22); background: rgba(5, 14, 22, .62); }
 .pv-real-map-toolbar, .pv-map-location-card, .pv-real-map-filters, .pv-real-route-controls, .pv-real-place-form { grid-column: 1 / -1; }
-.pv-real-map-toolbar { display: flex; align-items: center; justify-content: space-between; gap: .8rem; padding: .8rem .9rem; border-bottom: 1px solid rgba(120, 207, 209, .15); }
+.pv-real-map-toolbar { display: flex; align-items: center; justify-content: space-between; gap: .8rem; padding: .8rem .9rem; border-bottom: 1px solid rgba(113, 157, 230, .15); }
 .pv-real-map-label { color: var(--earth-accent-light); font-size: .68rem; letter-spacing: .14em; }
 .pv-real-map-actions { display: flex; gap: .45rem; flex-wrap: wrap; justify-content: flex-end; }
-.pv-map-location-card { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: .75rem; padding: .75rem .9rem; border-bottom: 1px solid rgba(120, 207, 209, .16); background: rgba(120, 207, 209, .065); }
+.pv-map-location-card { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: .75rem; padding: .75rem .9rem; border-bottom: 1px solid rgba(113, 157, 230, .16); background: rgba(113, 157, 230, .065); }
 .pv-map-location-card.located { background: rgba(77, 215, 232, .095); box-shadow: inset 3px 0 0 #4dd7e8; }
 .pv-map-location-card.failed { background: rgba(255, 119, 104, .07); box-shadow: inset 3px 0 0 #ff8f83; }
-.pv-map-location-icon { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid rgba(162, 245, 238, .35); border-radius: 50%; color: var(--earth-accent-light); background: rgba(5, 18, 29, .72); font-size: 1.1rem; }
+.pv-map-location-icon { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid rgba(203, 220, 245, .35); border-radius: 50%; color: var(--earth-accent-light); background: rgba(5, 18, 29, .72); font-size: 1.1rem; }
 .pv-map-location-card.located .pv-map-location-icon { color: #ffd37d; border-color: rgba(255, 211, 125, .5); box-shadow: 0 0 0 4px rgba(255, 179, 0, .1); }
 .pv-map-location-card.busy .pv-map-location-icon { animation: miya-map-live-blink 1.3s ease-in-out infinite; }
 .pv-map-location-card.failed .pv-map-location-icon { color: #ffb2a7; border-color: rgba(255, 178, 167, .45); }
@@ -6523,7 +6523,7 @@ function achievementShown(a: EarthAchievement) {
 .pv-map-location-copy strong { color: var(--miya-text-strong); font-size: .75rem; }
 .pv-map-location-copy span { margin-top: .18rem; color: var(--miya-text-dim); font-size: .62rem; line-height: 1.5; overflow-wrap: anywhere; }
 .pv-map-location-actions { display: flex; align-items: center; justify-content: flex-end; gap: .45rem; flex-wrap: wrap; }
-.pv-map-capability-note { grid-column: 1 / -1; padding: .7rem .9rem .75rem; border-bottom: 1px solid rgba(120, 207, 209, .12); background: rgba(120, 207, 209, .035); }
+.pv-map-capability-note { grid-column: 1 / -1; padding: .7rem .9rem .75rem; border-bottom: 1px solid rgba(113, 157, 230, .12); background: rgba(113, 157, 230, .035); }
 .pv-map-capability-head { display: flex; align-items: center; justify-content: space-between; gap: .8rem; margin-bottom: .45rem; color: var(--earth-accent-light); font-size: .72rem; }
 .pv-map-capability-head span { color: var(--miya-text-dim); font-size: .62rem; }
 .pv-map-capability-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .3rem .8rem; color: var(--miya-text-muted); font-size: .64rem; }
@@ -6531,12 +6531,12 @@ function achievementShown(a: EarthAchievement) {
 .pv-map-capability-grid .ready { color: #9de8d9; }
 .pv-map-capability-grid .pending { color: #e8c983; }
 .pv-map-capability-note p { margin: .5rem 0 0; color: var(--miya-text-dim); font-size: .61rem; line-height: 1.55; }
-.pv-map-layer-controls { display: flex; align-items: center; gap: .55rem .8rem; flex-wrap: wrap; padding: .62rem .9rem; border-bottom: 1px solid rgba(120, 207, 209, .12); background: rgba(4, 14, 22, .64); }
+.pv-map-layer-controls { display: flex; align-items: center; gap: .55rem .8rem; flex-wrap: wrap; padding: .62rem .9rem; border-bottom: 1px solid rgba(113, 157, 230, .12); background: rgba(4, 14, 22, .64); }
 .pv-map-layer-head { display: flex; align-items: baseline; gap: .45rem; margin-right: .25rem; color: var(--earth-accent-light); font-size: .68rem; }
 .pv-map-layer-head span { color: var(--miya-text-dim); font-size: .58rem; }
 .pv-map-layer-toggle { display: inline-flex; align-items: center; gap: .3rem; color: var(--miya-text-muted); font-size: .62rem; cursor: pointer; user-select: none; }
 .pv-map-layer-toggle input { accent-color: var(--earth-accent); }
-.pv-map-legend-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #4fc3c9; box-shadow: 0 0 7px rgba(162, 245, 238, .7); }
+.pv-map-legend-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #719DE6; box-shadow: 0 0 7px rgba(203, 220, 245, .7); }
 .pv-map-legend-dot.nearby { background: #8d7cff; box-shadow: 0 0 7px rgba(182, 173, 255, .86); }
 .pv-map-legend-dot.search { background: #e46b9b; box-shadow: 0 0 7px rgba(255, 200, 225, .9); }
 .pv-map-legend-dot.current { background: #ffb300; box-shadow: 0 0 8px #ffb300; }
@@ -6545,30 +6545,30 @@ function achievementShown(a: EarthAchievement) {
 .pv-map-legend-dot.real-route { width: 14px; height: 3px; border-radius: 2px; background: #4dd7e8; box-shadow: none; }
 .pv-map-legend-dot.accuracy { width: 10px; height: 10px; border: 1px solid #ffca70; background: rgba(255, 202, 112, .22); box-shadow: none; }
 .pv-map-legend-dot.journey-replay { width: 14px; height: 3px; border-radius: 2px; background: #e46b9b; box-shadow: none; }
-.pv-map-live-controls { grid-column: 1 / -1; display: flex; flex-direction: column; gap: .55rem; padding: .7rem .9rem; border-bottom: 1px solid rgba(120, 207, 209, .12); background: rgba(255, 202, 112, .035); }
+.pv-map-live-controls { grid-column: 1 / -1; display: flex; flex-direction: column; gap: .55rem; padding: .7rem .9rem; border-bottom: 1px solid rgba(113, 157, 230, .12); background: rgba(255, 202, 112, .035); }
 .pv-map-live-actions, .pv-map-nearby-actions, .pv-map-live-metrics { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .pv-map-nearby-actions label { display: inline-flex; align-items: center; gap: .4rem; color: var(--miya-text-muted); font-size: .66rem; }
-.pv-map-nearby-actions select { padding: .46rem .5rem; border: 1px solid rgba(120, 207, 209, .2); background: rgba(5, 14, 22, .9); color: var(--miya-text-strong); font: inherit; font-size: .66rem; }
+.pv-map-nearby-actions select { padding: .46rem .5rem; border: 1px solid rgba(113, 157, 230, .2); background: rgba(5, 14, 22, .9); color: var(--miya-text-strong); font: inherit; font-size: .66rem; }
 .pv-map-live-status { display: inline-flex; align-items: center; gap: .35rem; color: var(--miya-text-dim); font-size: .64rem; }
 .pv-map-live-status i { width: 7px; height: 7px; border-radius: 50%; background: #7d8b91; }
 .pv-map-live-status.active { color: #ffd37d; }
 .pv-map-live-status.active i { background: #ffb300; box-shadow: 0 0 0 4px rgba(255, 179, 0, .16), 0 0 10px #ffb300; animation: miya-map-live-blink 1.3s ease-in-out infinite; }
-.pv-map-live-status.journey { color: #a2f5ee; }
+.pv-map-live-status.journey { color: #CBDCF5; }
 .pv-map-live-status.journey i { background: #4dd7e8; box-shadow: 0 0 0 4px rgba(77, 215, 232, .16), 0 0 10px #4dd7e8; }
 .pv-btn-live-active { color: #ffd37d; border-color: rgba(255, 211, 125, .4); }
 .pv-map-live-metrics { color: var(--miya-text-dim); font-size: .61rem; }
 .pv-map-live-metrics span + span { padding-left: .5rem; border-left: 1px solid var(--miya-line-soft); }
 .pv-map-live-error { color: #ffb2a7; font-size: .64rem; }
-.pv-journey-summary { display: flex; flex-direction: column; gap: .65rem; padding: .8rem .9rem .9rem; border-bottom: 1px solid rgba(120, 207, 209, .18); background: linear-gradient(90deg, rgba(77, 215, 232, .09), rgba(255, 202, 112, .05)); }
+.pv-journey-summary { display: flex; flex-direction: column; gap: .65rem; padding: .8rem .9rem .9rem; border-bottom: 1px solid rgba(113, 157, 230, .18); background: linear-gradient(90deg, rgba(77, 215, 232, .09), rgba(255, 202, 112, .05)); }
 .pv-journey-summary-head { display: flex; align-items: center; justify-content: space-between; gap: .8rem; }
 .pv-journey-summary-head strong, .pv-journey-summary-head span { display: block; }
 .pv-journey-summary-head strong { color: var(--earth-accent-light); font-size: .78rem; }
 .pv-journey-summary-head span { margin-top: .15rem; color: var(--miya-text-dim); font-size: .6rem; }
 .pv-journey-summary-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .4rem; }
-.pv-journey-summary-stats span { padding: .45rem; border: 1px solid rgba(120, 207, 209, .15); color: var(--miya-text-dim); font-size: .58rem; text-align: center; }
+.pv-journey-summary-stats span { padding: .45rem; border: 1px solid rgba(113, 157, 230, .15); color: var(--miya-text-dim); font-size: .58rem; text-align: center; }
 .pv-journey-summary-stats b { display: block; margin-bottom: .12rem; color: var(--earth-accent-light); font-size: .76rem; }
 .pv-journey-summary-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .45rem; }
-.pv-journey-summary-fields input, .pv-journey-summary-fields textarea { min-width: 0; box-sizing: border-box; padding: .52rem .58rem; border: 1px solid rgba(120, 207, 209, .2); background: rgba(255, 255, 255, .045); color: var(--miya-text-strong); font: inherit; font-size: .68rem; }
+.pv-journey-summary-fields input, .pv-journey-summary-fields textarea { min-width: 0; box-sizing: border-box; padding: .52rem .58rem; border: 1px solid rgba(113, 157, 230, .2); background: rgba(255, 255, 255, .045); color: var(--miya-text-strong); font: inherit; font-size: .68rem; }
 .pv-journey-summary-fields textarea { min-height: 42px; resize: vertical; }
 .pv-journey-summary-fields label { grid-column: 1 / -1; display: flex; align-items: center; gap: .35rem; color: var(--miya-text-muted); font-size: .62rem; }
 .pv-journey-summary-actions { display: flex; justify-content: flex-end; gap: .45rem; }
@@ -6579,7 +6579,7 @@ function achievementShown(a: EarthAchievement) {
 .pv-maplibre-container :deep(.maplibregl-ctrl-group) { overflow: hidden; border: 1px solid rgba(23, 50, 64, .7); background: rgba(5, 18, 29, .9); }
 .pv-maplibre-container :deep(.maplibregl-ctrl button) { filter: invert(1) hue-rotate(145deg); }
 .pv-maplibre-container :deep(.maplibregl-ctrl-attrib) { color: #496a73; background: rgba(5, 18, 29, .84); }
-.miya-map-marker { width: 18px; height: 18px; padding: 0; border: 2px solid #d9fffb; border-radius: 50% 50% 50% 0; background: #4fc3c9; box-shadow: 0 0 0 4px rgba(79, 195, 201, .22), 0 0 16px rgba(162, 245, 238, .8); transform: rotate(-45deg); cursor: pointer; }
+.miya-map-marker { width: 18px; height: 18px; padding: 0; border: 2px solid #EDF4FF; border-radius: 50% 50% 50% 0; background: #719DE6; box-shadow: 0 0 0 4px rgba(113, 157, 230, .22), 0 0 16px rgba(203, 220, 245, .8); transform: rotate(-45deg); cursor: pointer; }
 .miya-map-marker-region { width: 21px; height: 21px; border-radius: 50%; border-color: #ffe2a3; background: #c9ac67; box-shadow: 0 0 0 4px rgba(201, 172, 103, .2), 0 0 16px rgba(255, 211, 125, .75); }
 .miya-map-marker-current { z-index: 8; width: 17px; height: 17px; border-radius: 50%; border-color: #fff0bd; background: #ffb300; box-shadow: 0 0 0 6px rgba(255, 179, 0, .24), 0 0 20px #ffb300; transform: none; cursor: default; animation: miya-location-pulse 1.8s ease-in-out infinite; }
 .miya-map-marker-label { position: absolute; left: 50%; bottom: calc(100% + 9px); width: max-content; max-width: 120px; padding: .2rem .38rem; border: 1px solid rgba(255, 211, 125, .42); border-radius: 3px; background: rgba(3, 12, 20, .92); color: #fff0bd; box-shadow: 0 4px 14px rgba(0, 0, 0, .32); font-size: .6rem; font-weight: 700; line-height: 1.2; white-space: nowrap; transform: translateX(-50%); pointer-events: none; }
@@ -6594,16 +6594,16 @@ function achievementShown(a: EarthAchievement) {
 .pv-real-map-viewport { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform-origin: center; transition: transform .16s ease-out; }
 .pv-real-map-tile { position: absolute; width: 256px; height: 256px; max-width: none; user-select: none; pointer-events: none; }
 .pv-real-map-pin, .pv-real-map-current { position: absolute; transform: translate(-50%, -50%); }
-.pv-real-map-pin { z-index: 3; color: #d9fffb; cursor: pointer; }
+.pv-real-map-pin { z-index: 3; color: #EDF4FF; cursor: pointer; }
 .pv-real-map-pin-nearby { z-index: 4; color: #ded9ff; }
 .pv-real-map-pin-search { z-index: 5; color: #ffd8e8; }
-.pv-real-map-pin-dot { display: block; width: 13px; height: 13px; border: 2px solid #d9fffb; border-radius: 50%; background: #4fc3c9; box-shadow: 0 0 0 5px rgba(79, 195, 201, .2), 0 0 18px rgba(162, 245, 238, .75); }
+.pv-real-map-pin-dot { display: block; width: 13px; height: 13px; border: 2px solid #EDF4FF; border-radius: 50%; background: #719DE6; box-shadow: 0 0 0 5px rgba(113, 157, 230, .2), 0 0 18px rgba(203, 220, 245, .75); }
 .pv-real-map-pin-nearby .pv-real-map-pin-dot { border-color: #f0edff; background: #8d7cff; box-shadow: 0 0 0 5px rgba(141, 124, 255, .22), 0 0 16px rgba(182, 173, 255, .86); }
 .pv-real-map-pin-search .pv-real-map-pin-dot { border-color: #fff; background: #e46b9b; box-shadow: 0 0 0 5px rgba(228, 107, 155, .22), 0 0 18px rgba(255, 200, 225, .9); }
-.pv-real-map-pin-label { position: absolute; left: 50%; top: 20px; transform: translateX(-50%); width: max-content; max-width: 160px; padding: .18rem .35rem; background: rgba(3, 12, 20, .84); color: #d9fffb; font-size: .62rem; white-space: nowrap; pointer-events: none; }
+.pv-real-map-pin-label { position: absolute; left: 50%; top: 20px; transform: translateX(-50%); width: max-content; max-width: 160px; padding: .18rem .35rem; background: rgba(3, 12, 20, .84); color: #EDF4FF; font-size: .62rem; white-space: nowrap; pointer-events: none; }
 .pv-real-map-pin.is-selected { z-index: 6; }
 .pv-real-map-pin.is-selected .pv-real-map-pin-dot { width: 17px; height: 17px; margin: -2px; animation: miya-map-pin-pulse 1.5s ease-in-out infinite; }
-.pv-real-map-pin.is-selected .pv-real-map-pin-label { color: #fff; background: rgba(13, 30, 40, .96); outline: 1px solid rgba(162, 245, 238, .55); box-shadow: 0 0 18px rgba(162, 245, 238, .28); }
+.pv-real-map-pin.is-selected .pv-real-map-pin-label { color: #fff; background: rgba(13, 30, 40, .96); outline: 1px solid rgba(203, 220, 245, .55); box-shadow: 0 0 18px rgba(203, 220, 245, .28); }
 .pv-real-map-region-pin { position: absolute; z-index: 3; transform: translate(-50%, -50%); display: grid; place-items: center; color: #ffd37d; cursor: pointer; text-shadow: 0 0 10px rgba(255, 179, 0, .65); }
 .pv-real-map-region-pin span { font-size: 1.25rem; }
 .pv-real-map-region-pin small { position: absolute; top: 21px; width: max-content; color: #ffe2a3; font-size: .58rem; }
@@ -6617,52 +6617,52 @@ function achievementShown(a: EarthAchievement) {
 .pv-real-map-journey-marker.end { border-radius: 3px; }
 .pv-real-map-journey-marker.progress { width: 25px; height: 25px; border-color: #fff4d8; background: #ffb93f; color: #311d00; box-shadow: 0 0 0 6px rgba(255, 202, 112, .18), 0 0 22px rgba(255, 202, 112, .9); font-size: .55rem; }
 .pv-real-map-caption { position: absolute; left: .8rem; bottom: .65rem; color: rgba(217, 255, 251, .55); font-size: .62rem; pointer-events: none; }
-.pv-real-place-detail { display: flex; align-items: baseline; gap: .7rem; flex-wrap: wrap; padding: .65rem .9rem; border-top: 1px solid rgba(120, 207, 209, .15); color: var(--miya-text-muted); font-size: .68rem; }
+.pv-real-place-detail { display: flex; align-items: baseline; gap: .7rem; flex-wrap: wrap; padding: .65rem .9rem; border-top: 1px solid rgba(113, 157, 230, .15); color: var(--miya-text-muted); font-size: .68rem; }
 .pv-real-place-detail strong { color: var(--earth-accent-light); font-size: .82rem; }
 .pv-real-place-detail small { width: 100%; color: var(--miya-text-dim); }
-.pv-real-place-photo { width: 100%; max-height: 180px; object-fit: cover; border: 1px solid rgba(120, 207, 209, .18); }
+.pv-real-place-photo { width: 100%; max-height: 180px; object-fit: cover; border: 1px solid rgba(113, 157, 230, .18); }
 .pv-real-place-upload { position: relative; overflow: hidden; }
 .pv-real-place-memories { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; width: 100%; }
 .pv-real-place-memories strong { margin-right: .25rem; color: var(--earth-accent-light); font-size: .68rem; }
-.pv-real-place-memories button { padding: .2rem .35rem; border: 1px solid rgba(120, 207, 209, .2); background: rgba(120, 207, 209, .06); color: var(--miya-text-muted); font: inherit; font-size: .62rem; cursor: pointer; }
-.pv-real-place-form { padding: .8rem .9rem .95rem; border-top: 1px solid rgba(120, 207, 209, .15); }
+.pv-real-place-memories button { padding: .2rem .35rem; border: 1px solid rgba(113, 157, 230, .2); background: rgba(113, 157, 230, .06); color: var(--miya-text-muted); font: inherit; font-size: .62rem; cursor: pointer; }
+.pv-real-place-form { padding: .8rem .9rem .95rem; border-top: 1px solid rgba(113, 157, 230, .15); }
 .pv-real-place-form-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: .7rem; color: var(--earth-accent-light); font-size: .82rem; }
 .pv-real-place-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .5rem; margin-bottom: .65rem; }
-.pv-real-place-fields input { min-width: 0; padding: .55rem .6rem; border: 1px solid rgba(120, 207, 209, .2); background: rgba(255, 255, 255, .045); color: var(--miya-text-strong); font: inherit; font-size: .72rem; }
+.pv-real-place-fields input { min-width: 0; padding: .55rem .6rem; border: 1px solid rgba(113, 157, 230, .2); background: rgba(255, 255, 255, .045); color: var(--miya-text-strong); font: inherit; font-size: .72rem; }
 .pv-real-place-fields input.wide { grid-column: 1 / -1; }
-.pv-real-map-filters { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; padding: .65rem .9rem; border-bottom: 1px solid rgba(120, 207, 209, .12); }
-.pv-real-map-filters input { flex: 1 1 220px; min-width: 160px; padding: .55rem .6rem; border: 1px solid rgba(120, 207, 209, .2); background: rgba(255, 255, 255, .045); color: var(--miya-text-strong); font: inherit; font-size: .72rem; }
-.pv-real-map-filters select { min-width: 100px; padding: .55rem .45rem; border: 1px solid rgba(120, 207, 209, .2); background: rgba(5, 14, 22, .9); color: var(--miya-text-strong); font: inherit; font-size: .68rem; }
-.pv-map-search-results { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1px; padding: 1px; border-bottom: 1px solid rgba(120, 207, 209, .14); background: rgba(120, 207, 209, .12); }
+.pv-real-map-filters { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; padding: .65rem .9rem; border-bottom: 1px solid rgba(113, 157, 230, .12); }
+.pv-real-map-filters input { flex: 1 1 220px; min-width: 160px; padding: .55rem .6rem; border: 1px solid rgba(113, 157, 230, .2); background: rgba(255, 255, 255, .045); color: var(--miya-text-strong); font: inherit; font-size: .72rem; }
+.pv-real-map-filters select { min-width: 100px; padding: .55rem .45rem; border: 1px solid rgba(113, 157, 230, .2); background: rgba(5, 14, 22, .9); color: var(--miya-text-strong); font: inherit; font-size: .68rem; }
+.pv-map-search-results { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1px; padding: 1px; border-bottom: 1px solid rgba(113, 157, 230, .14); background: rgba(113, 157, 230, .12); }
 .pv-map-search-results button { min-width: 0; padding: .58rem .7rem; border: 0; background: rgba(5, 14, 22, .96); color: var(--miya-text-muted); text-align: left; cursor: pointer; }
-.pv-map-search-results button:hover, .pv-map-search-results button.active { background: rgba(120, 207, 209, .13); }
+.pv-map-search-results button:hover, .pv-map-search-results button.active { background: rgba(113, 157, 230, .13); }
 .pv-map-search-results strong, .pv-map-search-results span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pv-map-search-results strong { color: var(--miya-text-strong); font-size: .7rem; }
 .pv-map-search-results span { margin-top: .15rem; color: var(--miya-text-dim); font-size: .57rem; }
-.pv-map-selection { grid-column: 1 / -1; display: flex; align-items: center; gap: .55rem; padding: .62rem .9rem; border-bottom: 1px solid rgba(120, 207, 209, .16); background: linear-gradient(90deg, rgba(228, 107, 155, .09), rgba(120, 207, 209, .04)); }
+.pv-map-selection { grid-column: 1 / -1; display: flex; align-items: center; gap: .55rem; padding: .62rem .9rem; border-bottom: 1px solid rgba(113, 157, 230, .16); background: linear-gradient(90deg, rgba(228, 107, 155, .09), rgba(113, 157, 230, .04)); }
 .pv-map-selection > div { min-width: 0; flex: 1; }
 .pv-map-selection strong, .pv-map-selection span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pv-map-selection strong { color: var(--earth-accent-light); font-size: .74rem; }
 .pv-map-selection span { margin-top: .14rem; color: var(--miya-text-dim); font-size: .59rem; }
-.pv-real-route-controls { display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; padding: .6rem .9rem; border-bottom: 1px solid rgba(120, 207, 209, .12); color: var(--miya-text-muted); font-size: .68rem; }
+.pv-real-route-controls { display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; padding: .6rem .9rem; border-bottom: 1px solid rgba(113, 157, 230, .12); color: var(--miya-text-muted); font-size: .68rem; }
 .pv-real-route-controls label { display: flex; align-items: center; gap: .45rem; color: var(--miya-text-strong); }
-.pv-real-route-controls select { padding: .48rem .55rem; border: 1px solid rgba(120, 207, 209, .2); background: rgba(5, 14, 22, .9); color: var(--miya-text-strong); font: inherit; }
+.pv-real-route-controls select { padding: .48rem .55rem; border: 1px solid rgba(113, 157, 230, .2); background: rgba(5, 14, 22, .9); color: var(--miya-text-strong); font: inherit; }
 .pv-real-route-controls small { color: var(--miya-text-dim); }
 .pv-route-error { color: #ffb2a7; }
-.pv-real-map-side { min-height: 280px; max-height: 440px; overflow-y: auto; border-left: 1px solid rgba(120, 207, 209, .15); }
+.pv-real-map-side { min-height: 280px; max-height: 440px; overflow-y: auto; border-left: 1px solid rgba(113, 157, 230, .15); }
 .pv-real-map-side-head { display: flex; justify-content: space-between; padding: .8rem .75rem .55rem; color: var(--earth-accent-light); font-size: .78rem; }
 .pv-real-map-side-head span { color: var(--miya-text-dim); font-size: .64rem; }
 .pv-real-map-place-row { display: flex; align-items: center; gap: .5rem; width: 100%; padding: .55rem .75rem; border: 0; border-top: 1px solid rgba(255, 255, 255, .06); background: transparent; color: var(--miya-text-muted); text-align: left; font: inherit; cursor: pointer; }
-.pv-real-map-place-row:hover { background: rgba(120, 207, 209, .1); }
-.pv-real-map-place-row.is-selected { background: rgba(120, 207, 209, .16); box-shadow: inset 3px 0 0 var(--earth-accent-light); }
+.pv-real-map-place-row:hover { background: rgba(113, 157, 230, .1); }
+.pv-real-map-place-row.is-selected { background: rgba(113, 157, 230, .16); box-shadow: inset 3px 0 0 var(--earth-accent-light); }
 .pv-real-map-place-row.is-selected b { color: var(--earth-accent-light); }
 .pv-real-map-place-row > span:not(.pv-real-map-place-dot) { min-width: 0; flex: 1; }
 .pv-real-map-place-row b, .pv-real-map-place-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pv-real-map-place-row b { color: var(--miya-text-strong); font-size: .72rem; }
 .pv-real-map-place-row small { margin-top: .15rem; color: var(--miya-text-dim); font-size: .6rem; }
 .pv-real-map-place-row em { color: var(--earth-accent-light); font-size: .6rem; font-style: normal; }
-.pv-real-map-place-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #4fc3c9; box-shadow: 0 0 8px rgba(162, 245, 238, .75); }
-.pv-real-map-side-story { margin-top: .5rem; padding: .65rem .75rem; border-top: 1px solid rgba(120, 207, 209, .15); }
+.pv-real-map-place-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #719DE6; box-shadow: 0 0 8px rgba(203, 220, 245, .75); }
+.pv-real-map-side-story { margin-top: .5rem; padding: .65rem .75rem; border-top: 1px solid rgba(113, 157, 230, .15); }
 .pv-real-map-side-story > strong { display: block; margin-bottom: .4rem; color: var(--earth-accent-light); font-size: .7rem; }
 .pv-real-map-side-story button { display: block; width: 100%; padding: .4rem 0; border: 0; background: transparent; color: var(--miya-text-muted); text-align: left; font: inherit; cursor: pointer; }
 .pv-real-map-side-story button:hover span { color: var(--earth-accent-light); }
@@ -6695,7 +6695,7 @@ function achievementShown(a: EarthAchievement) {
 }
 .pv-real-map-side-story span { font-size: .66rem; }
 .pv-real-map-side-story small { margin-top: .1rem; color: var(--miya-text-dim); font-size: .58rem; }
-.pv-real-map-nearby-list { border-top: 1px solid rgba(120, 207, 209, .15); }
+.pv-real-map-nearby-list { border-top: 1px solid rgba(113, 157, 230, .15); }
 .pv-real-map-nearby-list .pv-real-map-side-head { padding-top: .65rem; }
 .pv-real-map-nearby-row .pv-real-map-place-dot { background: #8d7cff; box-shadow: 0 0 8px rgba(182, 173, 255, .86); }
 
@@ -6704,8 +6704,8 @@ function achievementShown(a: EarthAchievement) {
   50% { filter: brightness(1.35); }
 }
 @keyframes miya-map-pin-pulse {
-  0%, 100% { box-shadow: 0 0 0 5px rgba(79, 195, 201, .2), 0 0 18px rgba(162, 245, 238, .75); }
-  50% { box-shadow: 0 0 0 10px rgba(162, 245, 238, .08), 0 0 28px rgba(162, 245, 238, .98); }
+  0%, 100% { box-shadow: 0 0 0 5px rgba(113, 157, 230, .2), 0 0 18px rgba(203, 220, 245, .75); }
+  50% { box-shadow: 0 0 0 10px rgba(203, 220, 245, .08), 0 0 28px rgba(203, 220, 245, .98); }
 }
 @keyframes miya-location-pulse {
   0%, 100% { box-shadow: 0 0 0 6px rgba(255, 179, 0, .24), 0 0 20px rgba(255, 179, 0, .9); }
@@ -6717,7 +6717,7 @@ function achievementShown(a: EarthAchievement) {
 }
 .pv-real-place-region-actions { display: flex; gap: .45rem; width: 100%; }
 .pv-place-drawer-mask { z-index: 940; backdrop-filter: blur(2px); }
-.pv-place-drawer { width: 470px; border-left-color: rgba(120, 207, 209, .34); background: linear-gradient(160deg, #101a22, #0a1119 68%); }
+.pv-place-drawer { width: 470px; border-left-color: rgba(113, 157, 230, .34); background: linear-gradient(160deg, #101a22, #0a1119 68%); }
 .pv-place-drawer .pv-drawer-head-label, .pv-place-drawer .pv-drawer-section { color: var(--earth-accent-light); }
 .pv-place-head-actions { display: flex; align-items: center; gap: .45rem; }
 .pv-place-favorite { width: 30px; height: 30px; padding: 0; border: 1px solid rgba(255, 211, 125, .3); border-radius: 50%; background: rgba(255, 211, 125, .08); color: #ffd37d; font-size: 1rem; cursor: pointer; }
@@ -6727,18 +6727,18 @@ function achievementShown(a: EarthAchievement) {
 .pv-place-drawer-body .pv-md-editor { width: 100%; box-sizing: border-box; padding: .55rem .6rem; border: 1px solid var(--miya-line); background: rgba(255, 255, 255, .05); color: var(--miya-text); outline: none; }
 .pv-place-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: .8rem; }
 .pv-place-subtitle { margin-top: .18rem; color: var(--miya-text-dim); font-size: .68rem; }
-.pv-place-category { flex: 0 0 auto; padding: .2rem .45rem; border: 1px solid rgba(120, 207, 209, .25); color: var(--earth-accent-light); font-size: .58rem; letter-spacing: .06em; }
+.pv-place-category { flex: 0 0 auto; padding: .2rem .45rem; border: 1px solid rgba(113, 157, 230, .25); color: var(--earth-accent-light); font-size: .58rem; letter-spacing: .06em; }
 .pv-place-address { margin: 0; color: var(--miya-text-muted); font-size: .7rem; line-height: 1.55; }
 .pv-place-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .35rem; margin-top: .25rem; }
-.pv-place-stats span { padding: .55rem; border: 1px solid rgba(120, 207, 209, .14); background: rgba(120, 207, 209, .05); color: var(--miya-text-dim); font-size: .6rem; text-align: center; }
+.pv-place-stats span { padding: .55rem; border: 1px solid rgba(113, 157, 230, .14); background: rgba(113, 157, 230, .05); color: var(--miya-text-dim); font-size: .6rem; text-align: center; }
 .pv-place-stats b { display: block; margin-bottom: .1rem; color: var(--earth-accent-light); font-size: .86rem; }
 .pv-place-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
 .pv-place-check { display: flex; align-items: center; gap: .45rem; }
 .pv-place-gallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .35rem; }
-.pv-place-gallery img { width: 100%; aspect-ratio: 1; object-fit: cover; border: 1px solid rgba(120, 207, 209, .18); }
+.pv-place-gallery img { width: 100%; aspect-ratio: 1; object-fit: cover; border: 1px solid rgba(113, 157, 230, .18); }
 .pv-place-visits { position: relative; display: flex; flex-direction: column; gap: .2rem; }
 .pv-place-visit { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: .55rem; padding: .42rem 0; }
-.pv-place-visit-dot { width: 8px; height: 8px; margin-top: .25rem; border-radius: 50%; background: var(--earth-accent); box-shadow: 0 0 8px rgba(162, 245, 238, .6); }
+.pv-place-visit-dot { width: 8px; height: 8px; margin-top: .25rem; border-radius: 50%; background: var(--earth-accent); box-shadow: 0 0 8px rgba(203, 220, 245, .6); }
 .pv-place-visit strong { color: var(--miya-text-strong); font-size: .68rem; }
 .pv-place-visit p { margin: .15rem 0 0; color: var(--miya-text-muted); font-size: .66rem; }
 .pv-place-visit small { color: var(--miya-text-dim); font-size: .56rem; }
@@ -6749,7 +6749,7 @@ function achievementShown(a: EarthAchievement) {
 .pv-place-evidence.is-unverified { color: #ffd29f; }
 .pv-place-delete { align-self: flex-start; margin-top: .35rem; padding: .35rem .55rem; border: 1px solid rgba(255, 107, 107, .25); background: rgba(255, 107, 107, .05); color: #ffaaa2; font: inherit; font-size: .62rem; cursor: pointer; }
 @media (max-width: 700px) { .pv-real-map-toolbar { align-items: flex-start; flex-direction: column; } .pv-real-map-actions { width: 100%; justify-content: flex-start; } .pv-map-location-card { grid-template-columns: 32px minmax(0, 1fr); } .pv-map-location-actions { grid-column: 1 / -1; justify-content: flex-start; } .pv-real-place-fields { grid-template-columns: 1fr 1fr; } }
-@media (max-width: 700px) { .pv-real-map-shell { grid-template-columns: 1fr; } .pv-real-map-side { min-height: 0; max-height: 280px; border-left: 0; border-top: 1px solid rgba(120, 207, 209, .15); } }
+@media (max-width: 700px) { .pv-real-map-shell { grid-template-columns: 1fr; } .pv-real-map-side { min-height: 0; max-height: 280px; border-left: 0; border-top: 1px solid rgba(113, 157, 230, .15); } }
 @media (max-width: 560px) { .pv-map-selection { align-items: stretch; flex-direction: column; } .pv-place-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); } .pv-place-coordinates { flex-direction: column; } .pv-map-live-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .35rem; } .pv-map-live-metrics span + span { padding-left: 0; border-left: 0; } }
 @media (max-width: 430px) { .pv-real-place-fields { grid-template-columns: 1fr; } .pv-real-place-fields input.wide { grid-column: auto; } }
 

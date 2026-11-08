@@ -77,12 +77,12 @@ def earth_online_enabled() -> bool:
     except Exception:
         return True
 
-# 前台主题默认值 (Miya OS 青碧)
+# 前台主题默认值 (Miya OS 青花瓷)
 DEFAULT_THEME: Dict[str, Any] = {
-    "version": 2,
-    "accent": "#78cfd1",
-    "accent_light": "#a2f5ee",
-    "accent_deep": "#4f9fa5",
+    "version": 3,
+    "accent": "#719de6",
+    "accent_light": "#cbdcf5",
+    "accent_deep": "#5279b4",
     "background": "",
     "background_opacity": 0.25,
     "glass": True,
@@ -3067,20 +3067,17 @@ class EarthOnlineStore:
                     user_theme = json.load(f)
                 if isinstance(user_theme, dict):
                     theme = {**DEFAULT_THEME, **user_theme}
-                    # v11 的默认鎏金主题不算用户自定义色板。读取时迁移，
-                    # 让旧的 theme.json 与设置页的新默认值保持一致。
-                    legacy_default = ("#c9ac67", "#e8d5a3", "#b5986a")
-                    try:
-                        theme_version = int(user_theme.get("version", 0) or 0)
-                    except (TypeError, ValueError):
-                        theme_version = 0
                     stored_colors = tuple(
                         str(user_theme.get(k, "")).lower()
                         for k in ("accent", "accent_light", "accent_deep")
                     )
-                    if theme_version < 2 and stored_colors == legacy_default:
+                    legacy_defaults = {
+                        ("#c9ac67", "#e8d5a3", "#b5986a"),
+                        ("#78cfd1", "#a2f5ee", "#4f9fa5"),
+                    }
+                    if stored_colors in legacy_defaults:
                         theme.update({k: DEFAULT_THEME[k] for k in ("accent", "accent_light", "accent_deep")})
-                        theme["version"] = 2
+                        theme["version"] = DEFAULT_THEME["version"]
                     return theme
         except Exception as e:
             logger.warning(f"[EarthOnline] 主题读取失败: {e}")
@@ -3110,7 +3107,7 @@ class EarthOnlineStore:
         return current
 
     def reset_theme(self) -> Dict[str, Any]:
-        """恢复前台主题默认值 (Miya OS 青碧)"""
+        """恢复前台主题默认值 (Miya OS 青花瓷)"""
         try:
             if os.path.isfile(self.theme_path):
                 os.remove(self.theme_path)

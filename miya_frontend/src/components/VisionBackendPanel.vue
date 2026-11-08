@@ -371,11 +371,11 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.cap-panel { margin-top: .7rem; padding: .7rem; border: 1px solid rgba(0,173,181,.12); border-radius: 4px; background: rgba(0,0,0,.32); display: flex; flex-direction: column; gap: .55rem; }
-.cap-label { color: rgba(0,255,245,.48); font: .5rem 'JetBrains Mono', monospace; letter-spacing: .08em; }
+.cap-panel { margin-top: .7rem; padding: .7rem; border: 1px solid rgba(113, 157, 230,.12); border-radius: 4px; background: rgba(0,0,0,.32); display: flex; flex-direction: column; gap: .55rem; }
+.cap-label { color: rgba(203, 220, 245,.48); font: .5rem 'JetBrains Mono', monospace; letter-spacing: .08em; }
 
 /* health row */
-.cap-health { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .5rem .6rem; border-radius: 3px; background: rgba(0,173,181,.07); border: 1px solid rgba(0,173,181,.16); }
+.cap-health { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .5rem .6rem; border-radius: 3px; background: rgba(113, 157, 230,.07); border: 1px solid rgba(113, 157, 230,.16); }
 .cap-health.good { background: rgba(110,231,168,.07); border-color: rgba(110,231,168,.3); }
 .cap-health.warn { background: rgba(255,190,120,.07); border-color: rgba(255,190,120,.3); }
 .cap-health.bad { background: rgba(255,120,120,.08); border-color: rgba(255,120,120,.32); }
@@ -394,17 +394,17 @@ onBeforeUnmount(() => {
 .cap-bridge-text { color: rgba(210,222,226,.7); font-size: .56rem; }
 .cap-bridge.broken .cap-bridge-text { color: rgba(255,170,170,.9); }
 .cap-bridge-text em { color: rgba(200,215,220,.45); font-style: normal; }
-.cap-btn { padding: .25rem .55rem; border: 1px solid rgba(0,255,245,.3); border-radius: 3px; background: rgba(0,173,181,.12); color: #c8f4f2; font-size: .58rem; cursor: pointer; }
-.cap-btn:hover:not(:disabled) { background: rgba(0,173,181,.22); }
+.cap-btn { padding: .25rem .55rem; border: 1px solid rgba(203, 220, 245,.3); border-radius: 3px; background: rgba(113, 157, 230,.12); color: #c8f4f2; font-size: .58rem; cursor: pointer; }
+.cap-btn:hover:not(:disabled) { background: rgba(113, 157, 230,.22); }
 .cap-btn:disabled { opacity: .45; cursor: default; }
 .cap-btn.stop { border-color: rgba(255,140,140,.35); background: rgba(255,120,120,.12); color: #ffd0d0; }
 
 /* devices */
 .cap-devices { display: flex; flex-direction: column; gap: .25rem; }
 .cap-device-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: .2rem; }
-.cap-device { display: flex; align-items: baseline; gap: .5rem; padding: .28rem .45rem; border-radius: 3px; background: rgba(0,173,181,.04); font-size: .58rem; }
+.cap-device { display: flex; align-items: baseline; gap: .5rem; padding: .28rem .45rem; border-radius: 3px; background: rgba(113, 157, 230,.04); font-size: .58rem; }
 .cap-device.bad { background: rgba(255,190,120,.05); }
-.cap-device-name { flex: none; width: 4.5rem; color: rgba(0,255,245,.7); font: .54rem 'JetBrains Mono', monospace; }
+.cap-device-name { flex: none; width: 4.5rem; color: rgba(203, 220, 245,.7); font: .54rem 'JetBrains Mono', monospace; }
 .cap-device-state { flex: 1; min-width: 0; color: rgba(222,232,235,.78); }
 .cap-device-reading { display: block; margin-top: .12rem; color: rgba(200,215,220,.48); }
 .cap-device.bad .cap-device-state { color: rgba(255,205,150,.8); }
@@ -414,7 +414,7 @@ onBeforeUnmount(() => {
 .cap-sources { display: flex; flex-direction: column; gap: .3rem; }
 .cap-sources-strip { display: flex; flex-wrap: wrap; gap: .45rem; }
 .cap-source { margin: 0; display: flex; flex-direction: column; gap: .2rem; }
-.cap-source-media { width: 176px; height: auto; border: 1px solid rgba(0,173,181,.2); border-radius: 3px; background: #000; }
+.cap-source-media { width: 176px; height: auto; border: 1px solid rgba(113, 157, 230,.2); border-radius: 3px; background: #000; }
 .cap-source figcaption { color: rgba(200,215,220,.42); font: .48rem 'JetBrains Mono', monospace; }
 
 /* latest reading */
@@ -432,35 +432,35 @@ onBeforeUnmount(() => {
 .cap-intents ul { margin: 0; padding-left: 1rem; color: rgba(210,222,226,.6); font-size: .56rem; line-height: 1.7; }
 
 /* history */
-.cap-history { display: flex; flex-direction: column; gap: .35rem; padding-top: .45rem; border-top: 1px solid rgba(0,173,181,.1); }
+.cap-history { display: flex; flex-direction: column; gap: .35rem; padding-top: .45rem; border-top: 1px solid rgba(113, 157, 230,.1); }
 .cap-history-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .4rem; }
 .cap-thumb-toggle { display: flex; align-items: center; gap: .3rem; color: rgba(220,230,235,.5); font-size: .55rem; cursor: pointer; }
 .cap-privacy-warn { margin: 0; padding: .35rem .45rem; border-radius: 3px; background: rgba(255,180,120,.08); color: rgba(255,205,150,.85); font-size: .54rem; line-height: 1.6; }
 .cap-empty { color: rgba(200,210,215,.3); font-size: .58rem; }
 .cap-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: .22rem; }
-.cap-row { border: 1px solid rgba(0,173,181,.08); border-radius: 3px; background: rgba(0,173,181,.03); }
-.cap-row.open { border-color: rgba(0,255,245,.22); background: rgba(0,173,181,.06); }
+.cap-row { border: 1px solid rgba(113, 157, 230,.08); border-radius: 3px; background: rgba(113, 157, 230,.03); }
+.cap-row.open { border-color: rgba(203, 220, 245,.22); background: rgba(113, 157, 230,.06); }
 .cap-row-head { display: flex; align-items: center; gap: .45rem; width: 100%; padding: .35rem .5rem; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .cap-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #6ee7a8; box-shadow: 0 0 8px rgba(110,231,168,.6); }
 .cap-dot.miss { background: rgba(180,190,195,.4); box-shadow: none; }
-.cap-time { flex: none; color: rgba(0,255,245,.5); font: .52rem 'JetBrains Mono', monospace; }
+.cap-time { flex: none; color: rgba(203, 220, 245,.5); font: .52rem 'JetBrains Mono', monospace; }
 .cap-headline { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(232,240,242,.86); font-size: .64rem; }
 .cap-tags { flex: none; display: flex; gap: .25rem; }
-.cap-tag { padding: .1rem .3rem; border-radius: 2px; background: rgba(0,173,181,.1); color: rgba(200,215,220,.6); font: .46rem 'JetBrains Mono', monospace; font-style: normal; }
+.cap-tag { padding: .1rem .3rem; border-radius: 2px; background: rgba(113, 157, 230,.1); color: rgba(200,215,220,.6); font: .46rem 'JetBrains Mono', monospace; font-style: normal; }
 .cap-tag.said { background: rgba(110,231,168,.16); color: #8ef5c8; }
 .cap-tag.notable { background: rgba(255,180,120,.16); color: rgba(255,205,150,.9); }
 .cap-tag.degraded { background: rgba(255,255,255,.06); color: rgba(200,210,215,.45); }
 .cap-detail { padding: .1rem .55rem .5rem; }
-.cap-chain { display: flex; flex-direction: column; gap: .28rem; border-left: 1px solid rgba(0,255,245,.14); padding-left: .55rem; }
+.cap-chain { display: flex; flex-direction: column; gap: .28rem; border-left: 1px solid rgba(203, 220, 245,.14); padding-left: .55rem; }
 .cap-step { display: flex; gap: .5rem; font-size: .58rem; line-height: 1.6; }
-.cap-step-label { flex: none; width: 4.2rem; color: rgba(0,255,245,.42); font: .5rem 'JetBrains Mono', monospace; }
+.cap-step-label { flex: none; width: 4.2rem; color: rgba(203, 220, 245,.42); font: .5rem 'JetBrains Mono', monospace; }
 .cap-step-value { flex: 1; min-width: 0; color: rgba(226,235,238,.8); word-break: break-word; }
 .cap-step-value.warn { color: rgba(255,190,150,.85); }
 .cap-step-value.minor { color: rgba(200,215,220,.42); font-size: .52rem; }
 .cap-step-value em { color: rgba(200,215,220,.5); font-style: normal; }
 .cap-thumbs { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .45rem; }
 .cap-thumb { margin: 0; display: flex; flex-direction: column; gap: .2rem; }
-.cap-thumb img { width: 148px; height: auto; border: 1px solid rgba(0,173,181,.2); border-radius: 3px; background: #000; }
+.cap-thumb img { width: 148px; height: auto; border: 1px solid rgba(113, 157, 230,.2); border-radius: 3px; background: #000; }
 .cap-thumb figcaption { color: rgba(200,215,220,.45); font: .46rem 'JetBrains Mono', monospace; }
 .cap-thumb-loading { color: rgba(200,210,215,.35); font-size: .54rem; }
 </style>

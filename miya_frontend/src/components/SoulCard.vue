@@ -21,8 +21,8 @@ onMounted(() => {
 const dominantColor = computed(() => {
   const top = props.emotions?.[0]
   if (!top)
-    return '#00ADB5'
-  return emotionColor(top.name, '#00ADB5')
+    return '#719DE6'
+  return emotionColor(top.name, '#719DE6')
 })
 
 const accentGlow = computed(() => `0 0 18px ${dominantColor.value}22, 0 0 4px ${dominantColor.value}11`)
@@ -99,14 +99,14 @@ const accentGlow = computed(() => `0 0 18px ${dominantColor.value}22, 0 0 4px ${
 <style scoped>
 /* ── 组件调色变量 ── */
 .soul-card {
-  --sp: var(--miya-comp-soul-primary, #00ADB5);
+  --sp: var(--miya-comp-soul-primary, #719DE6);
   --spo: var(--miya-comp-soul-positive, #ff6b9d);
   --sne: var(--miya-comp-soul-negative, #7dd3fc);
   --ssu: var(--miya-comp-soul-surprise, #facc15);
-  --sth: var(--miya-comp-soul-thought, #00ADB5);
+  --sth: var(--miya-comp-soul-thought, #719DE6);
   --stk: var(--miya-comp-soul-think, #4ade80);
-  --bg: var(--miya-comp-message-bg, #222831);
-  --tx: var(--miya-comp-message-text, #E4ECF0);
+  --bg: var(--miya-comp-message-bg, #0D1830);
+  --tx: var(--miya-comp-message-text, #ECF1F9);
 
   position: absolute;
   right: -188px;
@@ -133,7 +133,7 @@ const accentGlow = computed(() => `0 0 18px ${dominantColor.value}22, 0 0 4px ${
 }
 
 .soul-card:hover {
-  border-color: rgba(0, 173, 181, 0.3);
+  border-color: rgba(113, 157, 230, 0.3);
   box-shadow: 0 6px 32px rgba(0, 0, 0, 0.35), var(--card-glow, none);
   transform: translateX(-2px);
 }
@@ -159,7 +159,7 @@ const accentGlow = computed(() => `0 0 18px ${dominantColor.value}22, 0 0 4px ${
 /* 滚动条 */
 .soul-card::-webkit-scrollbar { width: 3px; }
 .soul-card::-webkit-scrollbar-track { background: transparent; }
-.soul-card::-webkit-scrollbar-thumb { background: rgba(0, 173, 181, 0.12); border-radius: 3px; }
+.soul-card::-webkit-scrollbar-thumb { background: rgba(113, 157, 230, 0.12); border-radius: 3px; }
 
 /* 标题 */
 .soul-header {
@@ -168,7 +168,7 @@ const accentGlow = computed(() => `0 0 18px ${dominantColor.value}22, 0 0 4px ${
   gap: 0.35rem;
   margin-bottom: 0.5rem;
   padding-bottom: 0.4rem;
-  border-bottom: 1px solid rgba(0, 173, 181, 0.06);
+  border-bottom: 1px solid rgba(113, 157, 230, 0.06);
 }
 .soul-header-dot {
   width: 5px; height: 5px;
@@ -178,7 +178,7 @@ const accentGlow = computed(() => `0 0 18px ${dominantColor.value}22, 0 0 4px ${
 .soul-header-text {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.55rem;
-  color: rgba(0, 173, 181, 0.35);
+  color: rgba(113, 157, 230, 0.35);
   letter-spacing: 0.15em;
   text-transform: uppercase;
 }
@@ -205,7 +205,7 @@ const accentGlow = computed(() => `0 0 18px ${dominantColor.value}22, 0 0 4px ${
 .soul-emotion-bar {
   flex: 1;
   height: 5px;
-  background: rgba(0, 173, 181, 0.05);
+  background: rgba(113, 157, 230, 0.05);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -216,7 +216,7 @@ const accentGlow = computed(() => `0 0 18px ${dominantColor.value}22, 0 0 4px ${
 }
 .soul-em-val {
   font-size: 0.5rem;
-  color: rgba(0, 173, 181, 0.3);
+  color: rgba(113, 157, 230, 0.3);
   width: 1.8rem;
   text-align: right;
   font-family: 'JetBrains Mono', monospace;
@@ -234,7 +234,7 @@ const accentGlow = computed(() => `0 0 18px ${dominantColor.value}22, 0 0 4px ${
 .soul-loading-dot {
   width: 5px; height: 5px;
   border-radius: 50%;
-  background: rgba(0, 173, 181, 0.5);
+  background: rgba(113, 157, 230, 0.5);
   animation: ld-bounce 0.6s ease-in-out infinite;
 }
 @keyframes ld-bounce {
@@ -250,13 +250,13 @@ const accentGlow = computed(() => `0 0 18px ${dominantColor.value}22, 0 0 4px ${
   line-height: 1.6;
   margin-bottom: 0.4rem;
   padding: 0.3rem 0.4rem;
-  background: rgba(0, 173, 181, 0.03);
-  border-left: 2px solid rgba(0, 173, 181, 0.12);
+  background: rgba(113, 157, 230, 0.03);
+  border-left: 2px solid rgba(113, 157, 230, 0.12);
   border-radius: 0 3px 3px 0;
   font-style: italic;
 }
 .soul-quote {
-  color: rgba(0, 173, 181, 0.25);
+  color: rgba(113, 157, 230, 0.25);
   font-size: 0.75rem;
 }
 
@@ -273,7 +273,7 @@ const accentGlow = computed(() => `0 0 18px ${dominantColor.value}22, 0 0 4px ${
   margin-right: 0.15rem;
 }
 .soul-attribution {
-  color: rgba(0, 173, 181, 0.4);
+  color: rgba(113, 157, 230, 0.4);
   font-size: 0.55rem;
   line-height: 1.35;
 }
@@ -286,7 +286,7 @@ const accentGlow = computed(() => `0 0 18px ${dominantColor.value}22, 0 0 4px ${
 /* 思考 */
 .soul-thinking {
   margin-top: 0.3rem;
-  border-top: 1px solid rgba(0, 173, 181, 0.06);
+  border-top: 1px solid rgba(113, 157, 230, 0.06);
   padding-top: 0.35rem;
 }
 .thinking-toggle {
@@ -294,12 +294,12 @@ const accentGlow = computed(() => `0 0 18px ${dominantColor.value}22, 0 0 4px ${
   align-items: center;
   gap: 0.3rem;
   cursor: pointer;
-  color: rgba(0, 173, 181, 0.3);
+  color: rgba(113, 157, 230, 0.3);
   font-size: 0.55rem;
   transition: color 0.2s;
   user-select: none;
 }
-.thinking-toggle:hover { color: rgba(0, 173, 181, 0.6); }
+.thinking-toggle:hover { color: rgba(113, 157, 230, 0.6); }
 .thinking-icon { font-size: 0.6rem; }
 .thinking-len {
   margin-left: auto;

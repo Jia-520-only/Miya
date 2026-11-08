@@ -74,8 +74,8 @@ const orbs = shallowRef(createOrbs(6))
 <style scoped>
 .sci-fi-overlay {
   position: fixed; inset: 0; pointer-events: none; z-index: 100; overflow: hidden;
-  --c1: var(--miya-comp-hud-primary-r, 0,255,245);
-  --c2: var(--miya-comp-hud-secondary-r, 0,173,181);
+  --c1: var(--miya-comp-hud-primary-r, 203,220,245);
+  --c2: var(--miya-comp-hud-secondary-r, 113,157,230);
 }
 
 /* bracket */

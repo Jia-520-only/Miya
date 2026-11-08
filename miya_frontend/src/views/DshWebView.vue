@@ -116,7 +116,7 @@ onMounted(() => {
   justify-content: space-between;
   padding: 0.5rem 0.8rem;
   background: rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(0, 173, 181, 0.06);
+  border: 1px solid rgba(113, 157, 230, 0.06);
   box-shadow:
     3px 3px 8px rgba(0, 40, 50, 0.3),
     -2px -2px 6px rgba(0, 180, 200, 0.04);
@@ -124,7 +124,7 @@ onMounted(() => {
   transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .web-header:hover {
-  border-color: rgba(0, 255, 245, 0.2);
+  border-color: rgba(203, 220, 245, 0.2);
   box-shadow:
     3px 3px 12px rgba(0, 40, 50, 0.4),
     -2px -2px 8px rgba(0, 180, 200, 0.06);
@@ -142,21 +142,21 @@ onMounted(() => {
   justify-content: center;
   width: 28px; height: 28px;
   border-radius: 6px;
-  border: 1px solid rgba(0, 173, 181, 0.1);
-  background: rgba(0, 173, 181, 0.04);
-  color: rgba(0, 173, 181, 0.5);
+  border: 1px solid rgba(113, 157, 230, 0.1);
+  background: rgba(113, 157, 230, 0.04);
+  color: rgba(113, 157, 230, 0.5);
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .web-back-btn:hover {
-  background: rgba(0, 173, 181, 0.1);
-  border-color: rgba(0, 255, 245, 0.3);
-  color: rgba(0, 255, 245, 0.8);
+  background: rgba(113, 157, 230, 0.1);
+  border-color: rgba(203, 220, 245, 0.3);
+  color: rgba(203, 220, 245, 0.8);
   transform: skewX(-4deg);
 }
 
 .web-header-icon {
-  color: var(--miya-primary, #00ADB5);
+  color: var(--miya-primary, #719DE6);
   display: flex;
 }
 
@@ -171,7 +171,7 @@ onMounted(() => {
 .web-header-ver {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.5rem;
-  color: rgba(0, 173, 181, 0.3);
+  color: rgba(113, 157, 230, 0.3);
 }
 
 .web-status {
@@ -186,7 +186,7 @@ onMounted(() => {
 .web-status-dot {
   width: 5px; height: 5px;
   border-radius: 50%;
-  background: rgba(0, 173, 181, 0.15);
+  background: rgba(113, 157, 230, 0.15);
   flex-shrink: 0;
 }
 
@@ -218,7 +218,7 @@ onMounted(() => {
   justify-content: center;
   width: 28px; height: 28px;
   border-radius: 6px;
-  border: 1px solid rgba(0, 173, 181, 0.1);
+  border: 1px solid rgba(113, 157, 230, 0.1);
   background: transparent;
   color: rgba(200, 200, 200, 0.4);
   cursor: pointer;
@@ -226,7 +226,7 @@ onMounted(() => {
 }
 .web-hdr-btn:hover {
   background: rgba(129, 191, 241, 0.12);
-  border-color: rgba(0, 255, 245, 0.25);
+  border-color: rgba(203, 220, 245, 0.25);
   color: rgba(255, 255, 255, 0.85);
   transform: skewX(-4deg);
 }
@@ -236,7 +236,7 @@ onMounted(() => {
   flex: 1;
   min-height: 0;
   background: rgba(0, 0, 0, 0.55);
-  border: 1px solid rgba(0, 173, 181, 0.06);
+  border: 1px solid rgba(113, 157, 230, 0.06);
   border-radius: 6px;
   box-shadow:
     3px 3px 10px rgba(0, 40, 50, 0.35),
@@ -246,7 +246,7 @@ onMounted(() => {
   backdrop-filter: blur(8px);
 }
 .web-container:focus-within {
-  border-color: rgba(0, 255, 245, 0.15);
+  border-color: rgba(203, 220, 245, 0.15);
 }
 
 .dsh-webview {

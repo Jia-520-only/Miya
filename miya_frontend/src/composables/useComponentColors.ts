@@ -22,17 +22,17 @@ const COLOR_GROUPS: ColorGroup[] = [
     label: '全局',
     icon: '⬡',
     colors: [
-      { key: 'accent', label: '全局主色', cssVar: '--miya-accent', default: '#00ADB5' },
-      { key: 'home', label: '首页按钮', cssVar: '--miya-home', default: '#00ADB5' },
-      { key: 'chatAi', label: 'AI 消息', cssVar: '--miya-chat-ai', default: '#00FFF5' },
-      { key: 'chatUser', label: '用户消息', cssVar: '--miya-chat-user', default: '#00ADB5' },
-      { key: 'chatBg', label: '聊天背景', cssVar: '--miya-chat-bg', default: '#222831' },
-      { key: 'border', label: '边框光', cssVar: '--miya-border', default: '#00ADB5' },
-      { key: 'bg', label: '全局背景', cssVar: '--miya-bg', default: '#222831' },
-      { key: 'surface', label: '卡片表面', cssVar: '--miya-surface', default: '#393E46' },
-      { key: 'gold', label: '金色', cssVar: '--miya-gold', default: '#00FFF5' },
-      { key: 'text', label: '主文字', cssVar: '--miya-text', default: '#E4ECF0' },
-      { key: 'textDim', label: '次文字', cssVar: '--miya-text-dim', default: '#7F898E' },
+      { key: 'accent', label: '全局主色', cssVar: '--miya-accent', default: '#719DE6' },
+      { key: 'home', label: '首页按钮', cssVar: '--miya-home', default: '#719DE6' },
+      { key: 'chatAi', label: 'AI 消息', cssVar: '--miya-chat-ai', default: '#CBDCF5' },
+      { key: 'chatUser', label: '用户消息', cssVar: '--miya-chat-user', default: '#719DE6' },
+      { key: 'chatBg', label: '聊天背景', cssVar: '--miya-chat-bg', default: '#0D1830' },
+      { key: 'border', label: '边框光', cssVar: '--miya-border', default: '#719DE6' },
+      { key: 'bg', label: '全局背景', cssVar: '--miya-bg', default: '#0D1830' },
+      { key: 'surface', label: '卡片表面', cssVar: '--miya-surface', default: '#142746' },
+      { key: 'gold', label: '瓷白高光', cssVar: '--miya-gold', default: '#B6D0F3' },
+      { key: 'text', label: '主文字', cssVar: '--miya-text', default: '#ECF1F9' },
+      { key: 'textDim', label: '次文字', cssVar: '--miya-text-dim', default: '#93A7C6' },
     ],
   },
   {
@@ -40,11 +40,11 @@ const COLOR_GROUPS: ColorGroup[] = [
     label: '消息卡片',
     icon: '◆',
     colors: [
-      { key: 'aiPrimary', label: 'AI 消息主色', cssVar: '--miya-comp-message-ai', default: '#00FFF5' },
-      { key: 'userPrimary', label: '用户消息主色', cssVar: '--miya-comp-message-user', default: '#00ADB5' },
-      { key: 'cardBg', label: '卡片背景', cssVar: '--miya-comp-message-bg', default: '#222831' },
-      { key: 'inputPrimary', label: '输入框主色', cssVar: '--miya-comp-message-input', default: '#00ADB5' },
-      { key: 'textPrimary', label: '文字色', cssVar: '--miya-comp-message-text', default: '#E4ECF0' },
+      { key: 'aiPrimary', label: 'AI 消息主色', cssVar: '--miya-comp-message-ai', default: '#CBDCF5' },
+      { key: 'userPrimary', label: '用户消息主色', cssVar: '--miya-comp-message-user', default: '#719DE6' },
+      { key: 'cardBg', label: '卡片背景', cssVar: '--miya-comp-message-bg', default: '#0D1830' },
+      { key: 'inputPrimary', label: '输入框主色', cssVar: '--miya-comp-message-input', default: '#719DE6' },
+      { key: 'textPrimary', label: '文字色', cssVar: '--miya-comp-message-text', default: '#ECF1F9' },
     ],
   },
   {
@@ -52,11 +52,11 @@ const COLOR_GROUPS: ColorGroup[] = [
     label: '灵魂卡片',
     icon: '♥',
     colors: [
-      { key: 'cardPrimary', label: '卡片主色', cssVar: '--miya-comp-soul-primary', default: '#00FFF5' },
+      { key: 'cardPrimary', label: '卡片主色', cssVar: '--miya-comp-soul-primary', default: '#CBDCF5' },
       { key: 'emotionPositive', label: '积极情绪', cssVar: '--miya-comp-soul-positive', default: '#ff6b9d' },
       { key: 'emotionNegative', label: '消极情绪', cssVar: '--miya-comp-soul-negative', default: '#7dd3fc' },
       { key: 'emotionSurprise', label: '惊喜情绪', cssVar: '--miya-comp-soul-surprise', default: '#facc15' },
-      { key: 'thoughtColor', label: '内心独白', cssVar: '--miya-comp-soul-thought', default: '#00ADB5' },
+      { key: 'thoughtColor', label: '内心独白', cssVar: '--miya-comp-soul-thought', default: '#719DE6' },
       { key: 'thinkColor', label: '思考过程', cssVar: '--miya-comp-soul-think', default: '#4ade80' },
     ],
   },
@@ -89,8 +89,8 @@ const COLOR_GROUPS: ColorGroup[] = [
     label: 'HUD 覆盖层',
     icon: '◎',
     colors: [
-      { key: 'primary', label: '主色调', cssVar: '--miya-comp-hud-primary', default: '#00FFF5' },
-      { key: 'secondary', label: '辅色调', cssVar: '--miya-comp-hud-secondary', default: '#00ADB5' },
+      { key: 'primary', label: '主色调', cssVar: '--miya-comp-hud-primary', default: '#CBDCF5' },
+      { key: 'secondary', label: '辅色调', cssVar: '--miya-comp-hud-secondary', default: '#719DE6' },
     ],
   },
   {
@@ -98,9 +98,9 @@ const COLOR_GROUPS: ColorGroup[] = [
     label: '悬浮窗',
     icon: '◈',
     colors: [
-      { key: 'ballPrimary', label: '球体主色', cssVar: '--miya-comp-floating-ball', default: '#00FFF5' },
-      { key: 'ringColor', label: '光环色', cssVar: '--miya-comp-floating-ring', default: '#00ADB5' },
-      { key: 'bgColor', label: '背景色', cssVar: '--miya-comp-floating-bg', default: '#222831' },
+      { key: 'ballPrimary', label: '球体主色', cssVar: '--miya-comp-floating-ball', default: '#CBDCF5' },
+      { key: 'ringColor', label: '光环色', cssVar: '--miya-comp-floating-ring', default: '#719DE6' },
+      { key: 'bgColor', label: '背景色', cssVar: '--miya-comp-floating-bg', default: '#0D1830' },
     ],
   },
   {
@@ -108,12 +108,12 @@ const COLOR_GROUPS: ColorGroup[] = [
     label: '记忆星图',
     icon: '◆',
     colors: [
-      { key: 'nodeLine', label: '节点连线', cssVar: '--miya-comp-mind-line', default: '#00ADB5' },
-      { key: 'anchorColor', label: '锚点色', cssVar: '--miya-comp-mind-anchor', default: '#00FFF5' },
-      { key: 'highlightColor', label: '高亮色', cssVar: '--miya-comp-mind-highlight', default: '#00FFF5' },
-      { key: 'levelLongTerm', label: '长期记忆', cssVar: '--miya-comp-mind-long-term', default: '#00ADB5' },
+      { key: 'nodeLine', label: '节点连线', cssVar: '--miya-comp-mind-line', default: '#719DE6' },
+      { key: 'anchorColor', label: '锚点色', cssVar: '--miya-comp-mind-anchor', default: '#CBDCF5' },
+      { key: 'highlightColor', label: '高亮色', cssVar: '--miya-comp-mind-highlight', default: '#CBDCF5' },
+      { key: 'levelLongTerm', label: '长期记忆', cssVar: '--miya-comp-mind-long-term', default: '#719DE6' },
       { key: 'levelShortTerm', label: '短期记忆', cssVar: '--miya-comp-mind-short-term', default: '#7dd3fc' },
-      { key: 'levelDialogue', label: '对话记忆', cssVar: '--miya-comp-mind-dialogue', default: '#00ADB5' },
+      { key: 'levelDialogue', label: '对话记忆', cssVar: '--miya-comp-mind-dialogue', default: '#719DE6' },
       { key: 'levelSemantic', label: '语义记忆', cssVar: '--miya-comp-mind-semantic', default: '#ff6b9d' },
       { key: 'levelKnowledge', label: '知识记忆', cssVar: '--miya-comp-mind-knowledge', default: '#ffd700' },
     ],
@@ -125,8 +125,8 @@ const COLOR_GROUPS: ColorGroup[] = [
     colors: [
       { key: 'bg', label: '背景', cssVar: '--miya-comp-terminal-bg', default: '#0a0a14' },
       { key: 'fg', label: '前景文字', cssVar: '--miya-comp-terminal-fg', default: '#d4d4e8' },
-      { key: 'cursor', label: '光标', cssVar: '--miya-comp-terminal-cursor', default: '#00FFF5' },
-      { key: 'selection', label: '选区', cssVar: '--miya-comp-terminal-selection', default: '#11666B' },
+      { key: 'cursor', label: '光标', cssVar: '--miya-comp-terminal-cursor', default: '#CBDCF5' },
+      { key: 'selection', label: '选区', cssVar: '--miya-comp-terminal-selection', default: '#294A78' },
       { key: 'black', label: 'ANSI 黑', cssVar: '--miya-comp-terminal-black', default: '#1a1a2e' },
       { key: 'red', label: 'ANSI 红', cssVar: '--miya-comp-terminal-red', default: '#f87171' },
       { key: 'green', label: 'ANSI 绿', cssVar: '--miya-comp-terminal-green', default: '#34d399' },
@@ -167,10 +167,27 @@ function normalizeColors(source: Record<string, string>): Record<string, string>
   for (const group of COLOR_GROUPS) {
     for (const c of group.colors) {
       const scopedKey = colorStorageKey(group.id, c.key)
-      normalized[scopedKey] = normalizePickerColor(source[scopedKey] || source[c.key] || c.default, c.default)
+      const stored = String(source[scopedKey] || source[c.key] || c.default)
+      const oldDefault = LEGACY_DEFAULTS[scopedKey]
+      normalized[scopedKey] = normalizePickerColor(oldDefault && stored.toLowerCase() === oldDefault.toLowerCase() ? c.default : stored, c.default)
     }
   }
   return normalized
+}
+
+const LEGACY_DEFAULTS: Record<string, string> = {
+  'global.accent': '#00ADB5', 'global.home': '#00ADB5', 'global.chatAi': '#00FFF5',
+  'global.chatUser': '#00ADB5', 'global.chatBg': '#222831', 'global.border': '#00ADB5',
+  'global.bg': '#222831', 'global.surface': '#393E46', 'global.gold': '#00FFF5',
+  'global.text': '#E4ECF0', 'global.textDim': '#7F898E',
+  'message.aiPrimary': '#00FFF5', 'message.userPrimary': '#00ADB5', 'message.cardBg': '#222831',
+  'message.inputPrimary': '#00ADB5', 'message.textPrimary': '#E4ECF0',
+  'soul.cardPrimary': '#00FFF5', 'soul.thoughtColor': '#00ADB5',
+  'hud.primary': '#00FFF5', 'hud.secondary': '#00ADB5',
+  'floating.ballPrimary': '#00FFF5', 'floating.ringColor': '#00ADB5', 'floating.bgColor': '#222831',
+  'mind.nodeLine': '#00ADB5', 'mind.anchorColor': '#00FFF5', 'mind.highlightColor': '#00FFF5',
+  'mind.levelLongTerm': '#00ADB5', 'mind.levelDialogue': '#00ADB5',
+  'terminal.cursor': '#00FFF5', 'terminal.selection': '#11666B',
 }
 
 function normalizePickerColor(value: string, fallback: string): string {
@@ -203,7 +220,7 @@ function hexToRgb(hex: string): string {
   const r = parseInt(h.substring(0, 2), 16)
   const g = parseInt(h.substring(2, 4), 16)
   const b = parseInt(h.substring(4, 6), 16)
-  return isNaN(r) ? '0,173,181' : `${r},${g},${b}`
+  return isNaN(r) ? '113,157,230' : `${r},${g},${b}`
 }
 
 export function applyComponentColors(colors: Record<string, string>) {
@@ -214,13 +231,13 @@ export function applyComponentColors(colors: Record<string, string>) {
     }
   }
   // 同步派生变量（依赖 global 组）
-  const accent = colors[colorStorageKey('global', 'accent')] || '#00ADB5'
+  const accent = colors[colorStorageKey('global', 'accent')] || '#719DE6'
   root.style.setProperty('--miya-primary', accent)
   root.style.setProperty('--miya-glow', `color-mix(in srgb, ${accent} 30%, transparent)`)
 
   // HUD 覆盖层 RGB 版本（供 SciFiOverlay 动画使用）
-  const hudPrimary = colors[colorStorageKey('hud', 'primary')] || '#00FFF5'
-  const hudSecondary = colors[colorStorageKey('hud', 'secondary')] || '#00ADB5'
+  const hudPrimary = colors[colorStorageKey('hud', 'primary')] || '#CBDCF5'
+  const hudSecondary = colors[colorStorageKey('hud', 'secondary')] || '#719DE6'
   root.style.setProperty('--miya-comp-hud-primary-r', hexToRgb(hudPrimary))
   root.style.setProperty('--miya-comp-hud-secondary-r', hexToRgb(hudSecondary))
 }

@@ -14,7 +14,7 @@ interface HubCard {
 }
 
 const cards: HubCard[] = [
-  { id: 'chat', icon: '◆', title: '弥娅对话', desc: '灵魂共鸣 · AI 深度交流', path: '/chat', color: '#00FFF5' },
+  { id: 'chat', icon: '◆', title: '弥娅对话', desc: '灵魂共鸣 · AI 深度交流', path: '/chat', color: '#CBDCF5' },
   { id: 'inbox', icon: '✉', title: '消息收件箱', desc: '跨平台消息总览', path: '/inbox', color: '#60a5fa' },
   { id: 'mind', icon: '◇', title: '记忆星河', desc: '3D 认知可视化图谱', path: '/mind', color: '#c084fc', size: 'tall' },
   { id: 'artboard', icon: '⬡', title: '弥娅画板', desc: 'AI 绘画创作工具', path: '/artboard', color: '#f472b6' },
@@ -90,7 +90,7 @@ function navigate(path: string) {
 }
 
 .hub-view::-webkit-scrollbar { width: 4px; }
-.hub-view::-webkit-scrollbar-thumb { background: rgba(0, 173, 181, 0.12); border-radius: 2px; }
+.hub-view::-webkit-scrollbar-thumb { background: rgba(113, 157, 230, 0.12); border-radius: 2px; }
 
 /* ── Header ── */
 .hub-header {
@@ -113,13 +113,13 @@ function navigate(path: string) {
   color: #ffffff;
   letter-spacing: 0.1em;
   margin: 0;
-  text-shadow: 0 0 8px rgba(0, 255, 245, 0.15);
+  text-shadow: 0 0 8px rgba(203, 220, 245, 0.15);
 }
 
 .hub-subtitle {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.55rem;
-  color: rgba(0, 255, 245, 0.4);
+  color: rgba(203, 220, 245, 0.4);
   letter-spacing: 0.12em;
 }
 
@@ -129,19 +129,19 @@ function navigate(path: string) {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(0, 173, 181, 0.12);
-  background: rgba(0, 173, 181, 0.06);
-  color: rgba(0, 173, 181, 0.5);
+  border: 1px solid rgba(113, 157, 230, 0.12);
+  background: rgba(113, 157, 230, 0.06);
+  color: rgba(113, 157, 230, 0.5);
   cursor: pointer;
   clip-path: polygon(0 4px, 4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%);
   transition: all 0.3s ease;
 }
 
 .hub-back:hover {
-  background: rgba(0, 173, 181, 0.16);
-  border-color: rgba(0, 255, 245, 0.4);
-  color: rgba(0, 255, 245, 0.9);
-  box-shadow: 0 0 14px rgba(0, 173, 181, 0.2);
+  background: rgba(113, 157, 230, 0.16);
+  border-color: rgba(203, 220, 245, 0.4);
+  color: rgba(203, 220, 245, 0.9);
+  box-shadow: 0 0 14px rgba(113, 157, 230, 0.2);
   transform: skewX(-4deg);
 }
 
@@ -159,7 +159,7 @@ function navigate(path: string) {
 .hub-card {
   position: relative;
   background: rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(0, 173, 181, 0.08);
+  border: 1px solid rgba(113, 157, 230, 0.08);
   cursor: pointer;
   transition: all 0.45s cubic-bezier(0.22, 1, 0.36, 1);
   overflow: hidden;
@@ -170,7 +170,7 @@ function navigate(path: string) {
   box-shadow:
     4px 4px 12px rgba(0, 60, 70, 0.4),
     -3px -3px 8px rgba(0, 200, 210, 0.06),
-    0 1px 0 rgba(0, 173, 181, 0.05);
+    0 1px 0 rgba(113, 157, 230, 0.05);
 }
 
 .hub-card::after {
@@ -185,9 +185,9 @@ function navigate(path: string) {
 }
 
 .hub-card:hover {
-  background: rgba(0, 173, 181, 0.18);
+  background: rgba(113, 157, 230, 0.18);
   transform: rotateX(1deg) rotateY(-6deg) skewX(-3deg) translateY(-4px);
-  border-color: color-mix(in srgb, var(--card-color) 35%, rgba(0, 173, 181, 0.2));
+  border-color: color-mix(in srgb, var(--card-color) 35%, rgba(113, 157, 230, 0.2));
   box-shadow:
     6px 6px 18px rgba(0, 60, 70, 0.5),
     -3px -3px 10px rgba(0, 200, 210, 0.12),
@@ -226,7 +226,7 @@ function navigate(path: string) {
 
 .hub-card-icon {
   font-size: 1.4rem;
-  color: color-mix(in srgb, var(--card-color) 70%, rgba(0, 255, 245, 0.3));
+  color: color-mix(in srgb, var(--card-color) 70%, rgba(203, 220, 245, 0.3));
   line-height: 1;
   transition: all 0.4s ease;
 }
@@ -315,6 +315,6 @@ function navigate(path: string) {
 
 .hub-card:hover .hub-card-corner.tl,
 .hub-card:hover .hub-card-corner.br {
-  border-color: color-mix(in srgb, var(--card-color) 55%, rgba(0, 255, 245, 0.4));
+  border-color: color-mix(in srgb, var(--card-color) 55%, rgba(203, 220, 245, 0.4));
 }
 </style>

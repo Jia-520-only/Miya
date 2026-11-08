@@ -31,6 +31,7 @@ const moreItems: NavItem[] = [
   { id: 'community', label: '弥娅社区', icon: '✧', path: '/community' },
   { id: 'hub', label: '弥娅中枢', icon: '⬡', path: '/hub' },
   { id: 'screen', label: '弥娅视觉', icon: '⊙', path: '/screen' },
+  { id: 'observatory', label: '弥娅观测台', icon: '◉', path: '/observatory' },
 ]
 
 function isActive(item: NavItem) {
@@ -152,7 +153,7 @@ function navigateTo(item: NavItem) {
   padding: 0.4rem 0;
   width: 56px;
   margin: 0.3rem 0;
-  background: rgba(120, 207, 209, 0.035);
+  background: rgba(113, 157, 230, 0.035);
   border: 1px solid var(--miya-line-soft);
   border-radius: var(--miya-radius-sm);
   cursor: pointer;
@@ -165,7 +166,7 @@ function navigateTo(item: NavItem) {
 .nav-logo:hover,
 .nav-logo.active {
   border-color: var(--miya-line-strong);
-  box-shadow: inset 0 0 20px rgba(120, 207, 209, 0.06);
+  box-shadow: inset 0 0 20px rgba(113, 157, 230, 0.06);
 }
 
 /* The navigation is a HUD rail, not a continuous glass panel. */
@@ -188,7 +189,7 @@ function navigateTo(item: NavItem) {
 .nav-logo {
   width: 54px;
   background: rgba(6, 14, 23, 0.62);
-  border-color: rgba(162, 245, 238, 0.12);
+  border-color: rgba(203, 220, 245, 0.12);
 }
 
 .nav-item {
@@ -199,28 +200,28 @@ function navigateTo(item: NavItem) {
 
 .nav-item:hover,
 .nav-item.active {
-  background: linear-gradient(90deg, rgba(120, 207, 209, 0.16), rgba(6, 14, 23, 0.62));
-  box-shadow: inset 2px 0 rgba(162, 245, 238, 0.5), 0 5px 16px rgba(0, 0, 0, 0.18);
+  background: linear-gradient(90deg, rgba(113, 157, 230, 0.16), rgba(6, 14, 23, 0.62));
+  box-shadow: inset 2px 0 rgba(203, 220, 245, 0.5), 0 5px 16px rgba(0, 0, 0, 0.18);
 }
 
 .nav-divider { width: 34px; margin-block: 0.18rem; }
 .nav-spacer { min-height: 0.25rem; }
 
 .nav-logo.active {
-  background: rgba(120, 207, 209, 0.1);
+  background: rgba(113, 157, 230, 0.1);
 }
 
 .nav-logo-icon {
   font-family: 'Noto Serif SC', serif;
   font-size: 1.2rem;
   font-weight: 700;
-  color: color-mix(in srgb, var(--miya-home, #00ADB5) 85%, transparent);
+  color: color-mix(in srgb, var(--miya-home, #719DE6) 85%, transparent);
   line-height: 1;
   transition: all 0.3s ease;
 }
 
 .nav-logo:hover .nav-logo-icon {
-  text-shadow: 0 0 12px color-mix(in srgb, var(--miya-home, #00ADB5) 30%, transparent);
+  text-shadow: 0 0 12px color-mix(in srgb, var(--miya-home, #719DE6) 30%, transparent);
 }
 
 .nav-logo-label {
@@ -265,13 +266,13 @@ function navigateTo(item: NavItem) {
 .nav-item:hover {
   color: var(--miya-text-strong);
   transform: translateX(2px);
-  background: rgba(120, 207, 209, 0.07);
+  background: rgba(113, 157, 230, 0.07);
   box-shadow: none;
 }
 
 .nav-item.active {
   color: var(--miya-accent-bright);
-  background: linear-gradient(90deg, rgba(120, 207, 209, 0.14), rgba(120, 207, 209, 0.035));
+  background: linear-gradient(90deg, rgba(113, 157, 230, 0.14), rgba(113, 157, 230, 0.035));
   font-weight: 600;
 }
 
@@ -387,8 +388,8 @@ function navigateTo(item: NavItem) {
   padding: 8px;
   overflow: visible;
   background: linear-gradient(135deg, rgba(7, 15, 24, 0.96), rgba(11, 22, 34, 0.9));
-  border: 1px solid rgba(162, 245, 238, 0.18);
-  border-left: 2px solid rgba(162, 245, 238, 0.48);
+  border: 1px solid rgba(203, 220, 245, 0.18);
+  border-left: 2px solid rgba(203, 220, 245, 0.48);
   box-shadow: 14px 18px 42px rgba(0, 0, 0, 0.42);
   backdrop-filter: blur(16px);
   clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
@@ -398,8 +399,8 @@ function navigateTo(item: NavItem) {
   content: 'EXTENDED ACCESS';
   grid-column: 1 / -1;
   padding: 2px 3px 5px;
-  color: rgba(162, 245, 238, 0.46);
-  border-bottom: 1px solid rgba(162, 245, 238, 0.1);
+  color: rgba(203, 220, 245, 0.46);
+  border-bottom: 1px solid rgba(203, 220, 245, 0.1);
   font: 0.38rem/1 'JetBrains Mono', monospace;
   letter-spacing: 0.16em;
 }
@@ -409,15 +410,15 @@ function navigateTo(item: NavItem) {
   min-height: 48px;
   margin: 0;
   padding: 0.38rem 0.25rem;
-  background: rgba(120, 207, 209, 0.035);
-  border: 1px solid rgba(162, 245, 238, 0.08);
+  background: rgba(113, 157, 230, 0.035);
+  border: 1px solid rgba(203, 220, 245, 0.08);
 }
 
 .nav-more-section .nav-item-sm:hover,
 .nav-more-section .nav-item-sm.active {
   transform: translateY(-1px);
-  background: rgba(120, 207, 209, 0.12);
-  border-color: rgba(162, 245, 238, 0.22);
+  background: rgba(113, 157, 230, 0.12);
+  border-color: rgba(203, 220, 245, 0.22);
 }
 
 .nav-more-section .nav-label-sm {

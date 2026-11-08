@@ -379,7 +379,7 @@ onUnmounted(() => {
 
 .cv-source-btn:hover { color: var(--miya-text-strong, #f2f6f7); }
 .cv-source-btn:focus-visible { outline: 2px solid var(--miya-accent); outline-offset: 2px; }
-.cv-source-btn.active { color: #5eead4; background: rgba(0, 173, 181, 0.11); border-color: rgba(94, 234, 212, 0.18); }
+.cv-source-btn.active { color: #5eead4; background: rgba(113, 157, 230, 0.11); border-color: rgba(94, 234, 212, 0.18); }
 .cv-source-btn.frontend.active { color: #93c5fd; background: rgba(59, 130, 246, 0.12); border-color: rgba(147, 197, 253, 0.2); }
 
 .cv-source-icon {
@@ -430,7 +430,7 @@ onUnmounted(() => {
   color: var(--miya-text);
 }
 
-.cv-filter-btn.active.f-all { background: rgba(0, 173, 181, 0.12); color: #5eead4; }
+.cv-filter-btn.active.f-all { background: rgba(113, 157, 230, 0.12); color: #5eead4; }
 .cv-filter-btn.active.f-info { background: rgba(59, 130, 246, 0.12); color: #60a5fa; }
 .cv-filter-btn.active.f-warning { background: rgba(245, 158, 11, 0.12); color: #fbbf24; }
 .cv-filter-btn.active.f-error { background: rgba(239, 68, 68, 0.12); color: #f87171; }

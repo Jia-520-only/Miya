@@ -28,9 +28,9 @@ function buildXtermTheme() {
   return {
     background: c('--miya-comp-terminal-bg', '#0a0a14'),
     foreground: c('--miya-comp-terminal-fg', '#d4d4e8'),
-    cursor: c('--miya-comp-terminal-cursor', '#00ADB5'),
+    cursor: c('--miya-comp-terminal-cursor', '#719DE6'),
     cursorAccent: '#0a0a14',
-    selectionBackground: c('--miya-comp-terminal-selection', '#00ADB544'),
+    selectionBackground: c('--miya-comp-terminal-selection', '#719DE644'),
     black: c('--miya-comp-terminal-black', '#1a1a2e'),
     red: c('--miya-comp-terminal-red', '#f87171'),
     green: c('--miya-comp-terminal-green', '#34d399'),
@@ -315,7 +315,7 @@ onUnmounted(() => {
   justify-content: space-between;
   padding: 0.5rem 0.8rem;
   background: rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(0, 173, 181, 0.06);
+  border: 1px solid rgba(113, 157, 230, 0.06);
   box-shadow:
     3px 3px 8px rgba(0, 40, 50, 0.3),
     -2px -2px 6px rgba(0, 180, 200, 0.04);
@@ -323,7 +323,7 @@ onUnmounted(() => {
   transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .term-header:hover {
-  border-color: rgba(0, 255, 245, 0.2);
+  border-color: rgba(203, 220, 245, 0.2);
   box-shadow:
     3px 3px 12px rgba(0, 40, 50, 0.4),
     -2px -2px 8px rgba(0, 180, 200, 0.06);
@@ -341,21 +341,21 @@ onUnmounted(() => {
   justify-content: center;
   width: 28px; height: 28px;
   border-radius: 6px;
-  border: 1px solid rgba(0, 173, 181, 0.1);
-  background: rgba(0, 173, 181, 0.04);
-  color: rgba(0, 173, 181, 0.5);
+  border: 1px solid rgba(113, 157, 230, 0.1);
+  background: rgba(113, 157, 230, 0.04);
+  color: rgba(113, 157, 230, 0.5);
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .term-back-btn:hover {
-  background: rgba(0, 173, 181, 0.1);
-  border-color: rgba(0, 255, 245, 0.3);
-  color: rgba(0, 255, 245, 0.8);
+  background: rgba(113, 157, 230, 0.1);
+  border-color: rgba(203, 220, 245, 0.3);
+  color: rgba(203, 220, 245, 0.8);
   transform: skewX(-4deg);
 }
 
 .term-header-icon {
-  color: var(--miya-primary, #00ADB5);
+  color: var(--miya-primary, #719DE6);
   display: flex;
 }
 
@@ -370,7 +370,7 @@ onUnmounted(() => {
 .term-header-ver {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.5rem;
-  color: rgba(0, 173, 181, 0.3);
+  color: rgba(113, 157, 230, 0.3);
 }
 
 .term-status {
@@ -385,7 +385,7 @@ onUnmounted(() => {
 .term-status-dot {
   width: 5px; height: 5px;
   border-radius: 50%;
-  background: rgba(0, 173, 181, 0.15);
+  background: rgba(113, 157, 230, 0.15);
   flex-shrink: 0;
 }
 
@@ -423,7 +423,7 @@ onUnmounted(() => {
   height: 28px;
   padding: 0 0.6rem;
   border-radius: 6px;
-  border: 1px solid rgba(0, 173, 181, 0.1);
+  border: 1px solid rgba(113, 157, 230, 0.1);
   background: transparent;
   color: rgba(200, 200, 200, 0.4);
   font-family: 'JetBrains Mono', monospace;
@@ -433,13 +433,13 @@ onUnmounted(() => {
 }
 .term-mode-btn:hover {
   background: rgba(129, 191, 241, 0.12);
-  border-color: rgba(0, 255, 245, 0.25);
+  border-color: rgba(203, 220, 245, 0.25);
   color: rgba(255, 255, 255, 0.85);
 }
 .term-mode-btn.active {
-  background: rgba(0, 173, 181, 0.12);
-  border-color: rgba(0, 255, 245, 0.35);
-  color: rgba(0, 255, 245, 0.9);
+  background: rgba(113, 157, 230, 0.12);
+  border-color: rgba(203, 220, 245, 0.35);
+  color: rgba(203, 220, 245, 0.9);
 }
 
 .term-hdr-btn {
@@ -448,7 +448,7 @@ onUnmounted(() => {
   justify-content: center;
   width: 28px; height: 28px;
   border-radius: 6px;
-  border: 1px solid rgba(0, 173, 181, 0.1);
+  border: 1px solid rgba(113, 157, 230, 0.1);
   background: transparent;
   color: rgba(200, 200, 200, 0.4);
   cursor: pointer;
@@ -456,7 +456,7 @@ onUnmounted(() => {
 }
 .term-hdr-btn:hover {
   background: rgba(129, 191, 241, 0.12);
-  border-color: rgba(0, 255, 245, 0.25);
+  border-color: rgba(203, 220, 245, 0.25);
   color: rgba(255, 255, 255, 0.85);
   transform: skewX(-4deg);
 }
@@ -466,7 +466,7 @@ onUnmounted(() => {
   flex: 1;
   min-height: 0;
   background: rgba(0, 0, 0, 0.55);
-  border: 1px solid rgba(0, 173, 181, 0.06);
+  border: 1px solid rgba(113, 157, 230, 0.06);
   border-radius: 6px;
   box-shadow:
     3px 3px 10px rgba(0, 40, 50, 0.35),
@@ -476,7 +476,7 @@ onUnmounted(() => {
   backdrop-filter: blur(8px);
 }
 .terminal-container:focus-within {
-  border-color: rgba(0, 255, 245, 0.15);
+  border-color: rgba(203, 220, 245, 0.15);
 }
 
 .dsh-webview {
@@ -509,7 +509,7 @@ onUnmounted(() => {
 
 :deep(.xterm-viewport) {
   scrollbar-width: thin;
-  scrollbar-color: rgba(0, 173, 181, 0.12) transparent;
+  scrollbar-color: rgba(113, 157, 230, 0.12) transparent;
 }
 
 :deep(.xterm-viewport::-webkit-scrollbar) {
@@ -521,11 +521,11 @@ onUnmounted(() => {
 }
 
 :deep(.xterm-viewport::-webkit-scrollbar-thumb) {
-  background: rgba(0, 173, 181, 0.12);
+  background: rgba(113, 157, 230, 0.12);
   border-radius: 2px;
 }
 
 :deep(.xterm-viewport::-webkit-scrollbar-thumb:hover) {
-  background: rgba(0, 173, 181, 0.25);
+  background: rgba(113, 157, 230, 0.25);
 }
 </style>

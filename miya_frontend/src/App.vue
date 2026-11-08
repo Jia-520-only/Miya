@@ -6,15 +6,16 @@ import { useRoute } from 'vue-router'
 import EarthAPI from '@/api/earth'
 import BottomBar from '@/components/BottomBar.vue'
 import HomeStoryShowcase from '@/components/HomeStoryShowcase.vue'
+import MiyaFluxScene from '@/components/MiyaFluxScene.vue'
 import SciFiOverlay from '@/components/SciFiOverlay.vue'
 import SideNav from '@/components/SideNav.vue'
 import TitleBar from '@/components/TitleBar.vue'
 import TopStatusBar from '@/components/TopStatusBar.vue'
 import { useElectron } from '@/composables/useElectron'
 import { useMIYARealtime } from '@/composables/useMIYARealtime'
+import { isLegacyBackground } from '@/utils/backgroundAssets'
 import { useCameraVision } from '@/utils/cameraVision'
 import { destroyParallax, initParallax } from '@/utils/parallax'
-import { isLegacyBackground } from '@/utils/backgroundAssets'
 
 const FloatingView = defineAsyncComponent(() => import('@/views/FloatingView.vue'))
 
@@ -28,6 +29,13 @@ const floatingState = ref<FloatingState>('classic')
 let cleanupFloatingState: (() => void) | undefined
 const isFloatingMode = computed(() => floatingState.value !== 'classic')
 const isHome = computed(() => route.path === '/')
+const homeAmbientEnabled = ref(false)
+
+function syncHomeAmbient(event?: Event) {
+  homeAmbientEnabled.value = event instanceof CustomEvent
+    ? Boolean(event.detail)
+    : localStorage.getItem('miya-haloflux-ambient-enabled') === 'true'
+}
 
 const customBg = useStorage('miya-bg-image', '')
 if (isLegacyBackground(customBg.value))
@@ -36,19 +44,20 @@ const customBgOpacity = useStorage('miya-bg-opacity', 0.35)
 const hudVisible = useStorage('miya-hud-visible', true)
 const hudOpacity = useStorage('miya-hud-opacity', 1.0)
 const homeGalleryVisible = useStorage('miya-home-gallery-visible', true)
+const backgroundQuoteRE = /"/g
 
 const frameStyle = computed(() => {
   if (!customBg.value) {
     return `
-      radial-gradient(circle at 18% 22%, rgba(0, 173, 181, 0.16), transparent 34%),
-      radial-gradient(circle at 78% 70%, rgba(40, 82, 120, 0.16), transparent 38%),
-      linear-gradient(145deg, #101923 0%, #071018 52%, #03070c 100%)
+      radial-gradient(circle at 18% 22%, rgba(113, 157, 230, 0.18), transparent 34%),
+      radial-gradient(circle at 78% 70%, rgba(82, 121, 180, 0.18), transparent 38%),
+      linear-gradient(145deg, #12213b 0%, #0d1830 52%, #080f21 100%)
     `
   }
   const overlay = `rgba(13, 17, 23, ${1 - customBgOpacity.value})`
   const rawSource = customBg.value
   const source = rawSource.startsWith('/api/') ? EarthAPI.imageUrl(rawSource) : rawSource
-  const escaped = source.replace(/"/g, '\\"')
+  const escaped = source.replace(backgroundQuoteRE, '\\"')
   return `linear-gradient(${overlay}, ${overlay}), url("${escaped}") center / cover no-repeat fixed`
 })
 
@@ -64,6 +73,8 @@ watch([isHome, homeGalleryVisible], ([home, visible]) => {
 })
 
 onMounted(async () => {
+  syncHomeAmbient()
+  window.addEventListener('miya-haloflux-ambient-change', syncHomeAmbient)
   if (isHome.value && homeGalleryVisible.value)
     initParallax()
   connectWS()
@@ -85,6 +96,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('miya-haloflux-ambient-change', syncHomeAmbient)
   disconnectWS()
   destroyParallax()
   cleanupFloatingState?.()
@@ -98,6 +110,11 @@ onUnmounted(() => {
   <template v-else>
     <div class="miya-shell" :class="{ 'is-electron': isElectron }" :style="{ background: frameStyle }">
       <div class="shell-atmosphere" aria-hidden="true" />
+      <MiyaFluxScene
+        v-if="isHome && homeAmbientEnabled"
+        class="home-ambient-visual"
+        ambient
+      />
       <SciFiOverlay v-if="hudVisible" :style="{ opacity: hudOpacity }" />
       <TitleBar />
       <TopStatusBar />
@@ -144,9 +161,20 @@ onUnmounted(() => {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(circle at 78% 14%, rgba(120, 207, 209, 0.08), transparent 30%),
-    radial-gradient(circle at 22% 88%, rgba(216, 189, 130, 0.055), transparent 32%),
-    repeating-linear-gradient(90deg, transparent 0 79px, rgba(173, 218, 226, 0.018) 80px);
+    radial-gradient(circle at 78% 14%, rgba(148, 184, 239, 0.1), transparent 30%),
+    radial-gradient(circle at 22% 88%, rgba(182, 208, 243, 0.055), transparent 32%),
+    repeating-linear-gradient(90deg, transparent 0 79px, rgba(148, 177, 228, 0.02) 80px);
+}
+
+.home-ambient-visual {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  opacity: 0.3;
+  pointer-events: none;
 }
 
 .miya-body {

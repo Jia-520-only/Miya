@@ -128,7 +128,7 @@ function onNewWindow(e: any) {
   justify-content: space-between;
   padding: 0.5rem 0.8rem;
   background: rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(0, 173, 181, 0.06);
+  border: 1px solid rgba(113, 157, 230, 0.06);
   box-shadow:
     3px 3px 8px rgba(0, 40, 50, 0.3),
     -2px -2px 6px rgba(0, 180, 200, 0.04);
@@ -136,7 +136,7 @@ function onNewWindow(e: any) {
   transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .cv-header:hover {
-  border-color: rgba(0, 255, 245, 0.2);
+  border-color: rgba(203, 220, 245, 0.2);
   box-shadow:
     3px 3px 12px rgba(0, 40, 50, 0.4),
     -2px -2px 8px rgba(0, 180, 200, 0.06);
@@ -154,21 +154,21 @@ function onNewWindow(e: any) {
   justify-content: center;
   width: 28px; height: 28px;
   border-radius: 6px;
-  border: 1px solid rgba(0, 173, 181, 0.1);
-  background: rgba(0, 173, 181, 0.04);
-  color: rgba(0, 173, 181, 0.5);
+  border: 1px solid rgba(113, 157, 230, 0.1);
+  background: rgba(113, 157, 230, 0.04);
+  color: rgba(113, 157, 230, 0.5);
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .cv-back-btn:hover {
-  background: rgba(0, 173, 181, 0.1);
-  border-color: rgba(0, 255, 245, 0.3);
-  color: rgba(0, 255, 245, 0.8);
+  background: rgba(113, 157, 230, 0.1);
+  border-color: rgba(203, 220, 245, 0.3);
+  color: rgba(203, 220, 245, 0.8);
   transform: skewX(-4deg);
 }
 
 .cv-header-icon {
-  color: var(--miya-primary, #00ADB5);
+  color: var(--miya-primary, #719DE6);
   font-size: 0.9rem;
   display: flex;
 }
@@ -184,7 +184,7 @@ function onNewWindow(e: any) {
 .cv-header-sub {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.5rem;
-  color: rgba(0, 173, 181, 0.3);
+  color: rgba(113, 157, 230, 0.3);
 }
 
 .cv-status {
@@ -199,7 +199,7 @@ function onNewWindow(e: any) {
 .cv-status-dot {
   width: 5px; height: 5px;
   border-radius: 50%;
-  background: rgba(0, 173, 181, 0.15);
+  background: rgba(113, 157, 230, 0.15);
   flex-shrink: 0;
 }
 
@@ -231,7 +231,7 @@ function onNewWindow(e: any) {
   justify-content: center;
   width: 28px; height: 28px;
   border-radius: 6px;
-  border: 1px solid rgba(0, 173, 181, 0.1);
+  border: 1px solid rgba(113, 157, 230, 0.1);
   background: transparent;
   color: rgba(200, 200, 200, 0.4);
   cursor: pointer;
@@ -239,7 +239,7 @@ function onNewWindow(e: any) {
 }
 .cv-hdr-btn:hover {
   background: rgba(129, 191, 241, 0.12);
-  border-color: rgba(0, 255, 245, 0.25);
+  border-color: rgba(203, 220, 245, 0.25);
   color: rgba(255, 255, 255, 0.85);
   transform: skewX(-4deg);
 }
@@ -249,7 +249,7 @@ function onNewWindow(e: any) {
   flex: 1;
   min-height: 0;
   background: rgba(0, 0, 0, 0.55);
-  border: 1px solid rgba(0, 173, 181, 0.06);
+  border: 1px solid rgba(113, 157, 230, 0.06);
   border-radius: 6px;
   box-shadow:
     3px 3px 10px rgba(0, 40, 50, 0.35),
@@ -259,7 +259,7 @@ function onNewWindow(e: any) {
   backdrop-filter: blur(8px);
 }
 .cv-container:focus-within {
-  border-color: rgba(0, 255, 245, 0.15);
+  border-color: rgba(203, 220, 245, 0.15);
 }
 
 .cv-webview {
@@ -284,7 +284,7 @@ function onNewWindow(e: any) {
   align-items: center;
   gap: 0.6rem;
   padding: 2.5rem 3rem;
-  border: 1px solid rgba(0, 173, 181, 0.1);
+  border: 1px solid rgba(113, 157, 230, 0.1);
   border-radius: 10px;
   background: rgba(20, 14, 6, 0.6);
   box-shadow: 0 0 40px rgba(212, 175, 55, 0.05);
@@ -292,7 +292,7 @@ function onNewWindow(e: any) {
 
 .cv-fallback-icon {
   font-size: 2rem;
-  color: var(--miya-accent, #00FFF5);
+  color: var(--miya-accent, #CBDCF5);
 }
 
 .cv-fallback-title {
@@ -314,7 +314,7 @@ function onNewWindow(e: any) {
   margin: 0;
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.62rem;
-  color: rgba(0, 173, 181, 0.4);
+  color: rgba(113, 157, 230, 0.4);
 }
 
 .cv-fallback-btn {
@@ -324,9 +324,9 @@ function onNewWindow(e: any) {
   gap: 0.4rem;
   padding: 0.55rem 1.6rem;
   border-radius: 6px;
-  border: 1px solid rgba(0, 173, 181, 0.25);
-  background: rgba(0, 173, 181, 0.12);
-  color: rgba(0, 255, 245, 0.85);
+  border: 1px solid rgba(113, 157, 230, 0.25);
+  background: rgba(113, 157, 230, 0.12);
+  color: rgba(203, 220, 245, 0.85);
   font-size: 0.78rem;
   font-family: inherit;
   cursor: pointer;
@@ -334,9 +334,9 @@ function onNewWindow(e: any) {
 }
 .cv-fallback-btn:hover {
   background: rgba(129, 191, 241, 0.14);
-  border-color: rgba(0, 255, 245, 0.4);
+  border-color: rgba(203, 220, 245, 0.4);
   transform: skewX(-3deg);
-  box-shadow: 0 0 14px rgba(0, 173, 181, 0.12);
+  box-shadow: 0 0 14px rgba(113, 157, 230, 0.12);
 }
 
 .cv-fallback-hint {

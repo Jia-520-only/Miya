@@ -2213,11 +2213,11 @@ function questStars(difficulty: number): string {
 .toast-enter-active, .toast-leave-active { transition: all 0.3s; }
 .toast-enter-from, .toast-leave-to { opacity: 0; transform: translateX(-50%) translateY(12px); }
 
-/* Miya OS admin skin: quiet surfaces, teal signal colour, consistent controls. */
+/* Miya OS admin skin: quiet surfaces, porcelain blue signal colour, consistent controls. */
 .earth-online {
   --earth-admin-accent: var(--earth-accent, var(--miya-accent-soft));
   --earth-admin-bright: var(--earth-accent-light, var(--miya-accent-bright));
-  --earth-admin-deep: var(--earth-accent-deep, #4f9fa5);
+  --earth-admin-deep: var(--earth-accent-deep, #5279B4);
   --earth-admin-surface: rgba(12, 20, 31, 0.82);
   gap: 0.65rem;
 }
@@ -2233,7 +2233,7 @@ function questStars(difficulty: number): string {
 }
 .earth-online .player-avatar {
   background: linear-gradient(135deg, var(--earth-admin-bright), var(--earth-admin-accent));
-  box-shadow: 0 0 18px rgba(120, 207, 209, 0.2);
+  box-shadow: 0 0 18px rgba(113, 157, 230, 0.2);
 }
 .earth-online .player-level,
 .earth-online .stat-icon,
@@ -2280,7 +2280,7 @@ function questStars(difficulty: number): string {
 .earth-online .btn-primary {
   color: #071018;
   background: linear-gradient(135deg, var(--earth-admin-bright), var(--earth-admin-accent));
-  box-shadow: 0 8px 20px rgba(120, 207, 209, 0.15);
+  box-shadow: 0 8px 20px rgba(113, 157, 230, 0.15);
 }
 .earth-online .btn-primary:hover { filter: brightness(1.08); }
 .earth-online input:focus,
@@ -2326,8 +2326,8 @@ function questStars(difficulty: number): string {
   padding: .75rem;
   overflow: hidden;
   background:
-    linear-gradient(90deg, rgba(120, 207, 209, .025) 1px, transparent 1px),
-    linear-gradient(rgba(120, 207, 209, .02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(113, 157, 230, .025) 1px, transparent 1px),
+    linear-gradient(rgba(113, 157, 230, .02) 1px, transparent 1px),
     rgba(5, 10, 16, .72);
   background-size: 72px 72px;
 }
@@ -2384,7 +2384,7 @@ function questStars(difficulty: number): string {
 .earth-online .item-card { border-top-color: var(--miya-line-strong); }
 .earth-online .item-img-wrap { height: 136px; }
 .earth-online .quest-card { border-left: 2px solid var(--miya-line); }
-.earth-online .quest-card.ongoing { border-left-color: var(--earth-admin-bright); background: linear-gradient(90deg, rgba(120, 207, 209, .08), var(--earth-admin-surface)); }
+.earth-online .quest-card.ongoing { border-left-color: var(--earth-admin-bright); background: linear-gradient(90deg, rgba(113, 157, 230, .08), var(--earth-admin-surface)); }
 .earth-online .quest-card.failed { border-left-color: var(--miya-danger); }
 .earth-online .character-card { border-top: 2px solid var(--miya-line); }
 .earth-online .story-card { border-left: 2px solid var(--earth-admin-accent); }
@@ -2404,22 +2404,22 @@ function questStars(difficulty: number): string {
   position: relative;
   padding: .15rem .2rem .5rem;
   background:
-    linear-gradient(90deg, rgba(120, 207, 209, .018) 1px, transparent 1px),
-    linear-gradient(rgba(120, 207, 209, .014) 1px, transparent 1px);
+    linear-gradient(90deg, rgba(113, 157, 230, .018) 1px, transparent 1px),
+    linear-gradient(rgba(113, 157, 230, .014) 1px, transparent 1px);
   background-size: 72px 72px;
 }
 .earth-online .player-card {
   padding: .65rem .8rem;
-  background: linear-gradient(100deg, rgba(120, 207, 209, .08), rgba(8, 16, 25, .9) 62%);
-  border-color: rgba(120, 207, 209, .2);
+  background: linear-gradient(100deg, rgba(113, 157, 230, .08), rgba(8, 16, 25, .9) 62%);
+  border-color: rgba(113, 157, 230, .2);
 }
-.earth-online .player-avatar { width: 48px; height: 48px; border-radius: 2px; box-shadow: 0 0 18px rgba(120, 207, 209, .18); }
+.earth-online .player-avatar { width: 48px; height: 48px; border-radius: 2px; box-shadow: 0 0 18px rgba(113, 157, 230, .18); }
 .earth-online .player-name { font-size: 1rem; }
 .earth-online .player-level { color: var(--earth-admin-bright); }
 .earth-online .stat-value { color: var(--earth-admin-bright); }
 .earth-online .earth-tabs { box-shadow: 0 10px 24px rgba(0,0,0,.18); }
-.earth-online .earth-tab.active { color: var(--earth-admin-bright); background: rgba(120, 207, 209, .08); }
-.earth-online .earth-tab-group { border-left-color: rgba(162, 245, 238, .12); background: rgba(5, 13, 21, .34); }
+.earth-online .earth-tab.active { color: var(--earth-admin-bright); background: rgba(113, 157, 230, .08); }
+.earth-online .earth-tab-group { border-left-color: rgba(203, 220, 245, .12); background: rgba(5, 13, 21, .34); }
 .earth-online .earth-tab-group-label b { color: var(--miya-text-body); }
 .earth-online .earth-tab-group-label small { color: color-mix(in srgb, var(--earth-admin-bright) 58%, transparent); }
 .earth-online .earth-tab-group-items { align-items: stretch; }

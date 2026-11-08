@@ -38,9 +38,9 @@ const model = defineModel<number>({ required: true })
 
 .miya-slider::-webkit-slider-runnable-track {
   height: 4px;
-  border: 1px solid color-mix(in srgb, var(--miya-accent, #00adb5) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--miya-accent, #719DE6) 20%, transparent);
   border-radius: 2px;
-  background: color-mix(in srgb, var(--miya-accent, #00adb5) 12%, rgba(0, 0, 0, 0.55));
+  background: color-mix(in srgb, var(--miya-accent, #719DE6) 12%, rgba(0, 0, 0, 0.55));
 }
 
 .miya-slider::-webkit-slider-thumb {
@@ -48,14 +48,14 @@ const model = defineModel<number>({ required: true })
   height: 14px;
   margin-top: -6px;
   appearance: none;
-  border: 1px solid color-mix(in srgb, var(--miya-accent, #00adb5) 70%, white 10%);
+  border: 1px solid color-mix(in srgb, var(--miya-accent, #719DE6) 70%, white 10%);
   border-radius: 50%;
-  background: var(--miya-accent, #00adb5);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--miya-accent, #00adb5) 40%, transparent);
+  background: var(--miya-accent, #719DE6);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--miya-accent, #719DE6) 40%, transparent);
 }
 
 .miya-slider:focus-visible {
-  outline: 1px solid var(--miya-accent, #00adb5);
+  outline: 1px solid var(--miya-accent, #719DE6);
   outline-offset: 2px;
 }
 

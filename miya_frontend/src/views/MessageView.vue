@@ -546,7 +546,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
                 class="soul-em-fill"
                 :style="{
                   width: `${Math.min(e.intensity, 100)}%`,
-                  background: getEmotionColorMap()[e.name] || '#00ADB5',
+                  background: getEmotionColorMap()[e.name] || '#719DE6',
                 }"
               />
             </div>
@@ -778,8 +778,8 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 .avatar-hex {
   width: 100%;
   height: 100%;
-  background: linear-gradient(135deg, rgba(0, 173, 181, 0.2), rgba(57, 164, 252, 0.15));
-  border: 1px solid rgba(0, 255, 245, 0.25);
+  background: linear-gradient(135deg, rgba(113, 157, 230, 0.2), rgba(57, 164, 252, 0.15));
+  border: 1px solid rgba(203, 220, 245, 0.25);
   clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   display: flex;
   align-items: center;
@@ -790,8 +790,8 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   font-family: 'Noto Serif SC', serif;
   font-size: 1.4rem;
   font-weight: 900;
-  color: rgba(0, 255, 245, 0.8);
-  text-shadow: 0 0 10px rgba(0, 255, 245, 0.3);
+  color: rgba(203, 220, 245, 0.8);
+  text-shadow: 0 0 10px rgba(203, 220, 245, 0.3);
 }
 
 .avatar-scan {
@@ -824,7 +824,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   font-size: 1.2em;
   letter-spacing: 0.05em;
   font-weight: 700;
-  text-shadow: 0 0 6px rgba(0, 255, 245, 0.1);
+  text-shadow: 0 0 6px rgba(203, 220, 245, 0.1);
 }
 
 .left-id {
@@ -861,7 +861,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   height: 68px;
   width: calc(50% - 0.2rem);
   background: rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(0, 173, 181, 0.06);
+  border: 1px solid rgba(113, 157, 230, 0.06);
   box-shadow: 3px 3px 8px rgba(0, 40, 50, 0.3), -2px -2px 6px rgba(0, 180, 200, 0.04);
   padding: 0.4rem;
   display: flex;
@@ -887,14 +887,14 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 
 .nav-block:hover {
   background: rgba(129, 191, 241, 0.15);
-  border-color: rgba(0, 255, 245, 0.2);
+  border-color: rgba(203, 220, 245, 0.2);
   transform: skewX(-6deg);
 }
 
 .nav-block.active {
-  background: rgba(0, 173, 181, 0.12);
-  border-color: rgba(0, 255, 245, 0.3);
-  box-shadow: 0 0 12px rgba(0, 173, 181, 0.1);
+  background: rgba(113, 157, 230, 0.12);
+  border-color: rgba(203, 220, 245, 0.3);
+  box-shadow: 0 0 12px rgba(113, 157, 230, 0.1);
 }
 
 /* Banner */
@@ -908,7 +908,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 .banner-inner {
   position: relative;
   background: rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(0, 173, 181, 0.08);
+  border: 1px solid rgba(113, 157, 230, 0.08);
   padding: 0.5rem;
   clip-path: polygon(0 6px, 4px 0, calc(100% - 4px) 0, 100% 4px, 100% 100%, 0 100%);
   overflow: hidden;
@@ -953,14 +953,14 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 
 .left-banner:hover .banner-inner {
   background: rgba(129, 191, 241, 0.12);
-  border-color: rgba(0, 255, 245, 0.2);
+  border-color: rgba(203, 220, 245, 0.2);
 }
 
 /* ═══ 灵魂共鸣卡片 ═══ */
 .left-soul {
   margin-top: 0.3rem;
   background: rgba(0, 0, 0, 0.55);
-  border: 1px solid rgba(0, 173, 181, 0.08);
+  border: 1px solid rgba(113, 157, 230, 0.08);
   padding: 0.5rem;
   overflow: hidden;
   position: relative;
@@ -974,13 +974,13 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 }
 
 .left-soul::-webkit-scrollbar { width: 3px; }
-.left-soul::-webkit-scrollbar-thumb { background: rgba(0, 173, 181, 0.1); border-radius: 2px; }
+.left-soul::-webkit-scrollbar-thumb { background: rgba(113, 157, 230, 0.1); border-radius: 2px; }
 
 .left-soul:hover {
-  border-color: rgba(0, 255, 245, 0.15);
+  border-color: rgba(203, 220, 245, 0.15);
   box-shadow:
     2px 3px 12px rgba(0, 30, 40, 0.4),
-    0 0 16px rgba(0, 173, 181, 0.06);
+    0 0 16px rgba(113, 157, 230, 0.06);
 }
 
 /* Header */
@@ -990,14 +990,14 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   gap: 0.35rem;
   margin-bottom: 0.4rem;
   padding-bottom: 0.35rem;
-  border-bottom: 1px solid rgba(0, 173, 181, 0.06);
+  border-bottom: 1px solid rgba(113, 157, 230, 0.06);
 }
 
 .soul-header-dot {
   width: 5px; height: 5px;
   border-radius: 50%;
-  background: rgba(0, 255, 245, 0.6);
-  box-shadow: 0 0 6px rgba(0, 255, 245, 0.4);
+  background: rgba(203, 220, 245, 0.6);
+  box-shadow: 0 0 6px rgba(203, 220, 245, 0.4);
   animation: dot-breath 2s ease-in-out infinite;
   flex-shrink: 0;
 }
@@ -1013,7 +1013,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   margin-left: auto;
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.45em;
-  color: rgba(0, 173, 181, 0.3);
+  color: rgba(113, 157, 230, 0.3);
   letter-spacing: 0.1em;
 }
 
@@ -1042,7 +1042,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 .soul-em-bar {
   flex: 1;
   height: 4px;
-  background: rgba(0, 173, 181, 0.06);
+  background: rgba(113, 157, 230, 0.06);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -1056,7 +1056,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 
 .soul-em-val {
   font-size: 0.5em;
-  color: rgba(0, 173, 181, 0.3);
+  color: rgba(113, 157, 230, 0.3);
   width: 1.8rem;
   text-align: right;
   font-family: 'JetBrains Mono', monospace;
@@ -1072,13 +1072,13 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   line-height: 1.5;
   padding: 0.3rem 0.35rem;
   margin-bottom: 0.35rem;
-  background: rgba(0, 173, 181, 0.03);
-  border-left: 2px solid rgba(0, 173, 181, 0.15);
+  background: rgba(113, 157, 230, 0.03);
+  border-left: 2px solid rgba(113, 157, 230, 0.15);
   border-radius: 0 3px 3px 0;
 }
 
 .soul-quote {
-  color: rgba(0, 173, 181, 0.25);
+  color: rgba(113, 157, 230, 0.25);
   font-size: 0.8em;
 }
 
@@ -1099,7 +1099,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 }
 
 .soul-line-icon {
-  color: rgba(0, 173, 181, 0.3);
+  color: rgba(113, 157, 230, 0.3);
   flex-shrink: 0;
   font-size: 0.55em;
   margin-top: 0.1em;
@@ -1107,7 +1107,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 
 /* Thinking */
 .soul-thinking {
-  border-top: 1px solid rgba(0, 173, 181, 0.05);
+  border-top: 1px solid rgba(113, 157, 230, 0.05);
   padding-top: 0.3rem;
 }
 
@@ -1116,13 +1116,13 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   align-items: center;
   gap: 0.25rem;
   cursor: pointer;
-  color: rgba(0, 173, 181, 0.3);
+  color: rgba(113, 157, 230, 0.3);
   font-size: 0.55em;
   transition: color 0.2s;
   user-select: none;
 }
 
-.thinking-toggle:hover { color: rgba(0, 173, 181, 0.55); }
+.thinking-toggle:hover { color: rgba(113, 157, 230, 0.55); }
 
 .thinking-icon { font-size: 0.6em; }
 
@@ -1137,7 +1137,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   margin-top: 0.3rem;
   padding: 0.3rem;
   background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(0, 173, 181, 0.05);
+  border: 1px solid rgba(113, 157, 230, 0.05);
   border-radius: 3px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.5em;
@@ -1150,13 +1150,13 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 }
 
 .thinking-body::-webkit-scrollbar { width: 2px; }
-.thinking-body::-webkit-scrollbar-thumb { background: rgba(0, 173, 181, 0.1); border-radius: 1px; }
+.thinking-body::-webkit-scrollbar-thumb { background: rgba(113, 157, 230, 0.1); border-radius: 1px; }
 
 /* Empty */
 .soul-empty {
   text-align: center;
   padding: 0.5rem;
-  color: rgba(0, 173, 181, 0.15);
+  color: rgba(113, 157, 230, 0.15);
   font-size: 0.55em;
 }
 
@@ -1174,7 +1174,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   gap: 0.3rem;
   padding: 0.3rem 0.4rem;
   background: rgba(255, 252, 252, 0.08);
-  border: 1px solid rgba(0, 173, 181, 0.05);
+  border: 1px solid rgba(113, 157, 230, 0.05);
   cursor: pointer;
   transition: all 0.2s ease;
   flex-shrink: 0;
@@ -1185,7 +1185,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 }
 
 .history-icon {
-  color: rgba(0, 255, 245, 0.4);
+  color: rgba(203, 220, 245, 0.4);
   font-size: 0.65rem;
 }
 
@@ -1205,12 +1205,12 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   transition: color 0.2s;
 }
 
-.history-toggle:hover { color: rgba(0, 255, 245, 0.8); }
+.history-toggle:hover { color: rgba(203, 220, 245, 0.8); }
 
 .history-dropdown {
   margin-top: 0.3rem;
   background: rgba(0, 0, 0, 0.7);
-  border: 1px solid rgba(0, 173, 181, 0.08);
+  border: 1px solid rgba(113, 157, 230, 0.08);
   overflow: hidden;
   backdrop-filter: blur(12px);
 }
@@ -1218,7 +1218,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 .history-status {
   text-align: center;
   padding: 0.8rem;
-  color: rgba(0, 173, 181, 0.3);
+  color: rgba(113, 157, 230, 0.3);
   font-size: 0.6rem;
 }
 
@@ -1228,7 +1228,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 }
 
 .history-list::-webkit-scrollbar { width: 3px; }
-.history-list::-webkit-scrollbar-thumb { background: rgba(0, 173, 181, 0.1); border-radius: 2px; }
+.history-list::-webkit-scrollbar-thumb { background: rgba(113, 157, 230, 0.1); border-radius: 2px; }
 
 .history-row {
   display: flex;
@@ -1236,7 +1236,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   padding: 0.35rem 0.5rem;
   cursor: pointer;
   transition: all 0.15s ease;
-  border-bottom: 1px solid rgba(0, 173, 181, 0.03);
+  border-bottom: 1px solid rgba(113, 157, 230, 0.03);
 }
 
 .history-row:hover,
@@ -1245,7 +1245,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 }
 
 .history-row.active {
-  border-left: 2px solid rgba(0, 255, 245, 0.4);
+  border-left: 2px solid rgba(203, 220, 245, 0.4);
 }
 
 .history-sid {
@@ -1257,12 +1257,12 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 .history-meta {
   margin-left: auto;
   font-size: 0.5rem;
-  color: rgba(0, 173, 181, 0.3);
+  color: rgba(113, 157, 230, 0.3);
 }
 
 .history-del {
   background: none; border: none;
-  color: rgba(0, 173, 181, 0.15);
+  color: rgba(113, 157, 230, 0.15);
   cursor: pointer; font-size: 0.5rem;
   padding: 2px;
 }
@@ -1273,10 +1273,10 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   display: block;
   width: 100%;
   padding: 0.35rem;
-  background: rgba(0, 173, 181, 0.06);
+  background: rgba(113, 157, 230, 0.06);
   border: none;
-  border-top: 1px solid rgba(0, 173, 181, 0.06);
-  color: rgba(0, 255, 245, 0.4);
+  border-top: 1px solid rgba(113, 157, 230, 0.06);
+  color: rgba(203, 220, 245, 0.4);
   font-size: 0.6rem;
   cursor: pointer;
   transition: all 0.2s;
@@ -1284,8 +1284,8 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 }
 
 .history-new-btn:hover {
-  background: rgba(0, 173, 181, 0.12);
-  color: rgba(0, 255, 245, 0.7);
+  background: rgba(113, 157, 230, 0.12);
+  color: rgba(203, 220, 245, 0.7);
 }
 
 .history-expand-enter-active { transition: all 0.25s ease; }
@@ -1304,7 +1304,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   background:
     linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0) 30%),
     linear-gradient(0deg, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0) 20%);
-  border: 1px solid rgba(0, 173, 181, 0.04);
+  border: 1px solid rgba(113, 157, 230, 0.04);
   border-radius: 2px;
   transition: transform 0.5s ease;
 }
@@ -1326,8 +1326,8 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 
 .tilt-toggle {
   background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(0, 173, 181, 0.08);
-  color: rgba(0, 173, 181, 0.35);
+  border: 1px solid rgba(113, 157, 230, 0.08);
+  color: rgba(113, 157, 230, 0.35);
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.55rem;
   padding: 2px 8px;
@@ -1337,9 +1337,9 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 }
 
 .tilt-toggle:hover {
-  background: rgba(0, 173, 181, 0.1);
-  border-color: rgba(0, 255, 245, 0.25);
-  color: rgba(0, 255, 245, 0.7);
+  background: rgba(113, 157, 230, 0.1);
+  border-color: rgba(203, 220, 245, 0.25);
+  color: rgba(203, 220, 245, 0.7);
 }
 
 .right-status {
@@ -1356,7 +1356,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   flex: 1;
   height: 36px;
   background: rgba(0, 0, 0, 0.55);
-  border: 1px solid rgba(0, 173, 181, 0.07);
+  border: 1px solid rgba(113, 157, 230, 0.07);
   padding: 0 0.7rem;
   cursor: pointer;
   transition: all 0.25s ease;
@@ -1364,19 +1364,19 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 
 .status-item:hover {
   background: rgba(129, 191, 241, 0.12);
-  border-color: rgba(0, 173, 181, 0.2);
+  border-color: rgba(113, 157, 230, 0.2);
 }
 
 .status-dot {
   width: 6px; height: 6px;
   border-radius: 50%;
-  background: rgba(0, 173, 181, 0.15);
+  background: rgba(113, 157, 230, 0.15);
   flex-shrink: 0;
 }
 
 .status-dot.on {
-  background: rgba(0, 255, 245, 0.6);
-  box-shadow: 0 0 6px rgba(0, 255, 245, 0.4);
+  background: rgba(203, 220, 245, 0.6);
+  box-shadow: 0 0 6px rgba(203, 220, 245, 0.4);
   animation: dot-breath 2s ease-in-out infinite;
 }
 
@@ -1410,7 +1410,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 
 .right-messages::-webkit-scrollbar { width: 4px; }
 .right-messages::-webkit-scrollbar-track { background: transparent; }
-.right-messages::-webkit-scrollbar-thumb { background: rgba(0, 173, 181, 0.12); border-radius: 2px; }
+.right-messages::-webkit-scrollbar-thumb { background: rgba(113, 157, 230, 0.12); border-radius: 2px; }
 
 .msg-list {
   display: flex;
@@ -1436,14 +1436,14 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 
 .input-box {
   background: rgba(0, 0, 0, 0.55);
-  border: 1px solid rgba(0, 173, 181, 0.07);
+  border: 1px solid rgba(113, 157, 230, 0.07);
   padding: 0.45rem 0.55rem;
   backdrop-filter: blur(16px);
   transition: border-color 0.3s, box-shadow 0.3s;
 }
 
 .input-box:focus-within {
-  border-color: rgba(0, 173, 181, 0.3);
+  border-color: rgba(113, 157, 230, 0.3);
 }
 
 .input-main {
@@ -1453,7 +1453,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 }
 
 .input-cursor {
-  color: rgba(0, 255, 245, 0.35);
+  color: rgba(203, 220, 245, 0.35);
   font-size: 0.85rem;
   font-family: 'JetBrains Mono', monospace;
   flex-shrink: 0;
@@ -1477,7 +1477,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   color: rgba(228, 236, 240, 0.9);
 }
 
-.input-textarea::placeholder { color: rgba(0, 173, 181, 0.12); }
+.input-textarea::placeholder { color: rgba(113, 157, 230, 0.12); }
 
 .input-actions {
   display: flex;
@@ -1491,7 +1491,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   justify-content: center;
   width: 30px; height: 30px;
   background: transparent;
-  border: 1px solid rgba(0, 173, 181, 0.06);
+  border: 1px solid rgba(113, 157, 230, 0.06);
   color: rgba(200, 200, 200, 0.4);
   cursor: pointer;
   font-family: 'JetBrains Mono', monospace;
@@ -1503,14 +1503,14 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 .input-btn:hover {
   color: rgba(255, 255, 255, 0.85);
   background: rgba(129, 191, 241, 0.12);
-  border-color: rgba(0, 173, 181, 0.2);
+  border-color: rgba(113, 157, 230, 0.2);
   transform: skewX(-5deg);
 }
 
 .input-btn.active {
-  color: rgba(0, 255, 245, 0.75);
-  background: rgba(0, 173, 181, 0.14);
-  border-color: rgba(0, 255, 245, 0.25);
+  color: rgba(203, 220, 245, 0.75);
+  background: rgba(113, 157, 230, 0.14);
+  border-color: rgba(203, 220, 245, 0.25);
 }
 
 .input-btn.recording {
@@ -1528,9 +1528,9 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   align-items: center;
   justify-content: center;
   width: 36px; height: 34px;
-  border: 1px solid rgba(0, 173, 181, 0.12);
+  border: 1px solid rgba(113, 157, 230, 0.12);
   background: rgba(57, 164, 252, 0.08);
-  color: rgba(0, 173, 181, 0.45);
+  color: rgba(113, 157, 230, 0.45);
   cursor: pointer;
   clip-path: polygon(0 3px, 3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%);
   transition: all 0.3s ease;
@@ -1539,8 +1539,8 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
 
 .send-btn:hover:not(:disabled) {
   background: rgba(57, 164, 252, 0.2);
-  border-color: rgba(0, 255, 245, 0.5);
-  color: rgba(0, 255, 245, 0.95);
+  border-color: rgba(203, 220, 245, 0.5);
+  color: rgba(203, 220, 245, 0.95);
   transform: skewX(-3deg);
 }
 
@@ -1554,7 +1554,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   right: 1rem;
   min-width: 130px;
   background: rgba(0, 0, 0, 0.7);
-  border: 1px solid rgba(0, 173, 181, 0.12);
+  border: 1px solid rgba(113, 157, 230, 0.12);
   backdrop-filter: blur(16px);
   box-shadow: 3px 3px 12px rgba(0, 40, 50, 0.45);
   overflow: hidden;
@@ -1567,7 +1567,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   padding: 0.4rem 0.7rem;
   background: none;
   border: none;
-  border-bottom: 1px solid rgba(0, 173, 181, 0.04);
+  border-bottom: 1px solid rgba(113, 157, 230, 0.04);
   color: rgba(200, 200, 200, 0.5);
   font-family: 'Noto Sans SC', sans-serif;
   font-size: 0.7rem;
@@ -1650,7 +1650,7 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   border-radius: var(--miya-radius-sm);
 }
 .status-item:hover {
-  background: rgba(120, 207, 209, 0.07);
+  background: rgba(113, 157, 230, 0.07);
   border-color: var(--miya-line);
 }
 
@@ -1671,10 +1671,10 @@ function getEmotionColorMap() { return buildEmotionColorMap() }
   border: 0;
   border-radius: var(--miya-radius-xs);
 }
-.tilt-toggle:hover { color: var(--miya-text-strong); background: rgba(120, 207, 209, 0.06); }
+.tilt-toggle:hover { color: var(--miya-text-strong); background: rgba(113, 157, 230, 0.06); }
 .tilt-toggle.active {
   color: var(--miya-accent-bright);
-  background: rgba(120, 207, 209, 0.12);
+  background: rgba(113, 157, 230, 0.12);
   box-shadow: inset 0 0 0 1px var(--miya-line);
 }
 

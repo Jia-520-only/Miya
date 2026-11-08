@@ -10,7 +10,7 @@ const EarningView = defineAsyncComponent(() => import('./earth/EarningView.vue')
 // ── 地球online 壳: 前台展示 (玩家视角) / 后台管理 (数据录入) 双界面 ──
 
 const view = ref<'player' | 'admin' | 'earning'>('player')
-const theme = ref<EarthTheme>({ accent: '#78cfd1', accent_light: '#a2f5ee', accent_deep: '#4f9fa5', background: '', background_opacity: 0.25, glass: true })
+const theme = ref<EarthTheme>({ accent: '#719DE6', accent_light: '#CBDCF5', accent_deep: '#5279B4', background: '', background_opacity: 0.25, glass: true })
 const shellThemeVars = computed(() => ({
   '--earth-accent': theme.value.accent,
   '--earth-accent-light': theme.value.accent_light,
@@ -57,7 +57,7 @@ const VIEW_LABELS = {
 .earth-shell {
   --earth-accent: var(--miya-accent-soft);
   --earth-accent-light: var(--miya-accent-bright);
-  --earth-accent-deep: #4f9fa5;
+  --earth-accent-deep: #5279B4;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -78,15 +78,15 @@ const VIEW_LABELS = {
   gap: .9rem;
   padding: 0 .6rem;
   background: linear-gradient(90deg, rgba(5, 10, 16, .92), rgba(8, 18, 28, .7) 62%, rgba(5, 10, 16, .52));
-  border-bottom: 1px solid rgba(162, 245, 238, .16);
-  box-shadow: inset 0 -1px rgba(120, 207, 209, .04);
+  border-bottom: 1px solid rgba(203, 220, 245, .16);
+  box-shadow: inset 0 -1px rgba(113, 157, 230, .04);
   backdrop-filter: blur(14px);
 }
 .view-switch::after { content: ''; position: absolute; right: 0; bottom: -1px; width: 34%; height: 1px; background: linear-gradient(90deg, transparent, var(--earth-accent-light)); }
-.view-buttons { display: flex; gap: 0; border-left: 1px solid rgba(162, 245, 238, .12); }
+.view-buttons { display: flex; gap: 0; border-left: 1px solid rgba(203, 220, 245, .12); }
 .view-btn { height: 31px; padding: 0 .78rem; color: var(--miya-text-faint); font-size: .62rem; letter-spacing: .08em; background: transparent; border: 0; cursor: pointer; }
-.view-btn:hover { color: var(--earth-accent-light); border-color: transparent; background: rgba(120, 207, 209, .06); }
-.view-btn.active { color: var(--earth-accent-light); background: rgba(120, 207, 209, .1); box-shadow: inset 0 -2px var(--earth-accent-light); }
+.view-btn:hover { color: var(--earth-accent-light); border-color: transparent; background: rgba(113, 157, 230, .06); }
+.view-btn.active { color: var(--earth-accent-light); background: rgba(113, 157, 230, .1); box-shadow: inset 0 -2px var(--earth-accent-light); }
 .view-hint { margin-left: auto; color: var(--miya-text-faint); font-size: .5rem; letter-spacing: .12em; text-transform: uppercase; }
 @media (max-width: 700px) {
   .view-switch { flex-basis: 30px; min-height: 30px; gap: .35rem; padding-inline: .35rem; }

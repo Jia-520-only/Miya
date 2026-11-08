@@ -70,7 +70,7 @@ export function getEmotionCSSVar(name: string): string {
 export function emotionColor(name: string, fallback?: string): string {
   const cssVar = getEmotionCSSVar(name)
   const canonical = resolveEmotionName(name)
-  const fb = fallback || EMOTION_DEFAULTS[canonical] || '#00ADB5'
+  const fb = fallback || EMOTION_DEFAULTS[canonical] || '#719DE6'
   const root = getComputedStyle(document.documentElement)
   return root.getPropertyValue(cssVar).trim() || fb
 }
@@ -81,13 +81,13 @@ export function buildEmotionColorMap(): Record<string, string> {
   const map: Record<string, string> = {}
   for (const [name, canonical] of Object.entries(EMOTION_ALIASES)) {
     const cssVar = `--miya-comp-emotion-${canonical}`
-    const fb = EMOTION_DEFAULTS[canonical] || '#00ADB5'
+    const fb = EMOTION_DEFAULTS[canonical] || '#719DE6'
     map[name] = root.getPropertyValue(cssVar).trim() || fb
   }
   // 也补上英文名
   for (const canonical of Object.keys(EMOTION_DEFAULTS)) {
     const cssVar = `--miya-comp-emotion-${canonical}`
-    const fb = EMOTION_DEFAULTS[canonical] || '#00ADB5'
+    const fb = EMOTION_DEFAULTS[canonical] || '#719DE6'
     map[canonical] = root.getPropertyValue(cssVar).trim() || fb
   }
   return map
@@ -106,7 +106,7 @@ export function emotionGradient(name: string): string {
     case 'warm':
       return `linear-gradient(90deg, ${color}, color-mix(in srgb, ${color} 80%, #ff6b9d))`
     case 'calm':
-      return `linear-gradient(90deg, ${color}, color-mix(in srgb, ${color} 80%, #00ADB5))`
+      return `linear-gradient(90deg, ${color}, color-mix(in srgb, ${color} 80%, #719DE6))`
     case 'attachment':
       return `linear-gradient(90deg, ${color}, color-mix(in srgb, ${color} 80%, #e879f9))`
     case 'sadness':
@@ -130,7 +130,7 @@ export function emotionGradient(name: string): string {
     case 'curious':
       return `linear-gradient(90deg, ${color}, color-mix(in srgb, ${color} 80%, #06b6d4))`
     case 'nostalgic':
-      return `linear-gradient(90deg, ${color}, color-mix(in srgb, ${color} 70%, #00ADB5))`
+      return `linear-gradient(90deg, ${color}, color-mix(in srgb, ${color} 70%, #719DE6))`
     case 'neutral':
       return `linear-gradient(90deg, ${color}, color-mix(in srgb, ${color} 80%, #cbd5e1))`
     default:

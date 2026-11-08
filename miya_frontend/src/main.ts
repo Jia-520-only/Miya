@@ -18,6 +18,7 @@ const router = createRouter({
     { path: '/console', component: () => import('@/views/ConsoleView.vue') },
     { path: '/inbox', component: () => import('@/views/MessageInbox.vue') },
     { path: '/terminal', component: () => import('@/views/TerminalView.vue') },
+    { path: '/observatory', component: () => import('@/views/MiyaObservatoryView.vue') },
     { path: '/dsh-web', component: () => import('@/views/DshWebView.vue') },
     { path: '/artboard', component: () => import('@/views/ArtboardView.vue') },
     { path: '/hub', component: () => import('@/views/HubView.vue') },

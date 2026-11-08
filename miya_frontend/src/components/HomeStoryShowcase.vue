@@ -105,7 +105,7 @@ function resetStyle() {
     <div v-if="panelOpen" class="home-story-panel">
       <label class="home-story-panel-row">
         <span>主色</span>
-        <input v-model="showcaseStyle.accent" type="color" class="home-story-color" :style="{ background: showcaseStyle.accent || '#78cfd1' }">
+        <input v-model="showcaseStyle.accent" type="color" class="home-story-color" :style="{ background: showcaseStyle.accent || '#719DE6' }">
         <button class="home-story-panel-btn" @click="showcaseStyle.accent = ''">跟随主题</button>
       </label>
       <label class="home-story-panel-row"><span>标题</span><input v-model="showcaseStyle.heading" type="text" maxlength="12" placeholder="美图"></label>
@@ -169,7 +169,7 @@ function resetStyle() {
 
 <style scoped>
 .home-story-showcase {
-  --hs-accent: var(--pv-gold, #78cfd1);
+  --hs-accent: var(--pv-gold, #719DE6);
   width: clamp(330px, 29vw, 390px);
   color: #f0e6cf;
   pointer-events: auto;

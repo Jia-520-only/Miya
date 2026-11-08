@@ -1,30 +1,30 @@
 :root {
   /* Miya OS · foundation */
-  --miya-bg-void: #070b12;
-  --miya-bg-canvas: #0b111b;
-  --miya-bg-elevated: #101925;
-  --miya-surface-1: rgba(12, 20, 31, 0.78);
-  --miya-surface-2: rgba(17, 28, 42, 0.86);
-  --miya-surface-3: rgba(25, 39, 56, 0.92);
+  --miya-bg-void: #080f21;
+  --miya-bg-canvas: #0d1830;
+  --miya-bg-elevated: #12213b;
+  --miya-surface-1: rgba(13, 24, 48, 0.78);
+  --miya-surface-2: rgba(18, 33, 59, 0.86);
+  --miya-surface-3: rgba(27, 48, 82, 0.92);
 
-  --miya-line-soft: rgba(173, 218, 226, 0.08);
-  --miya-line: rgba(173, 218, 226, 0.15);
-  --miya-line-strong: rgba(140, 231, 232, 0.32);
+  --miya-line-soft: rgba(148, 177, 228, 0.08);
+  --miya-line: rgba(148, 177, 228, 0.16);
+  --miya-line-strong: rgba(148, 184, 239, 0.38);
 
-  --miya-accent-soft: #78cfd1;
-  --miya-accent-bright: #a2f5ee;
-  --miya-life: #d8bd82;
-  --miya-life-soft: rgba(216, 189, 130, 0.16);
+  --miya-accent-soft: #719de6;
+  --miya-accent-bright: #cbdcf5;
+  --miya-life: #b6d0f3;
+  --miya-life-soft: rgba(182, 208, 243, 0.16);
 
-  --miya-text-strong: #f2f6f7;
-  --miya-text-body: #c4d0d5;
-  --miya-text-muted: #7f919a;
-  --miya-text-faint: #53636c;
+  --miya-text-strong: #ecf1f9;
+  --miya-text-body: #c7d3e7;
+  --miya-text-muted: #93a7c6;
+  --miya-text-faint: #5f7398;
 
   --miya-success: #72d6b1;
   --miya-warning: #e2bd73;
   --miya-danger: #e77d87;
-  --miya-info: #78aee8;
+  --miya-info: #94b8ef;
 
   --miya-space-1: 0.25rem;
   --miya-space-2: 0.5rem;
@@ -42,7 +42,7 @@
 
   --miya-shadow-panel: 0 18px 48px rgba(0, 0, 0, 0.28);
   --miya-shadow-float: 0 24px 72px rgba(0, 0, 0, 0.4);
-  --miya-shadow-focus: 0 0 0 3px rgba(120, 207, 209, 0.12);
+  --miya-shadow-focus: 0 0 0 3px rgba(148, 184, 239, 0.16);
 
   --miya-duration-fast: 140ms;
   --miya-duration-base: 240ms;

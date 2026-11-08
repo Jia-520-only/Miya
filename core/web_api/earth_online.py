@@ -789,7 +789,7 @@ class EarthOnlineRoutes:
 body {{ margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
   background:#0d1117; color:#e6edf3; font:15px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif; padding:24px; }}
 .card {{ width:100%; max-width:560px; background:#161b22; border:1px solid #30363d; border-radius:16px; padding:26px 24px; }}
-.kicker {{ font-size:12px; letter-spacing:.18em; color:#78cfd1; text-transform:uppercase; }}
+.kicker {{ font-size:12px; letter-spacing:.18em; color:#719de6; text-transform:uppercase; }}
 h1 {{ font-size:20px; margin:6px 0 4px; }}
 .stats {{ color:#8b949e; font-size:13px; margin-bottom:18px; }}
 ul {{ list-style:none; margin:0; padding:0; }}
