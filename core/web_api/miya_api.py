@@ -43,6 +43,27 @@ class MiyaAPI:
 
     def _setup_routes(self):
         """设置所有路由"""
+        from core.observatory import get_observatory
+
+        observatory = get_observatory(self.decision_hub)
+
+        @self.router.get("/api/observatory/snapshot")
+        async def observatory_snapshot():
+            return await observatory.snapshot()
+
+        @self.router.get("/api/observatory/events")
+        async def observatory_events(request: Request):
+            async def events():
+                yield "retry: 3000\n\n"
+                while not await request.is_disconnected():
+                    snapshot = await observatory.snapshot()
+                    yield f"event: presence\ndata: {json.dumps(snapshot, ensure_ascii=False, allow_nan=False)}\n\n"
+                    await asyncio.sleep(3)
+
+            return StreamingResponse(events(), media_type="text/event-stream", headers={
+                "Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+            })
+
         @self.router.get("/api/camera/control")
         async def camera_control_state():
             """Return the slash-command camera request without camera data."""

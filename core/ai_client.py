@@ -2073,7 +2073,7 @@ class AIClientFactory:
         return f"{provider}:{model}:{base_url}:{api_key[:8]}"
 
     @classmethod
-    def create_client(cls, provider: str, api_key: str, model: str, **kwargs) -> BaseAIClient:
+    def create_client(cls, provider: str, api_key: str, model: str, *, reuse: bool = True, **kwargs) -> BaseAIClient:
         """
         创建AI客户端
 
@@ -2097,7 +2097,7 @@ class AIClientFactory:
         provider_instance = kwargs.pop("provider_instance", None)
         cache_key = cls._cache_key(provider, api_key, model, base_url)
 
-        if cache_key in cls._cache:
+        if reuse and cache_key in cls._cache:
             cached = cls._cache[cache_key]
             cached.tool_context = kwargs.get("tool_context")
             cached.tool_registry = None
@@ -2119,7 +2119,7 @@ class AIClientFactory:
         if "tool_context" in kwargs and kwargs["tool_context"]:
             client.set_tool_context(kwargs["tool_context"])
 
-        while len(cls._cache) >= cls._cache_max_size:
+        while reuse and len(cls._cache) >= cls._cache_max_size:
             oldest_key = next(iter(cls._cache))
             try:
                 old = cls._cache.pop(oldest_key)
@@ -2134,7 +2134,8 @@ class AIClientFactory:
             except Exception:
                 pass
 
-        cls._cache[cache_key] = client
+        if reuse:
+            cls._cache[cache_key] = client
         return client
 
     @classmethod

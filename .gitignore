@@ -265,6 +265,7 @@ Microsoft/
 config/backup/
 
 # Self-care runtime state
+data/observatory/
 data/self_care_last.json
 data/self_care_state.json
 data/chat_sessions_meta.json

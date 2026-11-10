@@ -60,6 +60,50 @@ def test_buffer_since_and_overrun():
     assert r["overrun"] is True
 
 
+def test_buffer_detects_cursor_from_before_backend_restart():
+    buf = LogStreamBuffer(maxlen=3)
+    assert buf.since(900)["overrun"] is True
+    assert buf.since(0)["overrun"] is False
+    buf.add("INFO", "Miya.Spine", "restarted")
+    assert buf.since(900)["overrun"] is True
+    assert buf.since(1)["overrun"] is False
+
+
+def test_sse_marks_resume_history_and_then_emits_live_events(monkeypatch):
+    import asyncio
+    import json
+    from types import SimpleNamespace
+    from core import log_stream
+    from core.management_api import ManagementAPI
+
+    buf = LogStreamBuffer()
+    monkeypatch.setattr(log_stream, "_buffer", buf)
+    for i in range(3):
+        buf.add("INFO", "Miya.Spine", f"line-{i}")
+    api = ManagementAPI(SimpleNamespace())
+    endpoint = next(route.endpoint for route in api.app.routes if route.path == "/api/v1/logs/stream")
+
+    async def check():
+        response = await endpoint(since=1)
+        iterator = response.body_iterator
+        first = json.loads((await anext(iterator)).removeprefix("data: ").strip())
+        assert first["historical"] is True
+        assert [entry["seq"] for entry in first["entries"]] == [2, 3]
+        buf.add("INFO", "Miya.Spine", "live")
+        second = json.loads((await anext(iterator)).removeprefix("data: ").strip())
+        assert second.get("historical", False) is False
+        assert [entry["seq"] for entry in second["entries"]] == [4]
+        await iterator.aclose()
+        response = await endpoint(since=900)
+        iterator = response.body_iterator
+        reset = json.loads((await anext(iterator)).removeprefix("data: ").strip())
+        assert reset["type"] == "reset"
+        assert reset["historical"] is True
+        await iterator.aclose()
+
+    asyncio.run(check())
+
+
 def _with_handler(logger_name: str, fn):
     """临时给指定 logger 挂 handler（隔离 propagate），执行 fn 后恢复"""
     buf = LogStreamBuffer()

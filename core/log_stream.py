@@ -35,15 +35,15 @@ class LogStreamBuffer:
         self._seq = itertools.count(1)
 
     def add(self, level: str, name: str, text: str, *, source: str = "backend") -> Dict:
-        entry = {
-            "seq": next(self._seq),
-            "ts": datetime.now().isoformat(timespec="milliseconds"),
-            "level": level,
-            "name": name,
-            "text": text,
-            "source": source,
-        }
         with self._lock:
+            entry = {
+                "seq": next(self._seq),
+                "ts": datetime.now().isoformat(timespec="milliseconds"),
+                "level": level,
+                "name": name,
+                "text": text,
+                "source": source,
+            }
             self._entries.append(entry)
         return entry
 
@@ -59,10 +59,10 @@ class LogStreamBuffer:
         with self._lock:
             entries = list(self._entries)
         if not entries:
-            return {"entries": [], "latest_seq": 0, "overrun": False}
+            return {"entries": [], "latest_seq": 0, "overrun": seq > 0}
         oldest = entries[0]["seq"]
         latest = entries[-1]["seq"]
-        if seq < oldest - 1:
+        if seq < oldest - 1 or seq > latest:
             return {"entries": [], "latest_seq": latest, "overrun": True}
         return {
             "entries": [e for e in entries if e["seq"] > seq],

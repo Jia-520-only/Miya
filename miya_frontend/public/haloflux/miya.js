@@ -3,9 +3,13 @@
 window.MiyaFlux = (() => {
   if (!new URLSearchParams(location.search).has('miya')) return null;
   const tau = Math.PI * 2;
+  const layerKeys = ['dialogue', 'shortTerm', 'longTerm', 'semantic', 'knowledge', 'pinned'];
+  const layerLabels = ['对话', '短期', '长期', '语义', '知识', '置顶'];
   const state = {
-    online: false, activity: null, memoryCount: null, platformCount: null,
+    online: false, phase: null, emotionIntensity: null, messageCount: null,
+    memoryCount: null, memoryLayers: {}, platformCount: null,
     color: '#94b8ef', mode: 'resonance', ambient: false,
+    composition: 'ambient', selectedLayer: null, layerEcho: {}, cameraTime: 0, runtimeLogs: [], transition: null,
     paused: matchMedia('(prefers-reduced-motion: reduce)').matches,
     hasRendered: false, energy: 0.2, time: 0, echo: 0, avatarReady: false,
     portrait: { zoom: 1, x: 50, y: 42, flow: 32 },
@@ -67,14 +71,42 @@ window.MiyaFlux = (() => {
     const memory = finite(data.memoryCount, Number.MAX_SAFE_INTEGER);
     if (data.online === true && state.online && memory !== null && state.memoryCount !== null && memory > state.memoryCount)
       state.echo = 1;
+    const wasOnline = state.online;
     state.online = data.online === true;
-    state.activity = state.online ? finite(data.activity, 100) : null;
+    const messages = finite(data.messageCount, Number.MAX_SAFE_INTEGER);
+    if (state.online && wasOnline && messages !== null && state.messageCount !== null && messages > state.messageCount)
+      state.echo = Math.max(state.echo, 0.55);
+    state.messageCount = state.online ? messages : null;
+    state.phase = state.online && ['INIT', 'BOOT', 'RUNNING', 'IDLE', 'DROWSY', 'SLEEP', 'WAKE', 'SHUTDOWN'].includes(data.phase) ? data.phase : null;
+    state.emotionIntensity = state.online ? finite(data.emotionIntensity, 100) : null;
     state.memoryCount = state.online ? memory : null;
+    const nextLayers = Object.fromEntries(layerKeys.map(key => [key, state.online ? finite(data.memoryLayers?.[key], Number.MAX_SAFE_INTEGER) : null]));
+    for (const key of layerKeys) {
+      if (state.online && wasOnline && nextLayers[key] !== null && state.memoryLayers[key] != null && nextLayers[key] !== state.memoryLayers[key])
+        state.layerEcho[key] = 1;
+      else if (!state.online) state.layerEcho[key] = 0;
+    }
+    state.memoryLayers = nextLayers;
     state.platformCount = state.online ? finite(data.platformCount, 1000) : null;
     if (typeof data.color === 'string' && /^#[\da-f]{6}$/i.test(data.color)) state.color = data.color;
     if (['resonance', 'surge', 'quiet'].includes(data.mode)) state.mode = data.mode;
     state.paused = data.paused === true;
     state.ambient = data.ambient === true;
+    state.selectedLayer = layerKeys.includes(data.selectedLayer) ? data.selectedLayer : null;
+    if (Array.isArray(data.runtimeLogs)) state.runtimeLogs = data.runtimeLogs.slice(-24).filter(entry => entry && Number.isSafeInteger(entry.seq) && typeof entry.text === 'string' && typeof entry.name === 'string');
+    const composition = ['complete', 'closeup', 'ambient'].includes(data.composition) ? data.composition : state.composition;
+    if (state.composition !== composition) {
+      // Carry the last visible ring into the new composition. Only the camera
+      // interpolates; the original detailed ring textures need one rebuild.
+      state.transition = screenGeometry && state.composition !== 'ambient' && composition !== 'ambient' && !state.paused
+        && !matchMedia('(prefers-reduced-motion: reduce)').matches
+        ? { x: screenGeometry.x / screenGeometry.width, y: screenGeometry.y / screenGeometry.height, radius: screenGeometry.radius / screenGeometry.height, elapsed: 0 }
+        : null;
+      state.composition = composition;
+      state.cameraTime = 0;
+      lastGeometrySent = -Infinity;
+      window.dispatchEvent(new Event('miya:layout'));
+    }
     render();
   });
   function rgb() {
@@ -82,20 +114,129 @@ window.MiyaFlux = (() => {
   }
   function update(config, dt) {
     state.time += dt;
-    const target = state.online ? 0.25 + (state.activity ?? 35) / 135 : 0.15;
+    if (state.composition === 'closeup') state.cameraTime += dt;
+    if (state.transition) {
+      state.transition.elapsed += dt;
+      if (state.transition.elapsed >= 1.6) state.transition = null;
+    }
+    // These values set an artistic rhythm; they are not activity percentages.
+    const rhythm = { RUNNING: 0.8, IDLE: 0.45, DROWSY: 0.22, SLEEP: 0.08, WAKE: 0.65, BOOT: 0.3 };
+    const target = state.online ? (rhythm[state.phase] ?? 0.15) + (state.emotionIntensity ?? 0) / 1000 : 0.08;
     state.energy += (target - state.energy) * (state.paused ? 1 : Math.min(1, dt * 1.6));
     state.echo = Math.max(0, state.echo - dt * 0.32);
+    for (const key of layerKeys) state.layerEcho[key] = Math.max(0, (state.layerEcho[key] || 0) - dt * 0.35);
     const quiet = state.mode === 'quiet', surge = state.mode === 'surge';
     const gain = quiet ? 0.42 : surge ? 1.65 : 1;
     config.tempo = (0.72 + state.energy * 0.8) * gain;
     config.ringSpeed = (0.6 + state.energy * 0.9) * gain;
     config.runnerCount = Math.round((150 + state.energy * 230) * (quiet ? 0.55 : surge ? 1.35 : 1));
     config.runnerSpeed = (0.42 + state.energy * 0.5) * gain;
-    config.beamBright = (0.6 + state.energy * 0.45) * gain;
-    config.beamLen = quiet ? 0.5 : surge ? 1.3 : 0.85;
+    config.beamBright = (0.8 + state.energy * 0.55) * gain;
+    config.beamLen = quiet ? 0.8 : surge ? 1.8 : 1.25;
     config.burstRate = quiet ? 0.15 : surge ? 2.2 : 0.7;
     config.flareRate = quiet ? 0.2 : surge ? 1.8 : 0.6;
     config.glow = quiet ? 0.4 : surge ? 1.1 : 0.75;
+  }
+  let geometry = null;
+  function layout(width, height) {
+    let x, y, radius, outerRadius;
+    if (state.composition === 'closeup') {
+      x = width < 700 ? width * -0.02 : width * 0.16;
+      y = height * 0.52;
+      radius = width < 700 ? Math.min(height * 0.67, width * 0.66) : Math.max(height * 0.67, width * 0.29);
+      outerRadius = radius * 1.34;
+    } else if (state.composition === 'complete') {
+      x = width < 700 ? width * 0.5 : width * 0.68;
+      y = height * 0.49;
+      radius = Math.max(30, Math.min(height * 0.328, width * (width < 700 ? 0.315 : 0.218)));
+      outerRadius = radius * 1.4;
+    } else {
+      x = width < 760 || new URLSearchParams(location.search).has('framed') ? width * 0.5 : width * 0.61;
+      y = height * 0.47;
+      radius = Math.max(45, Math.min(height * 0.275, width * 0.24));
+      outerRadius = radius + Math.min(86, height * 0.105, width * 0.075) * preset.ringWidth;
+    }
+    geometry = { width, height, x, y, radius, outerRadius };
+    lastGeometrySent = -Infinity;
+    return geometry;
+  }
+  let lastGeometrySent = -Infinity;
+  let lastPublishedGeometry = null;
+  let screenGeometry = null;
+  function publishGeometry(x, y, zoom) {
+    if (!geometry) return;
+    screenGeometry = { ...geometry, x, y, radius: geometry.radius * zoom, outerRadius: geometry.outerRadius * zoom };
+    const changed = !lastPublishedGeometry || ['x', 'y', 'radius', 'outerRadius', 'width', 'height'].some(key => Math.abs(lastPublishedGeometry[key] - screenGeometry[key]) > 0.01);
+    if ((changed && state.time - lastGeometrySent > 0.1) || lastGeometrySent === -Infinity || (changed && state.paused)) {
+      lastGeometrySent = state.time;
+      lastPublishedGeometry = screenGeometry;
+      parent.postMessage({ type: 'miya:geometry', geometry: screenGeometry }, fileOrigin || origin === 'null' ? '*' : origin);
+    }
+  }
+  function camera(width, height) {
+    // Long takes: establish the whole crescent, approach the micro-panels,
+    // travel along their edge, then pull back. No cut or random camera shake.
+    const shots = [
+      { z: 1, dx: 0, dy: 0 },
+      { z: 1.38, dx: 0.08, dy: -0.11 },
+      { z: 1.22, dx: -0.035, dy: 0.13 },
+      { z: 1.08, dx: 0.02, dy: 0.035 },
+    ];
+    const position = Math.max(0, state.cameraTime) / 7.5;
+    const index = Math.floor(position) % shots.length;
+    const t = position % 1;
+    const ease = t * t * (3 - 2 * t);
+    const from = shots[index], to = shots[(index + 1) % shots.length];
+    const blend = key => from[key] + (to[key] - from[key]) * ease;
+    const target = state.composition === 'closeup'
+      ? { z: blend('z'), x: width * (0.5 + blend('dx')), y: height * (0.5 + blend('dy')) }
+      : { z: 1, x: width / 2, y: height / 2 };
+    const transition = state.transition;
+    if (!transition || !geometry) return target;
+    const progress = Math.min(1, transition.elapsed / 1.6);
+    const easeTransition = progress * progress * (3 - 2 * progress);
+    const startZoom = transition.radius * height / geometry.radius;
+    const start = {
+      z: startZoom,
+      x: geometry.x - (transition.x * width - width / 2) / startZoom,
+      y: geometry.y - (transition.y * height - height / 2) / startZoom,
+    };
+    // Interpolate screen center and log zoom to avoid a sideways arc or a snap.
+    const z = Math.exp(Math.log(start.z) + (Math.log(target.z) - Math.log(start.z)) * easeTransition);
+    const center = (axis, size) => {
+      const from = (geometry[axis] - start[axis]) * start.z + size / 2;
+      const to = (geometry[axis] - target[axis]) * target.z + size / 2;
+      return geometry[axis] - (from + (to - from) * easeTransition - size / 2) / z;
+    };
+    return { z, x: center('x', width), y: center('y', height) };
+  }
+  function renderTelemetry(ctx, slot, band, height, rotation) {
+    if (state.composition !== 'ambient') {
+      const logs = state.runtimeLogs;
+      if (!logs.length) return;
+      const entry = logs[Math.abs(slot.index || 0) % logs.length];
+      ctx.fillStyle = '#070f20'; ctx.fillRect(6, 1, band * 0.7, height - 1);
+      ctx.fillStyle = state.online ? '#b2c9eb' : '#607a9e';
+      ctx.font = `${Math.max(5, Math.min(8, band * 0.1, height * 0.22))}px Consolas,"Microsoft YaHei",sans-serif`;
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillText(entry.name.slice(-24), 9, 3, Math.max(1, band * 0.65 - 10));
+      ctx.fillText(entry.text.replace(/\s+/g, ' ').slice(0, 34), 9, height * 0.45, Math.max(1, band * 0.65 - 10));
+      return;
+    }
+    // Each slot samples the fixed semantic sector it currently passes through.
+    // Geometry, label and count share the same angle; there are no random readings.
+    const angle = ((slot.a + rotation + Math.PI / 2) % tau + tau) % tau;
+    const index = Math.floor(angle / (tau / 6));
+    const key = layerKeys[index], value = state.memoryLayers[key];
+    ctx.fillStyle = '#070f20'; ctx.fillRect(6, 1, band * 0.7, height - 1);
+    ctx.fillStyle = state.online ? '#b2c9eb' : '#607a9e';
+    const size = Math.max(5, Math.min(8, band * 0.115, height * 0.22));
+    ctx.font = `${size}px Consolas,"Microsoft YaHei",sans-serif`;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText(layerLabels[index], 9, 3, Math.max(1, band * 0.65 - 10));
+    ctx.fillText(value == null ? '—' : value.toLocaleString('en-US'), 9, 4 + size * 1.4, Math.max(1, band * 0.65 - 10));
+    ctx.strokeStyle = `rgba(168,199,245,${0.2 + (state.layerEcho[key] || 0) * 0.6})`;
+    ctx.beginPath(); ctx.moveTo(9, height - 4); ctx.lineTo(band * 0.62, height - 4); ctx.stroke();
   }
   function draw(ctx, x, y, radius) {
     const t = state.time, col = rgb();
@@ -108,20 +249,21 @@ window.MiyaFlux = (() => {
     shade.addColorStop(0.48, 'rgba(8,17,38,.87)');
     shade.addColorStop(1, 'rgba(8,17,38,0)');
     ctx.fillStyle = shade; ctx.beginPath(); ctx.arc(0, 0, radius * 0.78, 0, tau); ctx.fill();
-    // Six anchors refer to Miya's six memory layers. Motion is an artistic expression.
-    const labels = ['对话', '短期', '长期', '语义', '知识', '置顶'];
-    const nodeRadius = radius * 0.79;
-    for (let i = 0; i < 6; i++) {
-      const angle = -Math.PI / 2 + i * tau / 6;
-      const nx = Math.cos(angle) * nodeRadius, ny = Math.sin(angle) * nodeRadius;
-      ctx.strokeStyle = 'rgba(142,177,231,.2)'; ctx.lineWidth = 0.6;
-      ctx.beginPath(); ctx.moveTo(nx * 0.66, ny * 0.66); ctx.lineTo(nx * 0.93, ny * 0.93); ctx.stroke();
-      ctx.fillStyle = i === 5 ? '#e6edf7' : 'rgba(160,194,243,.8)';
-      ctx.beginPath(); ctx.arc(nx, ny, 2 + breath * 0.6, 0, tau); ctx.fill();
-      if (radius > 115 && !state.ambient) {
-        ctx.font = '9px "Microsoft YaHei", sans-serif'; ctx.textAlign = 'center';
-        ctx.fillStyle = 'rgba(195,213,241,.75)';
-        ctx.fillText(labels[i], nx * 1.12, ny * 1.12 + (ny < 0 ? -2 : 9));
+    // Stable semantic sectors sit on top of the original rotating micro-panel
+    // ring. Fixed sectors keep their meaning while the decorative texture turns.
+    const band = geometry ? geometry.outerRadius - radius : radius * 0.28;
+    for (let i = 0; state.composition === 'ambient' && i < 6; i++) {
+      const key = layerKeys[i], start = -Math.PI / 2 + i * tau / 6 + 0.025;
+      const end = start + tau / 6 - 0.05;
+      const selected = state.selectedLayer === key;
+      const echo = state.layerEcho[key] || 0;
+      ctx.strokeStyle = `rgba(${col},${selected ? 0.9 : 0.16 + echo * 0.65})`;
+      ctx.lineWidth = selected ? 2.5 : 1 + echo;
+      ctx.beginPath(); ctx.arc(0, 0, radius + band * 0.97, start, end); ctx.stroke();
+      if (echo > 0) {
+        ctx.strokeStyle = `rgba(218,234,255,${echo * 0.45})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(0, 0, radius + band * (1.05 + (1 - echo) * 0.4), start, end); ctx.stroke();
       }
     }
     ctx.globalCompositeOperation = 'lighter';
@@ -143,7 +285,7 @@ window.MiyaFlux = (() => {
     ctx.restore();
   }
   function drawPortrait(ctx, radius, t, col, breath) {
-    const r = radius * 0.66;
+    const r = radius * (state.composition === 'ambient' ? 0.66 : 0.49);
     ctx.save(); ctx.globalCompositeOperation = 'source-over';
     ctx.shadowColor = '#537bc4'; ctx.shadowBlur = 14 + breath * 5;
     ctx.strokeStyle = '#c6daf6'; ctx.lineWidth = 1.5;
@@ -209,6 +351,6 @@ window.MiyaFlux = (() => {
   }
   loadAvatar(defaultAvatar);
   parent.postMessage({ type: 'miya:ready' }, fileOrigin || origin === 'null' ? '*' : origin);
-  return { state, preset, update, draw, rgb, get paused() { return state.paused; },
+  return { state, preset, update, draw, rgb, layout, renderTelemetry, camera, publishGeometry, get geometry() { return geometry; }, get screenGeometry() { return screenGeometry; }, get paused() { return state.paused; },
     get hasRendered() { return state.hasRendered; }, set hasRendered(v) { state.hasRendered = v; } };
 })();

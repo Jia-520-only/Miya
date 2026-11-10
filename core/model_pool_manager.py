@@ -558,7 +558,7 @@ class ModelPoolManager:
 
     # ==================== AI 客户端 ====================
 
-    def create_ai_client(self, model_id: str = None, task_type: str = None, endpoint: str = "qq"):
+    def create_ai_client(self, model_id: str = None, task_type: str = None, endpoint: str = "qq", *, reuse: bool = True):
         try:
             model_config = None
             if model_id:
@@ -587,6 +587,7 @@ class ModelPoolManager:
                 api_key=api_key,
                 model=model_config.name,
                 base_url=model_config.base_url,
+                reuse=reuse,
             )
             return client
         except Exception as e:

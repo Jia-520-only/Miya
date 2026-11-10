@@ -1343,7 +1343,7 @@ function questStars(difficulty: number): string {
             <p v-else class="data-hint">该活动当前没有商品。</p>
           </template>
           <!-- 新建 / 编辑自定义活动表单 -->
-          <label>{{ editingEventArea ? `编辑自定义活动「${editingEventArea.name}」` : '新建自定义活动' }}</label>
+          <label>{{ editingEventArea ? `编辑自定义活动「${editingEventArea?.name}」` : '新建自定义活动' }}</label>
           <div class="modal-row">
             <div><label>key</label><input v-model="eventAreaForm.key" placeholder="如 summer_2026" :disabled="!!editingEventArea" /></div>
             <div><label>名称</label><input v-model="eventAreaForm.name" placeholder="活动名称" /></div>

@@ -447,6 +447,16 @@ class MemoryBus:
         core = await self._ensure_core()
         return await core.get_statistics()
 
+    async def observatory_stats(self) -> Dict[str, Any]:
+        """Count each indexed memory once, including the sixth (pinned) layer.
+
+        JSON and SQLite mirror the same records; adding their totals or using
+        the retrieval cache would respectively double-count or undercount them.
+        """
+        core = await self._ensure_core()
+        layers = {level.value: await core.backend.count(level) for level in MemoryLevel}
+        return {"total": await core.backend.count(), "layers": layers, "source": "memory_bus:index"}
+
     # ==================== Prompt 注入 ====================
 
     async def inject(

@@ -396,9 +396,10 @@ async function searchMapPlace() {
   try {
     const response = await EarthAPI.searchWorldPlaces(query, 6)
     mapSearchResults.value = response.results
-    if (!response.results.length) { showToast('没有找到这个地点'); return }
-    selectMapSearchResult(response.results[0])
-    showToast(response.results.length > 1 ? `找到 ${response.results.length} 个候选地点，请选择` : `已定位到「${response.results[0].name}」`)
+    const firstResult = response.results[0]
+    if (!firstResult) { showToast('没有找到这个地点'); return }
+    selectMapSearchResult(firstResult)
+    showToast(response.results.length > 1 ? `找到 ${response.results.length} 个候选地点，请选择` : `已定位到「${firstResult.name}」`)
   } catch (e: any) { showToast(e?.response?.data?.detail || '没有找到这个地点') } finally { worldBusy.value = false }
 }
 function selectMapSearchResult(result: EarthMapSearchResult) {
@@ -1249,13 +1250,13 @@ function discardJourneySummary() {
 async function saveJourneySummary() {
   if (journeyBusy.value || !journeyStartedAt.value) return
   const points = locationTrail.value
-  if (!points.length) {
+  const start = points[0]
+  if (!start) {
     showToast('这次旅程没有收到有效定位点，暂时无法保存')
     return
   }
   journeyBusy.value = true
   try {
-    const start = points[0]
     const end = points.at(-1) || start
     const title = journeyDraft.title.trim() || `现实旅程 · ${new Date(journeyStartedAt.value).toLocaleDateString('zh-CN')}`
     const durationSeconds = Math.max(0, Math.floor((locationSessionClock.value - journeyStartedAt.value) / 1000))

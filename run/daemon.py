@@ -243,6 +243,19 @@ def _register_spine_organs(daemon, spine) -> None:
     except Exception as e:
         logger.warning(f"EarthOperatorOrgan 注册跳过: {e}")
 
+    # Observatory — persistent notes, independently of Earth Online's switch.
+    try:
+        from core.observatory import get_observatory
+        from core.observatory_organ import MiyaObservatoryOrgan
+
+        hub = getattr(getattr(daemon, "_miya", None), "decision_hub", None)
+        service = get_observatory(hub)
+        service.spine = spine
+        spine.register_organ(MiyaObservatoryOrgan(service))
+        logger.info("MiyaObservatoryOrgan 已注册到脊柱 (观测台短笺)")
+    except Exception as e:
+        logger.warning(f"ObservatoryOrgan 注册跳过: {e}")
+
     # SelfCareOrgan — 自检看护（掉线告警/自动重启/资源告警/每日简报/记忆归档）
     try:
         from core.self_care_organ import MiyaSelfCareOrgan

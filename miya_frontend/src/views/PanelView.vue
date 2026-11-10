@@ -1,24 +1,27 @@
 <script setup lang="ts">
+import type { BgmPlaybackMode, MusicTrack } from '@/composables/useAudio'
 import { useStorage } from '@vueuse/core'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import API from '@/api/core'
 import EarthAPI from '@/api/earth'
-import { bgmState, fetchMusicLibrary, playBgm, setBgmPlaybackMode, setBgmPlaylist, stopBgm, type BgmPlaybackMode, type MusicTrack } from '@/composables/useAudio'
+import { bgmState, fetchMusicLibrary, playBgm, setBgmPlaybackMode, setBgmPlaylist, stopBgm } from '@/composables/useAudio'
 import { useHomeBriefing } from '@/composables/useHomeBriefing'
+import { useMiyaPresence } from '@/composables/useMiyaPresence'
+import { emotionLabel, phaseLabel } from '@/utils/miyaPresence'
 import { pX, pY } from '@/utils/parallax'
 
 const router = useRouter()
 
-const backendOnline = ref(false)
-const miyaPersona = ref('默认')
-const soulActive = ref(87)
+const { presence, online: backendOnline } = useMiyaPresence()
+const miyaPersona = computed(() => backendOnline.value ? presence.value.persona ?? '待同步' : '待同步')
+const soulPhase = computed(() => phaseLabel(backendOnline.value ? presence.value.phase : null))
+const soulActive = computed(() => backendOnline.value ? presence.value.emotionIntensity : null)
 const currentTime = ref('')
 const latestMiyaNote = ref('')
 const currentBgm = ref('')
-const miyaPlatforms = ref(3)
-const memoryTotal = ref(0)
-const emotionName = ref('平静')
+const miyaPlatforms = computed(() => backendOnline.value ? presence.value.platformCount ?? '—' : '—')
+const memoryTotal = computed(() => backendOnline.value ? presence.value.memoryCount ?? '—' : '—')
+const emotionName = computed(() => emotionLabel(backendOnline.value ? presence.value.emotion : null))
 const reservedNotice = ref('')
 let reservedNoticeTimer: ReturnType<typeof setTimeout> | null = null
 let timer: ReturnType<typeof setInterval> | null = null
@@ -87,21 +90,25 @@ async function selectMusic(track: MusicTrack) {
 }
 
 async function toggleBgm() {
-  if (!bgmAvailable.value) return
+  if (!bgmAvailable.value)
+    return
   if (bgmState.playing) {
     stopBgm()
     return
   }
   const firstTrack = filteredMusicLibrary.value[0]
-  if (firstTrack) await selectMusic(firstTrack)
+  if (firstTrack)
+    await selectMusic(firstTrack)
 }
 
 async function playRelative(direction: -1 | 1) {
   const tracks = filteredMusicLibrary.value
-  if (!tracks.length) return
+  if (!tracks.length)
+    return
   const index = currentMusicIndex.value >= 0 ? currentMusicIndex.value : (direction > 0 ? -1 : 0)
   const next = tracks[(index + direction + tracks.length) % tracks.length]
-  if (next) await selectMusic(next)
+  if (next)
+    await selectMusic(next)
 }
 
 function toggleMusicExpanded(event: Event) {
@@ -146,43 +153,6 @@ watch(() => bgmState.title, (title) => {
     currentBgm.value = title
 })
 
-async function loadSystemStatus() {
-  try {
-    const [statusRes, personaRes] = await Promise.all([
-      API.systemStatus(),
-      API.getCurrentPersona(),
-    ])
-    backendOnline.value = true
-
-    // 人格信息
-    miyaPersona.value = personaRes?.persona?.name || personaRes?.persona?.id || '默认'
-
-    // 从 systemStatus 读取实时数据
-    if (statusRes?.identity) {
-      // 情感状态
-      const emotion = statusRes.emotion || {}
-      emotionName.value = emotion.emotion_name || '平静'
-      soulActive.value = emotion.intensity ?? emotion.emotions?.[0]?.intensity ?? 87
-
-      // 记忆统计
-      const mem = statusRes.memory_stats || {}
-      memoryTotal.value = mem.total || mem.short_term || 0
-
-      // 平台信息
-      const plat = statusRes.platform_info || {}
-      miyaPlatforms.value = plat.enabled_count ?? plat.total_count ?? 3
-    }
-
-    // 如果有 soul 数据
-    if (personaRes?.soul) {
-      soulActive.value = personaRes.soul.activity || soulActive.value
-    }
-  }
-  catch {
-    backendOnline.value = false
-  }
-}
-
 async function loadLatestMiyaNote() {
   try {
     const notes = await EarthAPI.listNotes(12)
@@ -194,11 +164,10 @@ async function loadLatestMiyaNote() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadSystemStatus(), loadLatestMiyaNote()])
+  await loadLatestMiyaNote()
   updateTime()
   timer = setInterval(updateTime, 10000)
   statusTimer = setInterval(() => {
-    loadSystemStatus()
     loadLatestMiyaNote()
   }, 30000)
 })
@@ -331,7 +300,9 @@ function activateModule(module: QuickModule) {
   reservedNotice.value = `${module.label} // INTERFACE RESERVED · AWAITING LINK`
   if (reservedNoticeTimer)
     clearTimeout(reservedNoticeTimer)
-  reservedNoticeTimer = setTimeout(() => { reservedNotice.value = '' }, 2600)
+  reservedNoticeTimer = setTimeout(() => {
+    reservedNotice.value = ''
+  }, 2600)
 }
 
 const chatExpanded = ref(false)
@@ -389,14 +360,16 @@ watch(observatoryExpanded, (expanded) => {
     <!-- ═══ 左面板 ═══ -->
     <div class="cmd-panel cmd-left" :class="{ 'panel-hidden': panelsHidden }" :style="{ transform: gyroLeftPanel, ...gyroVarsLeft }">
       <div class="cmd-top">
-        <div class="cmd-eyebrow"><span>SOUL INTERFACE</span><span>LINK {{ backendOnline ? 'STABLE' : 'WAIT' }}</span></div>
+        <div class="cmd-eyebrow">
+          <span>SOUL INTERFACE</span><span>LINK {{ backendOnline ? 'STABLE' : 'WAIT' }}</span>
+        </div>
         <div class="cmd-level">
           <div class="cmd-level-head">
-            <span class="cmd-level-label">灵魂活跃度</span>
-            <span class="cmd-level-val">{{ soulActive }}</span>
+            <span class="cmd-level-label">此刻状态 · {{ soulPhase }}</span>
+            <span class="cmd-level-val" title="当前主导情绪的强度">{{ soulActive === null ? '—' : `${soulActive}%` }}</span>
           </div>
           <div class="cmd-level-bar">
-            <div class="cmd-level-fill" :style="{ width: `${Math.min(soulActive, 100)}%` }" />
+            <div class="cmd-level-fill" :style="{ width: `${soulActive ?? 0}%` }" />
           </div>
         </div>
         <div class="cmd-name">
@@ -410,14 +383,20 @@ watch(observatoryExpanded, (expanded) => {
           <div class="cmd-music-wrap" :class="{ expanded: musicExpanded }">
             <div class="cmd-music" :title="bgmState.playing ? '暂停 BGM' : '播放 BGM'" @click="toggleBgm">
               <span class="cmd-music-icon" :class="{ playing: bgmState.playing }">♪</span>
-              <div class="cmd-music-scroll"><span class="cmd-music-text">{{ bgmState.playing ? `正在播放 — ${bgmState.title || currentBgm}` : currentBgm ? `已暂停 — ${currentBgm}` : 'BGM 已暂停' }}</span></div>
-              <button type="button" class="cmd-music-expand" :aria-expanded="musicExpanded" :aria-label="musicExpanded ? '收起音乐列表' : '展开音乐列表'" aria-controls="cmd-music-actions" @click.stop="toggleMusicExpanded">{{ musicExpanded ? '×' : '⋯' }}</button>
+              <div class="cmd-music-scroll">
+                <span class="cmd-music-text">{{ bgmState.playing ? `正在播放 — ${bgmState.title || currentBgm}` : currentBgm ? `已暂停 — ${currentBgm}` : 'BGM 已暂停' }}</span>
+              </div>
+              <button type="button" class="cmd-music-expand" :aria-expanded="musicExpanded" :aria-label="musicExpanded ? '收起音乐列表' : '展开音乐列表'" aria-controls="cmd-music-actions" @click.stop="toggleMusicExpanded">
+                {{ musicExpanded ? '×' : '⋯' }}
+              </button>
             </div>
             <div v-if="musicExpanded" id="cmd-music-actions" class="cmd-music-actions" @click.stop>
               <span v-if="musicLoading" class="cmd-music-status">正在读取音乐列表…</span>
               <div class="cmd-music-toolbar">
                 <div class="cmd-music-filters" role="tablist" aria-label="音乐分类">
-                  <button v-for="filter in musicFilters" :key="filter.id" type="button" role="tab" :aria-selected="musicFilter === filter.id" :class="{ active: musicFilter === filter.id }" @click="musicFilter = filter.id">{{ filter.label }} <small>{{ musicCount(filter.id) }}</small></button>
+                  <button v-for="filter in musicFilters" :key="filter.id" type="button" role="tab" :aria-selected="musicFilter === filter.id" :class="{ active: musicFilter === filter.id }" @click="musicFilter = filter.id">
+                    {{ filter.label }} <small>{{ musicCount(filter.id) }}</small>
+                  </button>
                 </div>
                 <div class="cmd-music-modes" role="group" aria-label="播放模式">
                   <button v-for="mode in musicModes" :key="mode.id" type="button" :class="{ active: musicMode === mode.id }" :aria-pressed="musicMode === mode.id" :title="mode.title" :aria-label="mode.title" @click="musicMode = mode.id">
@@ -425,20 +404,28 @@ watch(observatoryExpanded, (expanded) => {
                   </button>
                 </div>
                 <div class="cmd-music-nav">
-                  <button type="button" title="上一首" aria-label="上一首" :disabled="!bgmAvailable" @click="playRelative(-1)">‹</button>
-                  <button type="button" title="下一首" aria-label="下一首" :disabled="!bgmAvailable" @click="playRelative(1)">›</button>
+                  <button type="button" title="上一首" aria-label="上一首" :disabled="!bgmAvailable" @click="playRelative(-1)">
+                    ‹
+                  </button>
+                  <button type="button" title="下一首" aria-label="下一首" :disabled="!bgmAvailable" @click="playRelative(1)">
+                    ›
+                  </button>
                 </div>
               </div>
-              <div class="cmd-music-section-label"><span>{{ musicSectionTitle }}</span><small>{{ filteredMusicLibrary.length }} 首 · {{ musicModeTitle }}</small></div>
+              <div class="cmd-music-section-label">
+                <span>{{ musicSectionTitle }}</span><small>{{ filteredMusicLibrary.length }} 首 · {{ musicModeTitle }}</small>
+              </div>
               <div class="cmd-music-list" role="listbox" @wheel.stop>
-                <button v-for="track in filteredMusicLibrary" :key="track.id" type="button" :disabled="!track.playable" :aria-disabled="!track.playable" :class="{ active: bgmState.file === track.url, 'is-material': !track.playable }" @click="selectMusic(track)">
+                <button v-for="track in filteredMusicLibrary" :key="track.id" type="button" :disabled="!track.playable" :aria-disabled="!track.playable" :class="{ 'active': bgmState.file === track.url, 'is-material': !track.playable }" @click="selectMusic(track)">
                   <span class="cmd-music-track-title">{{ track.title }}</span>
                   <small>{{ track.kind === 'cover' ? '弥娅翻唱' : '原曲' }}</small>
                 </button>
                 <span v-if="!musicLoading && !filteredMusicLibrary.length" class="cmd-music-status">此分类暂无音乐</span>
               </div>
               <span v-if="musicError" class="cmd-music-error">{{ musicError }}</span>
-              <button v-if="!musicLoading && !musicLibrary.length" type="button" class="cmd-music-retry" @click="loadMusicLibrary">重新读取</button>
+              <button v-if="!musicLoading && !musicLibrary.length" type="button" class="cmd-music-retry" @click="loadMusicLibrary">
+                重新读取
+              </button>
             </div>
           </div>
         </div>
@@ -462,13 +449,19 @@ watch(observatoryExpanded, (expanded) => {
             <Transition name="banner-slide" mode="out-in">
               <div :key="currentBriefing?.id || 'empty'" class="cmd-banner-slide">
                 <img v-if="currentBannerImg" :src="currentBannerImg" class="cmd-banner-img" :alt="currentBriefing?.title || '动态简报'">
-                <div v-else class="cmd-banner-placeholder"><span>≋</span><small>MIYA BRIEFING CHANNEL</small></div>
+                <div v-else class="cmd-banner-placeholder">
+                  <span>≋</span><small>MIYA BRIEFING CHANNEL</small>
+                </div>
               </div>
             </Transition>
             <div v-if="briefingItems.length > 1" class="cmd-banner-nav">
-              <button title="上一条简报" aria-label="上一条简报" @click.stop="stepBriefing(-1)">‹</button>
+              <button title="上一条简报" aria-label="上一条简报" @click.stop="stepBriefing(-1)">
+                ‹
+              </button>
               <span>{{ String(bannerIdx + 1).padStart(2, '0') }} / {{ String(briefingItems.length).padStart(2, '0') }}</span>
-              <button title="下一条简报" aria-label="下一条简报" @click.stop="stepBriefing(1)">›</button>
+              <button title="下一条简报" aria-label="下一条简报" @click.stop="stepBriefing(1)">
+                ›
+              </button>
             </div>
           </div>
           <div v-if="briefingShowCaption" class="cmd-banner-label">
@@ -498,7 +491,7 @@ watch(observatoryExpanded, (expanded) => {
       <div class="cmd-resources">
         <div class="cmd-res-item" @click="navigate('/chat')">
           <span class="cmd-res-icon">◆</span>
-          <span class="cmd-res-val" :title="`灵魂活跃度: ${soulActive}`">{{ soulActive }}</span>
+          <span class="cmd-res-val" :title="`此刻状态: ${soulPhase}`">{{ soulPhase }}</span>
           <span class="cmd-res-plus">+</span>
         </div>
         <div class="cmd-res-item">
@@ -646,7 +639,6 @@ watch(observatoryExpanded, (expanded) => {
           <span>{{ module.desc }}</span>
         </button>
       </div>
-
     </div>
 
     <Teleport to="body">
@@ -659,12 +651,22 @@ watch(observatoryExpanded, (expanded) => {
         aria-label="弥娅状态摘要"
         @click.stop
       >
-        <div class="observatory-status-heading"><span>弥娅状态</span><strong :class="{ online: backendOnline }">{{ backendOnline ? '在线' : '离线' }}</strong></div>
-        <div class="observatory-status-row"><span>人格 / 情绪</span><strong>{{ miyaPersona }} · {{ emotionName }}</strong></div>
-        <div class="observatory-status-row"><span>记忆条目</span><strong>{{ memoryTotal }}</strong></div>
-        <div class="observatory-status-row"><span>已接入平台</span><strong>{{ miyaPlatforms }} 个</strong></div>
+        <div class="observatory-status-heading">
+          <span>弥娅状态</span><strong :class="{ online: backendOnline }">{{ backendOnline ? '在线' : '离线' }}</strong>
+        </div>
+        <div class="observatory-status-row">
+          <span>人格 / 情绪</span><strong>{{ miyaPersona }} · {{ emotionName }}</strong>
+        </div>
+        <div class="observatory-status-row">
+          <span>记忆条目</span><strong>{{ memoryTotal }}</strong>
+        </div>
+        <div class="observatory-status-row">
+          <span>已接入平台</span><strong>{{ miyaPlatforms }} 个</strong>
+        </div>
         <label class="observatory-ambient-toggle"><span>动态背景</span><input v-model="homeAmbientEnabled" type="checkbox"></label>
-        <button class="observatory-open" @click="navigate('/observatory')">打开观测台 <span>↗</span></button>
+        <button class="observatory-open" @click="navigate('/observatory')">
+          打开观测台 <span>↗</span>
+        </button>
       </section>
     </Teleport>
 

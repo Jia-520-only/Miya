@@ -2,32 +2,23 @@
 import { useStorage } from '@vueuse/core'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import API from '@/api/core'
+import { useMiyaPresence } from '@/composables/useMiyaPresence'
 import { useCameraVision } from '@/utils/cameraVision'
 
-const backendOnline = ref(false)
-const miyaPersona = ref('默认')
+const { presence, online: backendOnline } = useMiyaPresence()
+const miyaPersona = computed(() => backendOnline.value ? presence.value.persona ?? '待同步' : '待同步')
 const currentTime = ref('')
+const now = ref(Date.now())
 const cameraMode = ref(localStorage.getItem('miya-camera-mode') || 'off')
 const cameraHeartbeat = ref(Number(localStorage.getItem('miya-camera-heartbeat') || 0))
 let timer: ReturnType<typeof setInterval> | null = null
 const router = useRouter()
 const cameraVision = useCameraVision()
 
-const companionActive = computed(() => cameraMode.value === 'companion' && Date.now() - cameraHeartbeat.value < 35_000)
-
-async function fetchStatus() {
-  try {
-    const health = await API.health()
-    backendOnline.value = health.status === 'healthy'
-    const persona = await API.getCurrentPersona()
-    miyaPersona.value = persona?.persona?.name || persona?.persona?.id || '默认'
-  } catch {
-    backendOnline.value = false
-  }
-}
+const companionActive = computed(() => cameraMode.value === 'companion' && now.value - cameraHeartbeat.value < 35_000)
 
 function updateTime() {
+  now.value = Date.now()
   currentTime.value = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
 
@@ -43,19 +34,18 @@ function handleCameraState(event: Event) {
 }
 
 onMounted(() => {
-  fetchStatus()
   updateTime()
   updateCameraState()
   window.addEventListener('miya-camera-state', handleCameraState)
   timer = setInterval(() => {
     updateTime()
     updateCameraState()
-    fetchStatus()
   }, 5000)
 })
 
 onUnmounted(() => {
-  if (timer) clearInterval(timer)
+  if (timer)
+    clearInterval(timer)
   window.removeEventListener('miya-camera-state', handleCameraState)
 })
 

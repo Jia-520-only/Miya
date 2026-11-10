@@ -349,6 +349,7 @@ function clampCam() {
   cam.y = Math.max(hh, Math.min(H - hh, cam.y));
 }
 function updateCam(dt) {
+  if (MIYA && MIYA.state.composition !== 'ambient') { Object.assign(cam, MIYA.camera(W, H)); return; }
   if (!C.camera) { cam.x = W / 2; cam.y = H / 2; cam.z = 1; return; }
   shotT += dt;
   const cur = shots[shotI], nxt = shots[(shotI + 1) % shots.length];
@@ -393,9 +394,8 @@ function resizeStage() {
   thV = Math.asin(Math.min(1, (H / 2 + 60) / R));
   thS = Math.asin(Math.min(1, (H / 2 + 40) / RO));
   if (MIYA) {
-    cx = W < 760 ? W * 0.5 : W * 0.61; cy = H * 0.47;
-    R = Math.max(45, Math.min(H * 0.275, W * 0.24));
-    RO = R + Math.min(86, H * 0.105, W * 0.075) * C.ringWidth;
+    const layout = MIYA.layout(W, H);
+    cx = layout.x; cy = layout.y; R = layout.radius; RO = layout.outerRadius;
     RMAX = Math.hypot(Math.max(cx, W - cx), Math.max(cy, H - cy)) + 60;
     thV = Math.PI; thS = Math.PI;
   }
@@ -869,7 +869,7 @@ function buildCards() {
   let a = 0;
   while (a < TAU - 0.03) {
     const hpx = rr(16, 62), da = hpx / mid, gap = rr(3, 9) / mid;
-    slots.push({ a: a + da / 2, da, hpx, c: null, flash: 0 });
+    slots.push({ a: a + da / 2, da, hpx, index: slots.length, c: null, flash: 0 });
     a += da + gap;
   }
   Object.assign(rot, { from: 0, to: 0, t: 1, dur: 1, hold: 0 });
@@ -900,7 +900,7 @@ function glyphStrips(x, x1, y0, y1, pitch, opt, ctx) {
 // ---- block renderers: (ctx, x0, x1, y0, y1, tint) — x is radial, y is tangential ----
 function header(c, x0, x1, y, t) {
   c.font = `700 4.3px ${FONT}`; c.fillStyle = rgba(t, 0.95); c.fillText(pick(HEAD), x0, y);
-  c.fillStyle = rgba(t, 0.55); c.fillText(String((rnd() * 99) | 0).padStart(2, '0'), x1 - 6, y);
+  if (!MIYA) { c.fillStyle = rgba(t, 0.55); c.fillText(String((rnd() * 99) | 0).padStart(2, '0'), x1 - 6, y); }
   c.fillStyle = rgba(t, 0.3); c.fillRect(x0, y + 5.6, x1 - x0, 0.45);
   return y + 7.5;
 }
@@ -921,6 +921,15 @@ const BLOCKS = {
   },
   kv(c, x0, x1, y0, y1, t) {
     let y = y1 - y0 > 18 ? header(c, x0, x1, y0, t) : y0 + 1;
+    if (MIYA) {
+      // Abstract strokes preserve the texture without inventing numeric readings.
+      while (y < y1 - 4) {
+        c.fillStyle = rgba(t, 0.2); c.fillRect(x0, y, (x1 - x0) * 0.65, 0.6);
+        c.fillStyle = rgba(t, 0.5); c.fillRect(x0, y + 2, (x1 - x0) * 0.25, 0.6);
+        y += 5.2;
+      }
+      return;
+    }
     c.font = `500 3.6px ${FONT}`;
     while (y < y1 - 4) {
       c.fillStyle = rgba(t, 0.5); c.fillText(pick(KEYS), x0, y);
@@ -1001,6 +1010,7 @@ const BLOCK_W = [['code', 16], ['kv', 11], ['spark', 9], ['bars', 8], ['prog', 7
   ['para', 12], ['cols', 7], ['barcode', 6], ['matrix', 8]];
 const NEEDS_H = { code: 18, spark: 18, bars: 20, wave: 18, gauge: 16 };
 function pickBlock(h) {
+  if (MIYA) return pick(['para', 'cols', 'barcode', 'matrix', 'wave', 'grid']);
   for (let tries = 0; tries < 8; tries++) {
     let r = rnd() * 100, name = 'para';
     for (const [n, w] of BLOCK_W) { r -= w; if (r <= 0) { name = n; break; } }
@@ -1030,7 +1040,7 @@ function renderSlot(s) {
   for (let yy = rr(1, pitch); yy < h - 2; yy += pitch) {
     if (rnd() < 0.15) continue;
     let xx = oz0 + rr(0, 3);
-    if (rnd() < 0.45) { x.fillStyle = `rgba(225,228,236,${rr(0.55, 0.95)})`; x.fillText(String((rnd() * 999) | 0).padStart(3, '0'), xx, yy - 1); xx += 9; }
+    if (!MIYA && rnd() < 0.45) { x.fillStyle = `rgba(225,228,236,${rr(0.55, 0.95)})`; x.fillText(String((rnd() * 999) | 0).padStart(3, '0'), xx, yy - 1); xx += 9; }
     const n = 1 + (rnd() * 3 | 0);
     for (let i = 0; i < n && xx < oz1; i++) { x.fillStyle = `rgba(225,228,236,${rr(0.5, 0.95)})`; x.fillRect(xx, yy, rr(1.2, 2.4), 1.2); xx += rr(2.4, 3.6); }
   }
@@ -1058,6 +1068,11 @@ function drawRing(dt) {
     S.save(); S.rotate(A);
     const hh = s.hpx + 2;
     S.drawImage(s.c, R, -hh / 2, band, hh);
+    if (MIYA && s.hpx > 28 && s.index % 4 === 0) {
+      S.save(); S.translate(R, -hh / 2);
+      MIYA.renderTelemetry(S, s, band, hh, ringRot);
+      S.restore();
+    }
     if (s.flash > 0.02) { S.globalCompositeOperation = 'lighter'; S.globalAlpha = s.flash; S.drawImage(s.c, R, -hh / 2, band, hh); S.globalAlpha = 1; S.globalCompositeOperation = 'source-over'; }
     S.restore();
   }
@@ -1217,7 +1232,7 @@ function drawStage(dt) {
     S.fillStyle = vg; S.fillRect(0, 0, W, H);
   }
 
-  if (MIYA) { S.setTransform(DPR, 0, 0, DPR, 0, 0); MIYA.draw(S, cx, cy, R); }
+  if (MIYA) { camT(S, DPR); MIYA.draw(S, cx, cy, R); const center = toScreen(cx, cy); MIYA.publishGeometry(center.x, center.y, cam.z); }
   if (!AMBIENT) drawCallout();
 }
 
@@ -1458,7 +1473,7 @@ function frame(now) {
   if (document.hidden || (MIYA && MIYA.paused && MIYA.hasRendered)) return;
   if (AMBIENT && now < nextFrameAt) { scheduleFrame(); return; }
   nextFrameAt = AMBIENT ? now + 1000 / 30 : 0;
-  const dt = MIYA && MIYA.paused ? 0 : Math.min(0.05, (now - last) / 1000); last = now; T += dt;
+  const dt = MIYA && MIYA.paused ? 0 : Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now; T += dt;
   if (MIYA) MIYA.update(C, dt);
   drawStage(dt);
   if (MIYA) MIYA.hasRendered = true;
@@ -1479,6 +1494,7 @@ function resizeAll() {
 }
 const origFrame = frame;
 frame = function (now) { if (ready) origFrame(now); else { frameRequest = 0; last = now; } };
+window.addEventListener('miya:layout', () => { if (started) resizeAll(); });
 window.addEventListener('miya:render', () => { if (MIYA) MIYA.hasRendered = false; last = performance.now(); scheduleFrame(); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { last = performance.now(); scheduleFrame(); } });
 new ResizeObserver(() => { clearTimeout(rzT); rzT = setTimeout(resizeAll, 120); }).observe(document.getElementById('stageWrap'));

@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import asyncio
 import json
 import logging
 import time
@@ -388,14 +387,24 @@ class ManagementAPI:
                 if since <= 0:
                     entries, latest = buf.snapshot(500)
                     last = latest
-                    yield sse({"type": "init", "entries": entries, "latest_seq": latest})
+                    yield sse({"type": "init", "entries": entries, "latest_seq": latest, "historical": True})
+                else:
+                    # Resume history is explicitly distinct from new runtime events.
+                    result = buf.since(last)
+                    if result["overrun"]:
+                        entries, latest = buf.snapshot(500)
+                        last = latest
+                        yield sse({"type": "reset", "entries": entries, "latest_seq": latest, "historical": True})
+                    else:
+                        last = result["latest_seq"]
+                        yield sse({"type": "logs", **result, "historical": True})
                 last_beat = time.time()
                 while True:
                     result = buf.since(last)
                     if result["overrun"]:
                         entries, latest = buf.snapshot(500)
                         last = latest
-                        yield sse({"type": "reset", "entries": entries, "latest_seq": latest})
+                        yield sse({"type": "reset", "entries": entries, "latest_seq": latest, "historical": True})
                         last_beat = time.time()
                     elif result["entries"]:
                         last = result["latest_seq"]
