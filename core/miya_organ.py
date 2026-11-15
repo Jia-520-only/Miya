@@ -13,10 +13,12 @@
 from __future__ import annotations
 
 import logging
+import copy
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from core.miya_life_event import MiyaEvent
     from core.miya_soul_state import MiyaSoulState, LifecyclePhase
 
 logger = logging.getLogger("Miya.Organ")
@@ -59,6 +61,9 @@ class MiyaOrgan(ABC):
     @property
     def started(self) -> bool:
         return self._started
+
+    def bind_spine(self, spine) -> None:
+        self._spine = spine
 
     # ── 生命周期钩子 ──
 
@@ -125,6 +130,10 @@ class MiyaOrgan(ABC):
         """
         pass
 
+    def on_life_event(self, event: MiyaEvent, state: MiyaSoulState) -> None:
+        """统一生命事件钩子。旧事件钩子仍由脊柱兼容调用。"""
+        pass
+
     # ── 元信息 ──
 
     def status(self) -> dict:
@@ -152,32 +161,53 @@ class MiyaOrganGroup(MiyaOrgan):
         self._children: list[MiyaOrgan] = organs or []
 
     def add(self, organ: MiyaOrgan) -> None:
+        if self.started:
+            raise RuntimeError("请在器官组启动前添加子器官")
+        organ.bind_spine(self._spine)
         self._children.append(organ)
+
+    def bind_spine(self, spine) -> None:
+        super().bind_spine(spine)
+        for child in self._children:
+            child.bind_spine(spine)
 
     async def on_start(self) -> None:
         for child in self._children:
-            if child._spine:
+            try:
                 await child.on_start()
+            except Exception as exc:
+                logger.warning("Organ [%s/%s] start failed: %s", self.name, child.name, exc)
         await super().on_start()
 
     async def on_shutdown(self) -> None:
-        for child in self._children:
-            if child._spine:
+        for child in reversed(self._children):
+            try:
                 await child.on_shutdown()
+            except Exception as exc:
+                logger.warning("Organ [%s/%s] shutdown failed: %s", self.name, child.name, exc)
         await super().on_shutdown()
 
-    def on_lifecycle_change(self, old_phase, new_phase) -> None:
+    def _forward(self, hook: str, *args) -> None:
         for child in self._children:
-            child.on_lifecycle_change(old_phase, new_phase)
+            try:
+                getattr(child, hook)(*copy.deepcopy(args))
+            except Exception as exc:
+                logger.warning("Organ [%s/%s] %s failed: %s", self.name, child.name, hook, exc)
+
+    def on_lifecycle_change(self, old_phase, new_phase) -> None:
+        self._forward("on_lifecycle_change", old_phase, new_phase)
 
     def on_soul_state(self, state) -> None:
-        for child in self._children:
-            child.on_soul_state(state)
+        self._forward("on_soul_state", state)
 
     def on_user_message(self, message: str, user_id: str = "") -> None:
-        for child in self._children:
-            child.on_user_message(message, user_id)
+        self._forward("on_user_message", message, user_id)
 
     def on_action_result(self, action: str, result: dict) -> None:
-        for child in self._children:
-            child.on_action_result(action, result)
+        self._forward("on_action_result", action, result)
+
+    def on_system_event(self, event: str, data: dict | None = None) -> None:
+        self._forward("on_system_event", event, data)
+
+    def on_life_event(self, event, state) -> None:
+        self._forward("on_life_event", event, state)

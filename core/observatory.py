@@ -74,12 +74,18 @@ class ObservatoryService:
         state = spine.current_state
         phase = spine.phase.value
         max_age = 95 if phase == "SLEEP" else 35 if phase == "DROWSY" else 15
-        age = time.time() - state.timestamp
+        heartbeat_at = state.last_heartbeat_at
+        # 未设置独立心跳时间的旧快照保留兼容；新脊柱的事件不能刷新这个时间。
+        if heartbeat_at is None:
+            heartbeat_at = state.timestamp if not hasattr(spine, "_last_heartbeat_at") else None
+        if heartbeat_at is None:
+            return {"phase": None, "observed_at": None, "message_count": None}
+        age = time.time() - heartbeat_at
         if age < -5 or age > max_age or not state.tick_index:
             return {"phase": None, "observed_at": None, "message_count": None}
         return {
             "phase": phase,
-            "observed_at": datetime.fromtimestamp(state.timestamp, UTC).isoformat(),
+            "observed_at": datetime.fromtimestamp(heartbeat_at, UTC).isoformat(),
             "message_count": valid_count(state.message_count),
         }
 

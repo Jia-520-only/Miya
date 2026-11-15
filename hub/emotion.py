@@ -299,6 +299,12 @@ class Emotion:
             "active_existential": self.active_existential,
         }
 
+    def get_experience_state(self, intentions: list[dict], *, now: float | None = None) -> Dict:
+        """将明确范围内的真实经历投影到现有情绪谱，不向其他会话累计染色。"""
+        from core.miya_intention import experience_emotion
+
+        return experience_emotion(self.current_emotions, intentions, now=now)
+
     def activate_existential(self, emotion_type: str) -> bool:
         """激活特定的存在性情感"""
         if emotion_type not in self.existential_emotions:

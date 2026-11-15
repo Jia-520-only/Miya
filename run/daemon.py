@@ -216,6 +216,15 @@ def _register_spine_organs(daemon, spine) -> None:
     except Exception as e:
         logger.warning(f"DecisionHubOrgan 注册跳过: {e}")
 
+    # ContinuityOrgan — 已明确约定事项的持续跟进，共享主动性协调器。
+    try:
+        from core.miya_continuity_organ import MiyaContinuityOrgan
+
+        if proactive_coordinator is not None:
+            spine.register_organ(MiyaContinuityOrgan(proactive_coordinator))
+    except Exception as exc:
+        logger.warning(f"ContinuityOrgan 注册跳过: {exc}")
+
     # AutonomyOrgan — 自主进化（安静时自我改进）
     try:
         from core.miya_autonomy_organ import MiyaAutonomyOrgan
@@ -524,11 +533,18 @@ async def run_daemon(
     daemon = MiyaDaemon()
     logging.getLogger("Miya.Bootstrap").info("弥娅守护进程已创建")
 
+    # 平台会在 daemon.start() 内连接；提前创建总线以保留启动阶段事件。
+    spine_disabled = os.environ.get("MIYA_NO_SPINE", "") in ("1", "true", "yes")
+    if not spine_disabled:
+        from core.miya_spine import get_spine
+
+        get_spine()
+
     # 启动守护进程 (初始化 Miya 核心 + 平台连接)
     await daemon.start(platform_ids=platform_ids)
 
     # v4.1.11: 使用脊柱神经架构启动 (可通过环境变量回退)
-    if os.environ.get("MIYA_NO_SPINE", "") in ("1", "true", "yes"):
+    if spine_disabled:
         logging.getLogger("Miya.Bootstrap").info("脊柱模式已禁用 (MIYA_NO_SPINE=1)")
         await run_daemon_legacy(
             daemon,

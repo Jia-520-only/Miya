@@ -58,6 +58,9 @@ class ToolContext:
 
     # 运行时信息
     request_id: Optional[str] = None  # 请求ID
+    session_id: Optional[str] = None  # 显式会话边界
+    intention_id: Optional[str] = None  # 当前明确关联的持续事项
+    current_input: Optional[str] = None  # 用户确认的原始依据，不来自工具参数
     group_id: Optional[int | str] = None  # 群号 / OpenID
     user_id: Optional[int | str] = None  # 用户ID / OpenID
     platform: Optional[str] = None

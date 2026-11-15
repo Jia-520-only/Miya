@@ -6,6 +6,7 @@ ToolNet 工具注册表（兼容层）
 """
 
 import logging
+import inspect
 from typing import Any, Dict, List, Optional
 
 from webnet.ToolNet.base import ToolContext
@@ -70,13 +71,28 @@ class ToolRegistry:
 
     async def execute_tool(self, name: str, context, **kwargs) -> str:
         """执行工具（含权限检查）- BaseTool 标准签名"""
+        from core.miya_action import tool_outcome, track_action
+
+        scope = {
+            key: getattr(context, key, None)
+            for key in ("platform", "user_id", "group_id", "session_id", "intention_id", "message_id", "request_id")
+        }
+        async with track_action(name, scope, kind="tool") as feedback:
+            result = await self._execute_tool_once(name, context, feedback, **kwargs)
+            if feedback.result["status"] == "completed":
+                feedback.result = tool_outcome(result)
+            return result
+
+    async def _execute_tool_once(self, name: str, context, feedback, **kwargs) -> str:
         tool = self.get_tool(name)
         if not tool:
+            feedback.result = {"status": "rejected", "success": False, "error": "tool_not_found"}
             return f"❌ 工具不存在: {name}"
 
         # 【新增】权限检查
         permission_check = await self._check_tool_permission(name, context)
         if not permission_check["allowed"]:
+            feedback.result = {"status": "rejected", "success": False, "error": "permission_denied"}
             self.logger.warning(
                 f"[权限拒绝] 用户 {getattr(context, 'user_id', 'unknown')} 尝试执行工具 {name}，缺少权限"
             )
@@ -101,19 +117,26 @@ class ToolRegistry:
             if hasattr(tool, "validate_args") and callable(tool.validate_args):
                 valid, error = tool.validate_args(kwargs)
                 if not valid:
+                    feedback.result = {"status": "rejected", "success": False, "error": str(error)[:500]}
                     return f"❌ 参数错误: {error}"
 
             # 执行工具 - 检测工具的签名类型并适配调用
             logger.info(f"[Registry] 执行工具: {name}, kwargs: {list(kwargs.keys())}")
 
             # 统一签名: execute(self, args, context)。保留旧签名 (context, **kwargs) 兜底。
-            try:
-                result = await tool.execute(kwargs, context)
-            except TypeError:
+            # 在执行前选择签名，避免工具自身 TypeError 导致副作用被重复执行。
+            params = list(inspect.signature(tool.execute).parameters.values())
+            if params and params[0].name in {"context", "tool_context"}:
                 result = await tool.execute(context, **kwargs)
+            else:
+                result = await tool.execute(kwargs, context)
 
             return result
+        except TimeoutError as e:
+            feedback.result = {"status": "timed_out", "success": None, "error": str(e)[:500]}
+            return f"❌ 工具执行超时: {str(e)}"
         except Exception as e:
+            feedback.result = {"status": "failed", "success": False, "error": str(e)[:500]}
             self.logger.error(f"执行工具失败 {name}: {e}", exc_info=True)
             return f"❌ 工具执行失败: {str(e)}"
 
@@ -349,6 +372,7 @@ class ToolRegistry:
         )
         from webnet.ToolNet.tools.memory.memory_update import MemoryUpdate
         from webnet.ToolNet.tools.memory.thinking_query import ThinkingQueryTool
+        from webnet.ToolNet.tools.memory.manage_intention import ManageIntention
 
         self.register(MemoryAdd())
         self.register(MemoryDelete())
@@ -359,6 +383,7 @@ class ToolRegistry:
         self.register(MemorySearchByCategory())
         self.register(MemoryQueryTool())
         self.register(ThinkingQueryTool())
+        self.register(ManageIntention())
         self.logger.info(
             "已加载记忆工具: MemoryAdd, MemoryDelete, MemoryUpdate, MemoryList, AutoExtractMemory, MemoryStats, MemorySearchByCategory, MemoryQuery, ThinkingQuery"
         )

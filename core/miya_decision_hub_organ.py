@@ -45,6 +45,9 @@ class MiyaDecisionHubOrgan(MiyaOrgan):
 
     async def on_start(self) -> None:
         await super().on_start()
+        emotion = getattr(self._hub, "emotion", None)
+        if self._spine is not None and callable(getattr(emotion, "get_experience_state", None)):
+            self._spine.set_emotion_provider(emotion.get_experience_state)
         logger.info("决策中枢器官已接入脊柱")
 
     def on_lifecycle_change(self, old_phase: LifecyclePhase, new_phase: LifecyclePhase) -> None:
@@ -70,6 +73,10 @@ class MiyaDecisionHubOrgan(MiyaOrgan):
                 self._hub.on_spine_user_message(message, user_id)
             except Exception:
                 pass
+
+    def on_life_event(self, event, state: MiyaSoulState) -> None:
+        """事件发生后立即刷新缓存，无需等待下一个心跳。"""
+        self._cached_state = state
 
     def get_cached_state(self) -> MiyaSoulState | None:
         """获取缓存的灵魂状态快照"""

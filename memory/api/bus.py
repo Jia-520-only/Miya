@@ -278,6 +278,54 @@ class MemoryBus:
 
     # ==================== 检索 API ====================
 
+    @staticmethod
+    async def recall_experiences(
+        *, user_id: str, platform: str, group_id: str = "", session_id: str = "",
+        query: str = "", limit: int = 3,
+    ) -> list[dict]:
+        """读取生命日志中的行动证据，严格限定用户、平台与群聊范围。"""
+        from core.miya_life_event import LifeEventType, MiyaEvent
+        from core.miya_spine import get_existing_spine
+
+        spine = get_existing_spine()
+        if spine is None:
+            return []
+        try:
+            events = await asyncio.to_thread(
+                spine.recall_action_experiences,
+                user_id=user_id, platform=platform, group_id=group_id, session_id=session_id, query=query, limit=limit,
+            )
+            if events:
+                spine.emit_event(MiyaEvent(
+                    LifeEventType.MEMORY_RECALLED, source=platform, actor="miya",
+                    payload={
+                        "user_id": user_id, "platform": platform, "group_id": group_id, "session_id": session_id,
+                        "event_ids": [event["event_id"] for event in events],
+                    },
+                ))
+            return events
+        except Exception as exc:
+            logger.warning("行动经历召回失败: %s", exc)
+            return []
+
+    @staticmethod
+    async def recall_intentions(*, user_id: str, platform: str, group_id: str = "", session_id: str = "") -> list[dict]:
+        """读取事项投影，不依赖最近事件窗口，也不创建新的脊柱或记忆后端。"""
+        from core.miya_spine import get_existing_spine
+
+        spine = get_existing_spine()
+        if spine is None:
+            return []
+        try:
+            return await asyncio.to_thread(
+                spine.list_intentions,
+                dict(user_id=user_id, platform=platform, group_id=group_id, session_id=session_id),
+                include_closed=True,
+            )
+        except Exception as exc:
+            logger.warning("持续事项召回失败: %s", exc)
+            return []
+
     async def recall(
         self,
         request: Union[str, RecallRequest],

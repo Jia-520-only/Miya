@@ -143,6 +143,10 @@ class ResponseGenerator:
 
                 tool_context = {
                     "platform": platform,
+                    "request_id": context.get("_life_correlation_id") or context.get("message_id"),
+                    "message_id": context.get("message_id"),
+                    "session_id": context.get("session_id", ""),
+                    "current_input": content,
                     "user_id": user_id,
                     "group_id": context.get("group_id"),
                     "message_type": context.get("message_type"),

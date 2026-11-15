@@ -242,7 +242,7 @@ class DecisionHub:
         )
 
         # 5b. 统一上下文管道 (v8.0+): 一次读取，多组件共享
-        self.context_builder = ContextBuilder(memory_net=self.memory_net)
+        self.context_builder = ContextBuilder(memory_net=self.memory_net, emotion=self.emotion)
 
         # 6. 平台工具管理器
         self.platform_tools_manager = PlatformToolsManager(tool_subnet=self.tool_subnet)
@@ -901,11 +901,19 @@ class DecisionHub:
         """按投递 ID 幂等分发，并区分发送、排队、拒绝和失败。"""
         import time
         from uuid import uuid4
+        from core.miya_action import track_action
         from core.proactive_delivery import DeliveryResult
 
         delivery_id = delivery_id or uuid4().hex
+        life_context = {
+            "platform": platform, "user_id": str(target_id) if chat_type != "group" else "global",
+            "group_id": str(target_id) if chat_type == "group" else "",
+            "request_id": delivery_id, "delivery_id": delivery_id,
+        }
         if not message or not target_id:
-            return DeliveryResult("rejected", delivery_id, "empty_message_or_target")
+            async with track_action("message.deliver", life_context, kind="delivery") as feedback:
+                feedback.result = {"status": "rejected", "success": False, "reason": "empty_message_or_target"}
+                return DeliveryResult("rejected", delivery_id, "empty_message_or_target")
         if not hasattr(self, "_proactive_delivery_results"):
             self._proactive_delivery_results = {}
         if not hasattr(self, "_proactive_delivery_locks"):
@@ -920,17 +928,25 @@ class DecisionHub:
                 cached = self._proactive_delivery_results.get(delivery_id)
                 if cached:
                     return cached[1]
-                try:
-                    return await self._dispatch_proactive_message_once(
-                        message, target_id, chat_type, platform, trigger_type, store_memory, delivery_id,
-                    )
-                except asyncio.CancelledError:
-                    if delivery_id in self._proactive_delivery_results:
-                        return self._proactive_delivery_results[delivery_id][1]
-                    raise
-                except Exception as exc:
-                    logger.warning("[主动分发] 投递失败 delivery_id=%s: %s", delivery_id, exc)
-                    return DeliveryResult("failed", delivery_id, str(exc))
+                async with track_action("message.deliver", life_context, kind="delivery") as feedback:
+                    try:
+                        result = await self._dispatch_proactive_message_once(
+                            message, target_id, chat_type, platform, trigger_type, store_memory, delivery_id,
+                        )
+                    except asyncio.CancelledError:
+                        if delivery_id in self._proactive_delivery_results:
+                            result = self._proactive_delivery_results[delivery_id][1]
+                        else:
+                            raise
+                    except Exception as exc:
+                        logger.warning("[主动分发] 投递失败 delivery_id=%s: %s", delivery_id, exc)
+                        result = DeliveryResult("failed", delivery_id, str(exc))
+                    feedback.result = {
+                        "status": result.status,
+                        "success": True if result.status == "sent" else False if result.status in {"failed", "rejected"} else None,
+                        "reason": result.reason[:500],
+                    }
+                    return result
         finally:
             if len(self._proactive_delivery_locks) > 256:
                 for identity, cached_lock in list(self._proactive_delivery_locks.items()):
@@ -956,6 +972,16 @@ class DecisionHub:
             user_id = getattr(coordinator, "_default_target_id", "default")
         messages = take_pending_deliveries(getattr(self, "_mobile_pending", {}), str(user_id))
         for item in messages:
+            from core.miya_action import track_action
+
+            async with track_action("message.queue_claim", {
+                "platform": item.get("platform", "terminal"),
+                "user_id": str(user_id),
+                "request_id": item.get("delivery_id", ""),
+                "delivery_id": item.get("delivery_id", ""),
+            }, kind="delivery") as feedback:
+                # 客户端领取仅证明返回给调用方，不声称用户已经阅读或播放。
+                feedback.result = {"status": "claimed", "success": None}
             if item.get("store_memory", True):
                 await self._store_proactive_message_memory(
                     message=str(item.get("message", "")),
@@ -1024,6 +1050,7 @@ class DecisionHub:
         sent = False
         queued = False
         broadcasted = False
+        scoped_followup = trigger_type == "intention_followup"
 
         # 1) 平台注册表直接发送 (v8.2: 启用跨平台 ID 翻译)
         if self.platform_registry and platform and platform != "terminal":
@@ -1033,7 +1060,7 @@ class DecisionHub:
                     logger.info(f"[主动分发] 发送群消息 (via {platform}): {message[:50]}")
                     sent = await self._attempt_proactive_send(inst.send_group_message, target_id, message)
                 elif chat_type != "group" and hasattr(inst, "send_private_message"):
-                    resolved_id = self._resolve_cross_platform_target_id(str(target_id), platform)
+                    resolved_id = str(target_id) if scoped_followup else self._resolve_cross_platform_target_id(str(target_id), platform)
                     logger.info(
                         f"[主动分发] 发送私聊消息 (via {platform}"
                         f"{', resolved_id=' + resolved_id if resolved_id != str(target_id) else ''})"
@@ -1052,7 +1079,7 @@ class DecisionHub:
         # 3) 需要路由判断的平台 → AI 感知 / 优先级 / 广播
         # v9.0: mobile/desktop 跳过 AI 路由，直接走 WS 兜底
         _ws_direct_platforms = MiyaPlatform.ws_direct_platforms()
-        if not sent and chat_type != "group" and platform not in _ws_direct_platforms:
+        if not sent and not scoped_followup and chat_type != "group" and platform not in _ws_direct_platforms:
             routing_config = self._get_platform_routing_config()
             mode = routing_config.get("mode", "ai_aware")
 
@@ -1086,7 +1113,8 @@ class DecisionHub:
                 sent = await self._send_by_priority(target_id, message, chat_type, routing_config)
 
         # 4) mobile/desktop 兜底 + WS 直推 (v9.0)
-        if not sent and chat_type != "group":
+        if (not sent and chat_type != "group"
+                and (not scoped_followup or platform in _ws_direct_platforms or platform in {"desktop", "web", "mobile", "terminal"})):
             if not sent:
                 logger.info(f"[主动分发] 无法直接发送到 {platform}，使用 WS 兜底: {message[:50]}")
 
@@ -1867,6 +1895,7 @@ class DecisionHub:
                         break
         else:
             content = raw_content
+        content = str(content or "")
         sender_name = perception.get("sender_name", "用户")
         message_type = perception.get("message_type", "")
         # 兼容多种来源：source字段或platform字段
@@ -1932,6 +1961,29 @@ class DecisionHub:
         reply_to_bot = perception.get("reply_to_bot", False)
         user_id = perception.get("user_id", perception.get("sender_id", 0))
         group_name = perception.get("group_name", "")
+        perception["_life_correlation_id"] = str(perception.get("message_id") or message.message_id)
+
+        # 统一入口只注入一次；内部标志消息已在上方过滤。
+        try:
+            from core.miya_spine import get_existing_spine
+
+            spine = get_existing_spine()
+            if spine is not None and spine.is_running():
+                spine.inject_user_message(
+                    content,
+                    str(user_id),
+                    source=str(platform),
+                    correlation_id=perception["_life_correlation_id"],
+                    context={
+                        "message_id": perception.get("message_id") or message.message_id,
+                        "group_id": group_id,
+                        "message_type": message_type,
+                        "sender_name": sender_name,
+                        "session_id": perception.get("session_id", ""),
+                    },
+                )
+        except Exception as exc:
+            logger.warning("[生命事件] 用户消息注入失败: %s", exc)
 
         # 标记弥娅正在处理消息，防止主动聊天在后处理中插入干扰
         target_id = group_id if group_id and group_id != 0 else user_id
@@ -3255,6 +3307,9 @@ class DecisionHub:
 
                 tool_context = {
                     "platform": platform,
+                    "request_id": perception.get("_life_correlation_id"),
+                    "session_id": session_id,
+                    "current_input": content,
                     "user_id": user_id if user_id else 0,
                     "platform_user_id": perception.get("platform_user_id", user_id),
                     "group_id": perception.get("group_id"),

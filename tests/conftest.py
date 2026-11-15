@@ -371,6 +371,12 @@ def timer():
 
 # ==================== 清理工具 ====================
 @pytest.fixture(autouse=True)
+def _life_events_are_not_test_data(tmp_path, monkeypatch):
+    """测试不能向真实生命日志写入虚构的经历。"""
+    monkeypatch.setattr("core.miya_spine.default_journal_path", lambda: tmp_path / "life-events.sqlite3")
+
+
+@pytest.fixture(autouse=True)
 def cleanup_after_test():
     """测试后清理"""
     yield

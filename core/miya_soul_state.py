@@ -31,6 +31,24 @@ class LifecyclePhase(str, Enum):
 
 
 @dataclass
+class MiyaLifeState:
+    """跨器官共享的、可持续更新的生命状态。"""
+
+    identity: str = "miya"
+    life_phase: str = LifecyclePhase.INIT.value
+    mood: dict[str, Any] = field(default_factory=dict)
+    attention: dict[str, Any] = field(default_factory=dict)
+    needs: dict[str, Any] = field(default_factory=dict)
+    memory_focus: list[str] = field(default_factory=list)
+    intentions: list[dict[str, Any]] = field(default_factory=list)
+    open_loops: list[dict[str, Any]] = field(default_factory=list)
+    last_action: dict[str, Any] = field(default_factory=dict)
+    recent_experience: list[dict[str, Any]] = field(default_factory=list)
+    last_event_at: float | None = None
+    agency_budget: float = 1.0
+
+
+@dataclass
 class MiyaSoulState:
     """
     弥娅生命的完整状态快照。
@@ -42,6 +60,7 @@ class MiyaSoulState:
     # ── 基础信息 ──
     tick_index: int = 0
     timestamp: float = field(default_factory=time.time)
+    last_heartbeat_at: float | None = None
     lifecycle_phase: LifecyclePhase = LifecyclePhase.INIT
     uptime_seconds: float = 0.0
     tick_count: int = 0
@@ -53,6 +72,7 @@ class MiyaSoulState:
 
     # ── 器官在线状态 (由 Spine 填充) ──
     organs_online: dict[str, bool] = field(default_factory=dict)
+    life_state: MiyaLifeState = field(default_factory=MiyaLifeState)
 
     def is_alive(self) -> bool:
         """弥娅是否在正常运行"""

@@ -1178,6 +1178,7 @@ class PlatformToolsManager:
 
     # 纯闲聊最小工具集 — 降低 prompt 体积，加速简单对话
     MINIMAL_CHAT_TOOLS = [
+        "manage_intention",
         "send_message",
         "mcp_art_service_comfyui",
         "send_platform_file",
@@ -1303,7 +1304,7 @@ class PlatformToolsManager:
 
         try:
             adapter = get_adapter(platform)
-            return self._supported_tools(adapter._get_available_tools(), platform)
+            return self._supported_tools([*adapter._get_available_tools(), "manage_intention"], platform)
         except Exception as e:
             logger.error(f"[平台工具] 获取平台工具失败: {e}")
             return []
@@ -1343,7 +1344,7 @@ class PlatformToolsManager:
         selected_tools = selected_tools + self.EARTH_TOOLS
 
         # 自检、创作与作品发送 — 所有平台通用
-        for _t in ("self_check", "daemon_logs", "mcp_art_service_comfyui", "send_platform_file"):
+        for _t in ("self_check", "daemon_logs", "mcp_art_service_comfyui", "send_platform_file", "manage_intention"):
             if _t not in selected_tools:
                 selected_tools.append(_t)
 

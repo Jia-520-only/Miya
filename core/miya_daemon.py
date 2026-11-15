@@ -343,6 +343,16 @@ class MiyaDaemon:
         event_type = event.get("event", "")
         pid = event.get("platform_id", "unknown")
 
+        try:
+            from .miya_soul_state import LifecyclePhase
+            from .miya_spine import get_existing_spine
+
+            spine = get_existing_spine()
+            if spine is not None and spine.phase != LifecyclePhase.SHUTDOWN:
+                spine.inject_platform_event(event)
+        except Exception as exc:
+            logger.warning("[生命事件] 平台事件注入失败: %s", exc)
+
         if PlatformEvent.DISCONNECTED.value in event_type:
             logger.info(f"[{pid}] 平台已断开")
         elif PlatformEvent.RECONNECTING.value in event_type:

@@ -222,60 +222,8 @@ class ToolAdapter:
                 # 原生模式：使用M-Link子网
                 result = await self.mlink_subnet.execute_tool(tool_name, args, tool_context)
             else:
-                # 兼容模式：直接调用注册表
-                tool = self.tool_registry.get_tool(tool_name)
-                if not tool:
-                    logger.warning(f"未找到工具: {tool_name}")
-                    return f"错误：未找到工具 '{tool_name}'"
-
-                logger.info(f"执行工具: {tool_name}, 参数: {args}")
-
-                # 处理不同工具的execute方法签名
-                import inspect
-
-                result = None
-
-                try:
-                    sig = inspect.signature(tool.execute)
-                    params = list(sig.parameters.keys())
-
-                    # 新版工具签名: execute(self, args: Dict, context: ToolContext)
-                    if (
-                        len(params) == 3 and params[0] == "self" and params[1] == "args" and params[2] == "context"
-                    ) or (len(params) == 2 and params[0] == "args" and params[1] == "context"):
-                        result = await tool.execute(args, tool_context)
-                    # 有self的旧版签名: execute(self, context, **kwargs)
-                    elif (
-                        (
-                            len(params) >= 2
-                            and params[0] == "self"
-                            and params[1] in ("context", "kwargs", "tool_context")
-                        )
-                        or len(params) >= 1
-                        and params[0]
-                        in (
-                            "context",
-                            "kwargs",
-                            "tool_context",
-                        )
-                    ):
-                        result = await tool.execute(tool_context, **args)
-                    else:
-                        # 兜底：尝试新版签名
-                        result = await tool.execute(args, tool_context)
-
-                except Exception:
-                    # 如果检测失败，尝试两种常见签名
-                    try:
-                        result = await tool.execute(args, tool_context)
-                    except TypeError:
-                        try:
-                            result = await tool.execute(tool_context, **args)
-                        except Exception as e2:
-                            logger.warning(f"工具签名适配失败: {e2}, 尝试直接调用")
-                            result = await tool.execute(args, tool_context)
-
-                logger.info(f"工具执行完成: {tool_name}")
+                # 新旧调用都通过注册表：权限、签名适配和行动反馈只执行一次。
+                result = await self.tool_registry.execute_tool(tool_name, tool_context, **args)
 
             return result
 
@@ -313,7 +261,7 @@ class ToolAdapter:
         for call in tool_calls:
             tool_name = call.get("tool_name")
             args = call.get("args", {})
-            result = await self.execute_tool(tool_name, args, tool_context)
+            result = await self.execute_tool(tool_name, args, filtered_context)
             results.append(result)
 
         return results

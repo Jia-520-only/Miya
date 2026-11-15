@@ -230,7 +230,8 @@ class ProactiveCoordinator:
         return token
 
     async def _send_reserved(self, token: str, message: str, target_id: str,
-                             chat_type: str, platform: str, trigger_type: str, detailed: bool = False):
+                             chat_type: str, platform: str, trigger_type: str, detailed: bool = False,
+                             guard: Optional[Callable[[], bool]] = None):
         accepted = False
         try:
             callback = self._send_callback
@@ -244,6 +245,8 @@ class ProactiveCoordinator:
             except (TypeError, ValueError):
                 accepts_id = False
             for attempt in range(self._send_attempts):
+                if guard is not None and not guard():
+                    return DeliveryResult("skipped", reason="superseded") if detailed and attempt == 0 else False
                 kwargs = {"delivery_id": token} if accepts_id else {}
                 result = callback(message, target_id, chat_type, platform, trigger_type, **kwargs)
                 if inspect.isawaitable(result):
@@ -281,7 +284,7 @@ class ProactiveCoordinator:
     async def _decide_message(self, event: dict) -> Optional[str]:
         facts = json.dumps(event, ensure_ascii=False, separators=(",", ":"), default=str)
         if not self._ai_client:
-            return facts
+            return str(event.get("candidate_message") or facts)
         try:
             from core.ai_client import AIMessage
             from core.persona_prompt import compose_persona_system_prompt
@@ -323,10 +326,15 @@ class ProactiveCoordinator:
         platform: str = "terminal",
         force: bool = False,
         source: str = "",
+        guard: Optional[Callable[[], bool]] = None,
+        detailed: bool = False,
     ) -> bool:
-        """提交后台事件；返回是否实际发出消息。"""
+        """提交后台事件；详细模式区分策略跳过与实际投递尝试。"""
+        def skipped(reason):
+            return DeliveryResult("skipped", reason=reason) if detailed else False
+
         if not self._enabled or not self._send_callback:
-            return False
+            return skipped("disabled")
         if target_id == "default":
             target_id = self._default_target_id
         # The event already carries which organ produced it; an explicit argument
@@ -335,7 +343,7 @@ class ProactiveCoordinator:
         urgency = str(event.get("urgency", "normal")).lower()
         if self._in_quiet_hours() and not force and urgency not in {"high", "critical"}:
             logger.info("[主动协调] 静默时段跳过 key=%s", key)
-            return False
+            return skipped("quiet_hours")
         facts = json.dumps(event, ensure_ascii=False, separators=(",", ":"), default=str)
         # Ask the model *before* taking the lock. Deciding is a network round trip
         # of up to tens of seconds, and holding the one coordinator lock across it
@@ -355,14 +363,16 @@ class ProactiveCoordinator:
         message = await self._decide_message(decision_event)
         if not message:
             logger.info("[主动协调] AI 判断无需通知 key=%s", key)
-            return False
+            return skipped("no_message")
         async with self._lock:
             if not self._enabled or (self._in_quiet_hours() and not force and urgency not in {"high", "critical"}):
-                return False
+                return skipped("disabled_or_quiet")
+            if guard is not None and not guard():
+                return skipped("superseded")
             token = self._claim(key, facts, urgency, origin, EVENT)
         if not token:
-            return False
-        return await self._send_reserved(token, message, target_id, chat_type, platform, trigger_type)
+            return skipped("throttled")
+        return await self._send_reserved(token, message, target_id, chat_type, platform, trigger_type, detailed, guard)
 
     async def submit_message(
         self,
