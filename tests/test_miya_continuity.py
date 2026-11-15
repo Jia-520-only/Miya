@@ -496,6 +496,20 @@ async def test_heartbeat_drives_followup_and_decision_organ_projects_emotion(spi
 
 
 @pytest.mark.asyncio
+async def test_due_intention_can_be_followed_up_while_spine_sleeps(spine, monkeypatch):
+    record = make_due(spine, monkeypatch)
+    spine._phase = LifecyclePhase.SLEEP
+    sender = AsyncMock(return_value=DeliveryResult("sent", "sleep-followup"))
+    organ = MiyaContinuityOrgan(coordinator(sender))
+    organ.bind_spine(spine)
+
+    result = await organ.follow_up(record)
+
+    assert result.status == "sent"
+    sender.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_followup_limit_survives_restart_and_stops_without_abandoning_promise(spine, monkeypatch):
     record = make_due(spine, monkeypatch)
     sender = AsyncMock(return_value=True)

@@ -32,7 +32,8 @@ _MCP_KEYWORDS: Dict[str, List[str]] = {
         "电脑",
         "桌面",
         "打开软件",
-        "浏览器",
+        "终端",
+        "命令行",
         "键盘",
         "鼠标",
         "文件操作",
@@ -51,6 +52,8 @@ _MCP_KEYWORDS: Dict[str, List[str]] = {
         "配置环境",
         "分析代码",
         "修复bug",
+        "项目操作",
+        "电脑自动化",
     ],
 }
 
@@ -147,10 +150,29 @@ class MCPTool(BaseTool):
             from core.mcp_manager import get_mcp_manager
 
             manager = get_mcp_manager()
+            call_args = dict(args)
+            # DSH 是主进程的执行器，不应再创建第二套弥娅状态。
+            # 只传递可序列化的请求边界，让 DSH 的结果能回到同一次生命行动。
+            if self._service_name == "dsh":
+                call_args["miya_context"] = {
+                    key: getattr(context, key, None)
+                    for key in (
+                        "platform",
+                        "user_id",
+                        "group_id",
+                        "session_id",
+                        "request_id",
+                        "intention_id",
+                        "message_id",
+                        "channel_id",
+                        "current_input",
+                        "action_id",
+                    )
+                }
             result = await manager.call(
                 service_name=self._service_name,
                 tool_name=self._tool_name,
-                **args,
+                **call_args,
             )
 
             if result.success:

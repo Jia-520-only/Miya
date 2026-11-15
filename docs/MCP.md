@@ -10,10 +10,10 @@
 .mcp.json (stdio MCP 服务端)           agent-manifest.json (MCPManager 自动发现)
 ─────────                              ────────────
 
-┌─ miya-soul ──────────────────┐       ┌─ MCPManager ───────────────────────┐
+┌─ miya-mineradio ─────────────┐       ┌─ MCPManager ───────────────────────┐
 │  mcp.server.Server           │       │  core/mcp_manager.py                │
 │  @server.list_tools()        │       │  scans mcpserver/**/agent-manifest  │
-│  @server.call_tool()         │◄──────│  importlib.import_module()          │
+│  @server.call_tool()         │       │  importlib.import_module()          │
 │  stdio JSON-RPC              │  DSH  │  instance.handle_handoff({...})     │
 └──────────────────────────────┘       └─────────────────────────────────────┘
                                               │
@@ -34,7 +34,7 @@
 
 | 范式 | 配置方式 | 服务数 | 使用场景 |
 |------|----------|--------|----------|
-| **原生 MCP SDK** | `.mcp.json` → `stdio` | 2 | DSH 终端直接调用的核心服务 |
+| **原生 MCP SDK** | `.mcp.json` → `stdio` | 1 | DSH 终端直接调用的独立服务 |
 | **MCPManager 自动发现** | `mcpserver/*/agent-manifest.json` | 14 | 通过 daemon 进程统一管理、ToolNet 注册 |
 
 
@@ -74,7 +74,7 @@
   "result": {
     "protocolVersion": "2024-11-05",
     "capabilities": { "tools": {} },
-    "serverInfo": { "name": "miya-soul", "version": "1.0.0" }
+    "serverInfo": { "name": "miya-mineradio", "version": "1.0.0" }
   }
 }
 ```
@@ -94,8 +94,8 @@
   "result": {
     "tools": [
       {
-        "name": "miya_get_emotion",
-        "description": "获取弥娅当前情感状态和表情符号",
+        "name": "mineradio_get_status",
+        "description": "获取 Mineradio 播放器状态",
         "inputSchema": {
           "type": "object",
           "properties": {},
@@ -118,7 +118,7 @@
   "id": 3,
   "method": "tools/call",
   "params": {
-    "name": "miya_get_emotion",
+    "name": "mineradio_get_status",
     "arguments": {}
   }
 }
@@ -131,7 +131,7 @@
     "content": [
       {
         "type": "text",
-        "text": "{\"state\": {\"current\": \"joy\", \"intensity\": 0.7, ...}, \"expression\": \"😊\"}"
+        "text": "{\"playing\": true, \"title\": \"当前歌曲\"}"
       }
     ]
   }
@@ -139,24 +139,6 @@
 ```
 
 ### 2.5 常用调用示例
-
-#### miya-soul: 查询情感状态
-```json
-// 请求
-{ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": "miya_get_emotion", "arguments": {} } }
-
-// 响应 content[0].text
-{
-  "state": { "current": "joy", "intensity": 0.75, "emotions": { "joy": 0.75, "trust": 0.3, ... } },
-  "expression": "😊"
-}
-```
-
-#### miya-soul: 查询系统完整状态
-```json
-// 请求
-{ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "miya_get_system_status", "arguments": {} } }
-```
 
 #### miya-mineradio: 搜索歌曲
 ```json
@@ -174,35 +156,6 @@
 ## 3. 各服务模块职责详解
 
 ### 3.1 原生 MCP SDK 服务（`.mcp.json` 注册）
-
-#### miya-soul (mcpserver/miya/)
-
-**入口**：`python mcpserver/miya/server.py`  
-**核心类**：`MiyaPersonality`, `MiayaMemory`, `MiayaEmotion`, `MiayaModelSelector`  
-**职责**：DSH 终端感知弥娅"灵魂状态"的唯一窗口。暴露 17 个工具。
-
-| 工具 | 说明 |
-|------|------|
-| `miya_get_personality` | 获取当前人格、可用人格列表 |
-| `miya_switch_personality` | 运行时热切换人格 |
-| `miya_get_memory` | 获取近期记忆与会话摘要 |
-| `miya_save_memory` | 保存键值对记忆 |
-| `miya_recall` | 按关键词回忆 |
-| `miya_get_emotion` | 当前情感类型 + 强度 + 表情符号 |
-| `miya_set_emotion` | 手动设置情感（7 种基本情绪） |
-| `miya_get_status` | 人格 + 记忆 + 情感三者整合 |
-| `miya_get_system_status` | 全量状态：人格 + 情感 + 记忆 + 脊柱 + 模型池 |
-| `miya_list_models` | 列出模型池中所有可用模型 |
-| `miya_select_model` | 按任务类型选择最佳模型 |
-| `miya_classify_task` | 分类用户输入的任务类型 |
-| `miya_get_task_types` | 获取所有支持的任务类型 |
-| `miya_get_spine_status` | v8.0 脊柱神经：存活状态、生命阶段、器官在线等 |
-| `miya_collaborate` | 经协作引擎处理消息（自动单模型/链式/并行/角色分工） |
-
-**桥接能力**：
-- `spine` — 桥接 v8.0 弥娅脊柱神经
-- `collaboration_engine` — 包装 `ModelCollaborationEngine`
-- `model_selector` — 包装 `core.model_pool_compat`
 
 #### miya-mineradio (mcpserver/miya_mineradio/)
 
@@ -591,7 +544,7 @@ if __name__ == "__main__":
 3. **IO 不阻塞**：`handle_handoff` 是 `async` 方法，内部不应使用 `time.sleep()` 等同步阻塞调用。
 4. **日志**：服务日志输出到 `stderr`（原生 MCP SDK 的 stdin/stdout 不能混入日志）。
 5. **错误处理**：捕获异常并返回 JSON 错误对象，避免未捕获异常导致整个 MCP 框架崩溃。
-6. **与 miya-soul 交互**：如需访问弥娅的人格/记忆/情感状态，通过 `mcpserver/miya/server.py` 中的 MCP 工具调用，不要直接在自定义模块中导入 `core.*` 模块（避免循环依赖）。
+6. **读取弥娅状态**：人格、记忆、情感和 Spine 状态统一由主程序维护；新模块通过主程序提供的组件或事件接口读取，不要再创建第二套状态服务。
 7. **参数提取**：`handle_handoff` 接收的 `tool_call` 字典中，工具参数与 `service_name`, `tool_name`, `message` 同级。MCPManager 在 `call()` 方法中会自动展开 `**kwargs`。
 
 ---
@@ -688,8 +641,6 @@ class MCPCallResult:
 
 ```
 mcpserver/
-├── miya/                     # ★ miya-soul 原生 MCP 服务（17 工具）
-│   └── server.py
 ├── miya_mineradio/           # ★ 音乐遥控（27 工具，双端注册）
 │   ├── agent-manifest.json
 │   ├── server.py

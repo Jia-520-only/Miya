@@ -144,6 +144,7 @@ class AuthSubnet(BaseSubnet):
 
             context = {
                 "user_id": user_id,
+                "platform": args.get("platform"),
                 "group_id": group_id,
                 "message_type": message_type,
                 "sender_name": sender_name,
@@ -226,10 +227,16 @@ class AuthSubnet(BaseSubnet):
 
         if action == "check_permission":
             permission = request.get("permission", "")
+            platform = request.get("platform")
             result = await self.execute_tool(
-                "check_permission", {"user_id": user_id, "permission": permission}, user_id
+                "check_permission", {"user_id": user_id, "permission": permission, "platform": platform}, user_id
             )
-            return json.dumps({"success": True, "has_permission": json.loads(result)}, ensure_ascii=False)
+            payload = json.loads(result)
+            return json.dumps({
+                "success": payload.get("success", False),
+                "has_permission": payload.get("allowed", False),
+                "error": payload.get("error"),
+            }, ensure_ascii=False)
 
         elif action == "list_permissions":
             result = await self.execute_tool("list_permissions", {"user_id": user_id}, user_id)

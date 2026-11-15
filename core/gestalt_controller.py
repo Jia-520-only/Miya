@@ -86,6 +86,13 @@ class GestaltController:
             "scheduler",
             "lifenet",
             "request_id",
+            "action_id",
+            "platform",
+            "session_id",
+            "intention_id",
+            "message_id",
+            "channel_id",
+            "current_input",
             "group_id",
             "user_id",
             "message_type",
@@ -130,6 +137,13 @@ class GestaltController:
 
         if self.tool_subnet and hasattr(self.tool_subnet, "registry") and self.tool_subnet.registry:
             try:
+                original_tool_name = tool_name
+                if self.tool_subnet.registry.get_tool("mcp_dsh_execute"):
+                    from core.dsh_routing import adapt_dsh_call
+
+                    tool_name, args = adapt_dsh_call(tool_name, args)
+                    if tool_name != original_tool_name:
+                        logger.info("[格式塔] DSH 统一路由: %s -> %s", original_tool_name, tool_name)
                 result = await self.tool_subnet.registry.execute_tool(tool_name, tool_context, **args)
                 logger.info(f"[格式塔] 工具执行完成: {tool_name}, 结果: {result[:100] if result else '(无)'}...")
                 return result

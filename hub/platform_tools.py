@@ -7,6 +7,7 @@ import logging
 from typing import Dict, List
 
 from core.unified_platform.platform_type import MiyaPlatform
+from core.dsh_routing import canonical_tool_name, canonical_tool_names, collapse_dsh_schemas
 
 logger = logging.getLogger(__name__)
 
@@ -1276,10 +1277,41 @@ class PlatformToolsManager:
         "group_analysis_inactive_risk", "group_analysis_message_mix",
     })
 
+    # Names kept by older platform manifests.  Resolve them at the boundary
+    # so model-facing schemas only contain tools that are actually registered.
+    LEGACY_TOOL_ALIASES = {
+        "terminal_execute": "mcp_dsh_execute",
+        "terminal_command": "mcp_dsh_execute",
+        "terminal_exec": "mcp_dsh_execute",
+        "multi_terminal": "mcp_dsh_execute",
+        "code_execute": "mcp_code_executor_execute",
+        "file_read": "mcp_filesystem_read_file",
+        "file_write": "mcp_filesystem_write_file",
+        "file_edit": "mcp_dsh_execute",
+        "file_delete": "mcp_dsh_execute",
+        "directory_tree": "mcp_filesystem_list_files",
+        "file_grep": "mcp_filesystem_search_files",
+        "file_glob": "mcp_filesystem_search_files",
+        "project_analyze": "mcp_dsh_execute",
+    }
+
     @classmethod
     def _supported_tools(cls, names: List[str], platform: str) -> List[str]:
         unsupported = cls.QQ_OFFICIAL_UNSUPPORTED_TOOLS if platform in {"qqofficial", "qq_official"} else set()
-        return list(dict.fromkeys(name for name in names if name not in unsupported))
+        normalized = []
+        for item in names:
+            # Platform adapters may expose either a plain tool name or a
+            # descriptive ``{"name": ...}`` entry.
+            name = item.get("name") if isinstance(item, dict) else item
+            if isinstance(name, str) and name not in unsupported:
+                normalized.append(name)
+        return list(dict.fromkeys(normalized))
+
+    @classmethod
+    def _canonical_tools(cls, names: List[str]) -> List[str]:
+        """Collapse legacy aliases and DSH-owned capabilities."""
+        legacy = [cls.LEGACY_TOOL_ALIASES.get(name, name) for name in names]
+        return canonical_tool_names(legacy)
 
     def __init__(self, tool_subnet):
         """
@@ -1304,7 +1336,14 @@ class PlatformToolsManager:
 
         try:
             adapter = get_adapter(platform)
-            return self._supported_tools([*adapter._get_available_tools(), "manage_intention"], platform)
+            names = self._supported_tools([*adapter._get_available_tools(), "manage_intention"], platform)
+            available = set(self.tool_subnet.get_tool_names())
+            resolved = []
+            for name in names:
+                canonical = canonical_tool_name(self.LEGACY_TOOL_ALIASES.get(name, name))
+                if canonical in available and canonical not in resolved:
+                    resolved.append(canonical)
+            return resolved
         except Exception as e:
             logger.error(f"[平台工具] 获取平台工具失败: {e}")
             return []
@@ -1348,13 +1387,24 @@ class PlatformToolsManager:
             if _t not in selected_tools:
                 selected_tools.append(_t)
 
-        selected_tools = self._supported_tools(selected_tools, platform)
+        raw_selected_tools = self._supported_tools(selected_tools, platform)
+        selected_tools = self._canonical_tools(raw_selected_tools)
 
         # 从 tool_subnet 获取工具 schema
         try:
             all_schemas = self.tool_subnet.get_tools_schema()
+            available_names = {
+                schema.get("function", {}).get("name")
+                for schema in all_schemas
+                if isinstance(schema, dict)
+            }
+            # DSH 尚未初始化时保留旧入口，避免启动竞态造成能力消失；
+            # DSH 一旦存在，旧入口会由 canonical/collapse 逻辑隐藏。
+            if "mcp_dsh_execute" not in available_names:
+                selected_tools = list(dict.fromkeys([*raw_selected_tools, *selected_tools]))
             # 只返回在 selected_tools 列表中的工具
             platform_schemas = [s for s in all_schemas if s.get("function", {}).get("name") in selected_tools]
+            platform_schemas = collapse_dsh_schemas(platform_schemas)
 
             logger.info(f"[平台工具] 平台 {platform} 使用 {len(platform_schemas)} 个工具")
             return platform_schemas
@@ -1374,6 +1424,7 @@ class PlatformToolsManager:
             all_schemas = self.tool_subnet.get_tools_schema()
             names = self._supported_tools(self.MINIMAL_CHAT_TOOLS, platform)
             minimal = [s for s in all_schemas if s.get("function", {}).get("name") in names]
+            minimal = collapse_dsh_schemas(minimal)
             logger.debug(f"[平台工具] 闲聊精简: {len(minimal)} 个工具")
             return minimal
         except Exception:

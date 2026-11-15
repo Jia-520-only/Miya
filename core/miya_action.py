@@ -27,10 +27,13 @@ def tool_outcome(value) -> dict:
     if isinstance(structured, dict):
         flag = structured.get("success", structured.get("ok"))
         named_status = str(structured.get("status", "")).lower()
-        if flag is False or structured.get("error") or named_status in {"error", "failed", "failure"}:
-            status, success = "failed", False
-        elif named_status in {"queued", "pending", "accepted", "claimed", "processing", "cancelled", "timed_out"}:
+        if named_status in {
+            "queued", "pending", "accepted", "claimed", "processing", "cancelled", "timed_out", "unknown",
+        }:
             status = named_status
+        elif (named_status in {"error", "failed", "failure", "rejected", "denied", "invalid"}
+              or flag is False or structured.get("error")):
+            status, success = "failed", False
         elif flag is True or named_status in {"success", "succeeded", "sent"}:
             status, success = "succeeded", True
     elif value is False:
@@ -39,8 +42,14 @@ def tool_outcome(value) -> dict:
         status, success = "succeeded", True
     if isinstance(value, str):
         prefix = value.lstrip()
-        if prefix.startswith(("❌", "错误：", "错误:", "Error:", "工具执行失败")):
+        if prefix.startswith(("❌", "错误：", "错误:", "Error:", "工具执行失败", "MCP 调用失败:", "MCP 调用异常:")):
             status, success = "failed", False
+    # DSH's process success only means its turn ended normally. Preserve its
+    # execution metadata without treating that as proof the delegated task landed.
+    if isinstance(structured, dict) and structured.get("execution_status") in {
+        "timed_out", "cancelled", "queued", "pending", "accepted", "claimed", "processing",
+    }:
+        status, success = structured["execution_status"], None
     return {"status": status, "success": success, "summary": str(value)[:1000]}
 
 

@@ -35,6 +35,7 @@ class SubnetConfig:
     total_calls: int = 0
     success_calls: int = 0
     failed_calls: int = 0
+    unknown_calls: int = 0
     last_call_time: Optional[datetime] = None
 
 
@@ -134,6 +135,19 @@ class ToolSubnet:
         """
         self.config.total_calls += 1
 
+        # 兼容旧的终端/文件/代码入口：只要 DSH 已注册，统一从这里
+        # 进入 DSH，避免不同调用链重新实现同一套执行逻辑。
+        original_tool_name = tool_name
+        try:
+            from core.dsh_routing import adapt_dsh_call
+
+            if self.registry.get_tool("mcp_dsh_execute"):
+                tool_name, args = adapt_dsh_call(tool_name, args)
+            if tool_name != original_tool_name:
+                logger.info("[ToolNet] DSH 统一路由: %s -> %s", original_tool_name, tool_name)
+        except Exception as exc:
+            logger.debug("[ToolNet] DSH 路由适配跳过: %s", exc)
+
         # 创建执行上下文
         try:
             from .base import ToolContext
@@ -170,20 +184,28 @@ class ToolSubnet:
         try:
             # 执行工具 (registry expects: name, context, **kwargs)
             result = await self.registry.execute_tool(tool_name, context, **args)
-
-            self.config.success_calls += 1
             self.config.last_call_time = datetime.now()
+            from core.miya_action import tool_outcome
+
+            outcome = tool_outcome(result)
+            if outcome["success"] is True:
+                self.config.success_calls += 1
+            elif outcome["success"] is False:
+                self.config.failed_calls += 1
+            else:
+                self.config.unknown_calls += 1
 
             # 记录最后执行的工具信息
             self._last_execution_info = {
                 "tool_name": tool_name,
                 "args": args,
-                "result": result[:200] if len(result) > 200 else result,
-                "success": True,
+                "result": str(result)[:200],
+                "status": outcome["status"],
+                "success": outcome["success"],
                 "timestamp": datetime.now().isoformat(),
             }
 
-            logger.info(f"[ToolNet] 工具执行: {tool_name} - 成功")
+            logger.info("[ToolNet] 工具执行: %s - %s", tool_name, outcome["status"])
 
             return result
         except Exception as e:
@@ -203,7 +225,14 @@ class ToolSubnet:
 
     def get_tools_schema(self) -> List[Dict[str, Any]]:
         """获取所有工具的 OpenAI Function Calling 格式配置"""
-        return self.registry.get_tools_schema()
+        schemas = self.registry.get_tools_schema()
+        try:
+            from core.dsh_routing import collapse_dsh_schemas
+
+            return collapse_dsh_schemas(schemas)
+        except Exception as exc:
+            logger.debug("[ToolNet] DSH schema 收敛跳过: %s", exc)
+            return schemas
 
     def get_tool_names(self) -> List[str]:
         """获取所有工具名称"""
@@ -220,6 +249,7 @@ class ToolSubnet:
             "total_calls": self.config.total_calls,
             "success_calls": self.config.success_calls,
             "failed_calls": self.config.failed_calls,
+            "unknown_calls": self.config.unknown_calls,
             "success_rate": f"{success_rate:.1f}%",
             "last_call": self.config.last_call_time.isoformat() if self.config.last_call_time else None,
         }
@@ -230,8 +260,10 @@ class ToolSubnet:
             return None
 
         info = self._last_execution_info
-        if info.get("success"):
+        if info.get("success") is True:
             return f"{info['tool_name']}({', '.join(info['args'].keys())})"
+        if info.get("success") is None:
+            return f"{info['tool_name']} - 结果待核实: {info.get('result', '')}"
         else:
             return f"{info['tool_name']} - 失败: {info.get('error', '未知错误')}"
 

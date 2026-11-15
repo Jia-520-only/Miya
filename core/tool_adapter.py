@@ -134,19 +134,19 @@ class ToolAdapter:
         result = await self._do_execute_tool(tool_name, args, filtered_context)
 
         # 检查是否需要降级
-        if enable_fallback and not self._is_success_result(result):
+        if enable_fallback and self._tool_result_state(result) is False:
             # 如果结果包含 [FINAL] 标记，不尝试降级
-            if result.startswith("[FINAL]"):
+            if isinstance(result, str) and result.startswith("[FINAL]"):
                 return result
             fallback_tools = TOOL_FALLBACK_MAP.get(tool_name, [])
             for fallback_tool in fallback_tools:
                 logger.info(f"[降级机制] 主工具 {tool_name} 失败，尝试降级工具: {fallback_tool}")
                 try:
                     result = await self._do_execute_tool(fallback_tool, args, filtered_context)
-                    if self._is_success_result(result):
+                    if self._tool_result_state(result) is True:
                         logger.info(f"[降级机制] 降级工具 {fallback_tool} 执行成功")
                         # 添加降级提示
-                        result += "\n\n[注: 由于跨端工具不可用，已使用替代方式执行]"
+                        result = f"{result}\n\n[注: 由于跨端工具不可用，已使用替代方式执行]"
                         break
                 except Exception as e:
                     logger.warning(f"[降级机制] 降级工具 {fallback_tool} 也失败: {e}")
@@ -154,12 +154,13 @@ class ToolAdapter:
             else:
                 # 所有工具都失败了
                 if not self._is_success_result(result):
-                    result += f"\n\n[注: 尝试了 {len(fallback_tools)} 个备选工具，均未能成功执行]"
+                    result = f"{result}\n\n[注: 尝试了 {len(fallback_tools)} 个备选工具，均未能成功执行]"
 
         return result
 
     def _prepare_tool_context(self, context: Dict[str, Any]) -> ToolContext:
         """准备工具上下文"""
+        context = dict(context or {})
         # 添加额外上下文
         if self.life_subnet:
             context["lifenet"] = self.life_subnet
@@ -167,14 +168,30 @@ class ToolAdapter:
             context["unified_memory"] = self.unified_memory
 
         # 过滤掉 ToolContext 不支持的参数
-        filtered_context = {k: v for k, v in context.items() if k in _TOOL_CONTEXT_FIELDS}
+        # A plain context dict can originate at an API boundary; it must not
+        # be able to assert the registry's trusted-internal bypass.
+        filtered_context = {k: v for k, v in context.items() if k in _TOOL_CONTEXT_FIELDS and k != "trusted_internal"}
 
         return ToolContext(**filtered_context)
 
     def _is_success_result(self, result: str) -> bool:
         """判断工具执行是否成功"""
-        if not result:
-            return False
+        return self._tool_result_state(result) is not False
+
+    @staticmethod
+    def _tool_result_state(result: Any) -> Optional[bool]:
+        """Return explicit success/failure; None means the effect is unconfirmed."""
+        from core.miya_action import tool_outcome
+
+        outcome = tool_outcome(result)
+        if outcome["success"] is not None:
+            return bool(outcome["success"])
+        if outcome["status"] in {"timed_out", "cancelled", "queued", "pending", "accepted", "claimed", "processing"}:
+            return None
+        if isinstance(result, dict):
+            return None
+        if not isinstance(result, str) or not result:
+            return None
         # 失败的关键字（排除记忆系统正常的空结果提示）
         failure_keywords = [
             "错误",
@@ -202,7 +219,9 @@ class ToolAdapter:
                 return True
         # 如果结果包含这些关键字，认为是失败的
         result_lower = result.lower()
-        return all(not (keyword.lower() in result_lower and "降级" not in result) for keyword in failure_keywords)
+        if any(keyword.lower() in result_lower and "降级" not in result for keyword in failure_keywords):
+            return False
+        return True
 
     async def _do_execute_tool(self, tool_name: str, args: Dict[str, Any], tool_context: ToolContext) -> str:
         """
@@ -217,6 +236,15 @@ class ToolAdapter:
             执行结果
         """
         try:
+            if not (self.enable_native and self.mlink_subnet) and self.tool_registry:
+                get_tool = getattr(self.tool_registry, "get_tool", None)
+                if callable(get_tool) and get_tool("mcp_dsh_execute"):
+                    from core.dsh_routing import adapt_dsh_call
+
+                    routed_name, routed_args = adapt_dsh_call(tool_name, args)
+                    if routed_name != tool_name:
+                        logger.info("[ToolAdapter] DSH 统一路由: %s -> %s", tool_name, routed_name)
+                        tool_name, args = routed_name, routed_args
             # 根据模式选择执行方式
             if self.enable_native and self.mlink_subnet:
                 # 原生模式：使用M-Link子网
@@ -242,15 +270,8 @@ class ToolAdapter:
         Returns:
             结果列表
         """
-        # 添加额外上下文
-        context["lifenet"] = self.life_subnet
-        if self.unified_memory:
-            context["unified_memory"] = self.unified_memory
-
-        # 过滤掉 ToolContext 不支持的参数
-        filtered_context = {k: v for k, v in context.items() if k in _TOOL_CONTEXT_FIELDS}
-
-        tool_context = ToolContext(**filtered_context)
+        # Reuse the same trust-boundary filtering as single tool calls.
+        tool_context = self._prepare_tool_context(context)
 
         # 原生模式使用批量执行
         if self.enable_native and self.mlink_subnet:
@@ -261,7 +282,7 @@ class ToolAdapter:
         for call in tool_calls:
             tool_name = call.get("tool_name")
             args = call.get("args", {})
-            result = await self.execute_tool(tool_name, args, filtered_context)
+            result = await self.execute_tool(tool_name, args, context)
             results.append(result)
 
         return results

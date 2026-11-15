@@ -152,13 +152,15 @@ def ensure_dsh_config(model_env: dict[str, str] | None = None) -> dict:
         creds["DEEPSEEK_API_KEY"] = api_key
     _write_yaml_file(creds_path, creds)
 
-    # headless profile 用户层 — 接入弥娅原生 MCP 服务（miya-soul 等）
+    # headless profile 用户层 — 仅接入仍保持独立边界的 Mineradio 服务。
+    # 弥娅的人格、情绪、记忆和 Spine 属于主进程，不再通过第二个 MCP 子进程暴露。
     _ensure_headless_profile()
 
     logger.info(f"[DSH] 配置就绪: home={DSH_HOME}, model={model.get('model')}, key={'有' if api_key else '无'}")
     return {
         "home": str(DSH_HOME),
         "model": model.get("model", ""),
+        "base_url": model.get("base_url", ""),
         "provider": model.get("provider", "deepseek-official"),
         "api_key_configured": bool(api_key),
     }
@@ -171,7 +173,7 @@ def _ensure_headless_profile() -> None:
       - cordis.yml        根文件，保持空列表（组合由 bundle + patch 层构成）
       - cordis.patch.yml  用户 patch 层（id 定向覆盖 / disable / insert 列表）
 
-    工具名形如 mcp__miya-soul__miya_get_status（与 Claude Code 的限定形式一致）。
+    工具名形如 mcp__miya-mineradio__mineradio_get_status（与 Claude Code 的限定形式一致）。
     配置在 data/dsh 下运行时生成（含本机 python 路径），随目录一起被 git 忽略。
     """
     profile_dir = DSH_HOME / "profiles" / "headless"
@@ -195,7 +197,6 @@ def _ensure_headless_profile() -> None:
         }
 
     entries = [
-        _mcp_plugin("mcp-miya-soul", "miya-soul", "mcpserver.miya.server"),
         _mcp_plugin("mcp-miya-mineradio", "miya-mineradio", "mcpserver.miya_mineradio.server"),
     ]
 
@@ -213,7 +214,7 @@ def _ensure_headless_profile() -> None:
     # cordis.patch.yml — 用户 patch 层：插入弥娅 MCP 服务
     patch_yaml = DSH_HOME / "profiles" / "headless" / "cordis.patch.yml"
     patch_yaml.write_text(
-        "# 弥娅生成的 patch 层（运行时生成，勿手改）— 接入 miya-soul / miya-mineradio\n"
+        "# 弥娅生成的 patch 层（运行时生成，勿手改）— 接入 miya-mineradio\n"
         + yaml.safe_dump([{"insert": entries}], allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )

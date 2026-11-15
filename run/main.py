@@ -220,12 +220,6 @@ class Miya:
         # 初始化平台适配器
         self.terminal_adapter = get_adapter("terminal")
 
-        # DSH 作为弥娅的"手"/肢体工具 —— 守护进程可调用 DSH 执行任务
-        self.dsh_bin_path: Path | None = None
-        self.dsh_node_exe: str = "node"
-        self._call_dsh_env_cache: dict | None = None
-        self._init_dsh_executor()
-
         # 【自主能力】初始化带人设的自主能力
         self.autonomy_with_personality = get_autonomy_with_personality(
             personality=self.personality,
@@ -321,115 +315,6 @@ class Miya:
         except Exception as e:
             self.logger.warning(f"ToolNet 子网初始化失败: {e}", exc_info=True)
             self.tool_subnet = None
-
-    def _init_dsh_executor(self):
-        """初始化 DSH 执行器 — 守护进程（大脑）调用 DSH（手）的桥梁"""
-        import platform
-        import shutil
-
-        dsh_dir = project_root / "deepseek-harness"
-        cli_candidates = [
-            dsh_dir / "apps" / "cli" / "lib" / "bin.js",  # 嵌入式构建产物
-        ]
-        for candidate in cli_candidates:
-            if candidate.exists():
-                self.dsh_bin_path = candidate
-                break
-
-        node_candidates: list[str] = []
-        if platform.system() == "Windows":
-            node_candidates = [
-                shutil.which("node") or "",
-                str(
-                    Path.home() / "AppData" / "Roaming" / "fnm" / "node-versions" / "v22" / "installation" / "node.exe"
-                ),
-                str(Path(os.environ.get("PROGRAMFILES", "C:\\Program Files")) / "nodejs" / "node.exe"),
-            ]
-        else:
-            node_candidates = [
-                shutil.which("node") or "",
-                "/usr/local/bin/node",
-                "/usr/bin/node",
-            ]
-
-        for candidate in node_candidates:
-            if candidate and Path(candidate).exists():
-                self.dsh_node_exe = candidate
-                break
-
-        if self.dsh_bin_path:
-            self.logger.info(f"[DSH] 执行器就绪: {self.dsh_node_exe} {self.dsh_bin_path.name}")
-        else:
-            self.logger.warning("[DSH] 未找到 apps/cli/lib/bin.js，守护进程无法调用 DSH")
-
-    def call_dsh(self, task: str, timeout: int = 300, working_dir: str | None = None) -> dict:
-        """
-        守护进程调用 DSH 执行任务（同步，阻塞等待结果）
-
-        Args:
-            task: 自然语言任务描述，如 "在 data/ 目录下创建 test.txt"
-            timeout: 超时秒数（headless agent 循环，默认 300s）
-            working_dir: 工作目录，默认项目根目录
-
-        Returns:
-            {"success": bool, "output": str, "error": str}
-        """
-        import platform
-        import subprocess
-
-        if not self.dsh_bin_path or not self.dsh_bin_path.exists():
-            return {"success": False, "output": "", "error": "DSH CLI 未就绪"}
-
-        if self._call_dsh_env_cache is None:
-            dotenv_path = project_root / "config" / ".env"
-            env_vars: dict[str, str] = {}
-            if dotenv_path.exists():
-                for line in dotenv_path.read_text(encoding="utf-8").split("\n"):
-                    line = line.strip()
-                    if line and not line.startswith("#") and "=" in line:
-                        key, _, value = line.partition("=")
-                        env_vars[key.strip()] = value.strip()
-            self._call_dsh_env_cache = env_vars
-
-        env_vars = self._call_dsh_env_cache
-
-        env = {
-            **{k: v for k, v in os.environ.items()},
-            "DEEPSEEK_API_KEY": env_vars.get("DEEPSEEK_API_KEY", ""),
-            "DSH_PERMISSION_MODE": "danger-full-access",  # 等价 CCE 的 bypassPermissions
-        }
-        try:
-            from mcpserver.dsh.config_bridge import ensure_dsh_config
-
-            dsh_config = ensure_dsh_config()
-            env["DSH_HOME"] = dsh_config["home"]
-        except Exception as e:
-            self.logger.debug(f"[DSH] 配置注入跳过（DSH 将使用默认 ~/.dsh）: {e}")
-
-        try:
-            creationflags = subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
-            cwd = working_dir or str(project_root)
-
-            proc = subprocess.run(
-                [self.dsh_node_exe, str(self.dsh_bin_path), "--profile", "headless", task],
-                cwd=cwd,
-                env=env,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout,
-                creationflags=creationflags,
-            )
-            return {
-                "success": proc.returncode == 0,
-                "output": proc.stdout,
-                "error": proc.stderr,
-            }
-        except subprocess.TimeoutExpired:
-            return {"success": False, "output": "", "error": f"DSH 执行超时 ({timeout}s)"}
-        except Exception as e:
-            return {"success": False, "output": "", "error": str(e)}
 
     def _init_web_net(self):
         """初始化 WebNet 子网"""

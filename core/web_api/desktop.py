@@ -7,12 +7,12 @@ import builtins
 import contextlib
 import logging
 import platform
-import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from core.text_loader import get_permission
+from core.dsh_routing import execute_dsh
 
 logger = logging.getLogger(__name__)
 
@@ -58,42 +58,42 @@ class DesktopRoutes:
     def _setup_routes(self):
         """设置路由"""
 
+        project_root = Path(__file__).parent.parent.parent.resolve()
+
+        def checked_path(raw_path: str, *, must_exist: bool = False) -> Path:
+            """Keep Web file operations inside the Miya project boundary."""
+            candidate = Path(raw_path).expanduser().resolve(strict=False)
+            try:
+                candidate.relative_to(project_root)
+            except ValueError as exc:
+                raise HTTPException(status_code=403, detail="访问被拒绝：路径超出项目范围") from exc
+            if must_exist and not candidate.exists():
+                raise HTTPException(status_code=404, detail="文件不存在")
+            return candidate
+
         @self.router.post("/terminal/execute")
         async def execute_terminal_command(command: str, timeout: int = 30):
             """执行终端命令（电脑操控核心功能）"""
             try:
-                # 安全检查：禁止危险命令
-                dangerous_commands = [
-                    "rm -rf /",
-                    "format",
-                    "del /f /s /q",
-                    "shutdown",
-                    "reboot",
-                ]
-                if any(dcmd in command for dcmd in dangerous_commands):
+                dangerous_commands = ("rm -rf /", "format", "del /f /s /q", "shutdown", "reboot")
+                if any(dcmd in command.lower() for dcmd in dangerous_commands):
                     raise HTTPException(status_code=403, detail="危险命令已被拦截")
-
-                # 执行命令
-                result = subprocess.run(
-                    command,
-                    shell=True,  # nosec B602
-                    capture_output=True,
-                    text=True,
+                result = await execute_dsh(
+                    getattr(self.decision_hub, "tool_subnet", None),
+                    f"执行以下终端命令，并保留 stdout、stderr 和退出码：\n{command}",
                     timeout=timeout,
-                    encoding="utf-8",
-                    errors="ignore",
+                    user_id=1,
+                    platform="web",
+                    sender_name="desktop",
                 )
-
                 return {
-                    "success": True,
+                    "success": bool(result.get("success")),
                     "command": command,
-                    "exit_code": result.returncode,
-                    "stdout": result.stdout,
-                    "stderr": result.stderr,
+                    "exit_code": result.get("exit_code"),
+                    "stdout": result.get("stdout", result.get("output", "")),
+                    "stderr": result.get("stderr", result.get("error", "")),
                     "timestamp": datetime.utcnow().isoformat(),
                 }
-            except subprocess.TimeoutExpired:
-                return {"success": False, "error": "命令执行超时", "command": command}
             except HTTPException:
                 raise
             except Exception as e:
@@ -104,34 +104,28 @@ class DesktopRoutes:
         async def list_files_api(path: str = ".", recursive: bool = False):
             """列出文件（电脑操控）"""
             try:
-                base_path = Path(path).resolve()
-                # 安全检查：限制在项目目录内
-                project_path = Path(__file__).parent.parent.parent.resolve()
-                try:
-                    base_path.relative_to(project_path)
-                except ValueError:
-                    raise HTTPException(status_code=403, detail="访问被拒绝：路径超出项目范围")
-
-                files = list(base_path.rglob("*")) if recursive else list(base_path.iterdir())
-
-                file_list = []
-                for f in files:
-                    with contextlib.suppress(builtins.BaseException):
-                        file_list.append(
-                            {
-                                "name": f.name,
-                                "path": str(f),
-                                "is_dir": f.is_dir(),
-                                "size": f.stat().st_size if f.is_file() else 0,
-                                "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
-                            }
-                        )
-
+                checked_path(path)
+                result = await execute_dsh(
+                    getattr(self.decision_hub, "tool_subnet", None),
+                    f"列出目录 {path} 的文件，recursive={recursive}。请优先返回 JSON 数组，每项包含 name、path、is_dir、size、modified。",
+                    timeout=60,
+                    user_id=1,
+                    platform="web",
+                    sender_name="desktop",
+                )
+                structured = result.get("structured_output")
+                if isinstance(structured, list):
+                    file_list = structured
+                elif isinstance(structured, dict) and isinstance(structured.get("files"), list):
+                    file_list = structured["files"]
+                else:
+                    file_list = []
                 return {
-                    "success": True,
+                    "success": bool(result.get("success")),
                     "path": path,
                     "files": file_list,
                     "count": len(file_list),
+                    "result": result.get("output", "") if not file_list else None,
                 }
             except HTTPException:
                 raise
@@ -143,28 +137,30 @@ class DesktopRoutes:
         async def read_file_api(path: str, offset: int = 0, limit: int = 1000):
             """读取文件内容"""
             try:
-                file_path = Path(path).resolve()
-                # 安全检查
-                project_path = Path(__file__).parent.parent.parent.resolve()
-                try:
-                    file_path.relative_to(project_path)
-                except ValueError:
-                    raise HTTPException(status_code=403, detail="访问被拒绝：路径超出项目范围")
-
+                file_path = checked_path(path, must_exist=True)
                 if not file_path.is_file():
                     raise HTTPException(status_code=404, detail="文件不存在")
-
-                # 限制文件大小
-                if file_path.stat().st_size > 10 * 1024 * 1024:  # 10MB
+                if file_path.stat().st_size > 10 * 1024 * 1024:
                     raise HTTPException(status_code=400, detail="文件过大")
-
-                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                    lines = f.readlines()[offset : offset + limit]
-
+                result = await execute_dsh(
+                    getattr(self.decision_hub, "tool_subnet", None),
+                    f"读取文件 {path} 的内容，返回第 {offset} 行起最多 {limit} 行。",
+                    timeout=60,
+                    user_id=1,
+                    platform="web",
+                    sender_name="desktop",
+                )
+                structured = result.get("structured_output")
+                content = (
+                    str(structured.get("content", ""))
+                    if isinstance(structured, dict) and "content" in structured
+                    else str(result.get("output", ""))
+                )
+                lines = content.splitlines(keepends=True)
                 return {
-                    "success": True,
+                    "success": bool(result.get("success")),
                     "path": path,
-                    "content": "".join(lines),
+                    "content": content,
                     "lines": lines,
                     "total_lines_read": len(lines),
                     "offset": offset,
@@ -184,24 +180,20 @@ class DesktopRoutes:
             if not path:
                 raise HTTPException(status_code=400, detail="缺少 path 参数")
             try:
-                file_path = Path(path).resolve()
-                # 安全检查
-                project_path = Path(__file__).parent.parent.parent.resolve()
-                try:
-                    file_path.relative_to(project_path)
-                except ValueError:
-                    raise HTTPException(status_code=403, detail="访问被拒绝：路径超出项目范围")
-
-                # 创建父目录
-                file_path.parent.mkdir(parents=True, exist_ok=True)
-
-                with open(file_path, "w", encoding="utf-8") as f:
-                    f.write(content)
-
+                checked_path(path)
+                result = await execute_dsh(
+                    getattr(self.decision_hub, "tool_subnet", None),
+                    f"将以下内容写入文件 {path}，覆盖原内容：\n{content}",
+                    timeout=60,
+                    user_id=1,
+                    platform="web",
+                    sender_name="desktop",
+                )
                 return {
-                    "success": True,
+                    "success": bool(result.get("success")),
                     "path": path,
                     "message": "文件写入成功",
+                    "result": result.get("output", ""),
                     "timestamp": datetime.utcnow().isoformat(),
                 }
             except HTTPException:
@@ -214,25 +206,21 @@ class DesktopRoutes:
         async def delete_file_api(path: str):
             """删除文件"""
             try:
-                file_path = Path(path).resolve()
-                # 安全检查
-                project_path = Path(__file__).parent.parent.parent.resolve()
-                try:
-                    file_path.relative_to(project_path)
-                except ValueError:
-                    raise HTTPException(status_code=403, detail="访问被拒绝：路径超出项目范围")
-
-                if not file_path.exists():
-                    raise HTTPException(status_code=404, detail="文件不存在")
-
-                if file_path.is_dir():
-                    import shutil
-
-                    shutil.rmtree(file_path)
-                else:
-                    file_path.unlink()
-
-                return {"success": True, "path": path, "message": "删除成功"}
+                checked_path(path, must_exist=True)
+                result = await execute_dsh(
+                    getattr(self.decision_hub, "tool_subnet", None),
+                    f"删除文件或目录 {path}。仅执行这一个删除操作并返回结果。",
+                    timeout=60,
+                    user_id=1,
+                    platform="web",
+                    sender_name="desktop",
+                )
+                return {
+                    "success": bool(result.get("success")),
+                    "path": path,
+                    "message": "删除成功" if result.get("success") else result.get("error", "删除失败"),
+                    "result": result.get("output", ""),
+                }
             except HTTPException:
                 raise
             except Exception as e:

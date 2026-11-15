@@ -482,7 +482,7 @@ class GestaltControllerEnhanced:
         group_id = args.get("group_id", context.get("group_id", ""))
 
         logger.info(f"[GestaltEnhanced] 发送消息: {user_id}/{group_id} - {message[:50]}...")
-        return f"消息已发送: {message[:50]}..."
+        return "❌ 当前没有可用的平台消息投递通道，消息未发送。"
 
     async def _load_agent_tools(self):
         """加载Agent工具"""
@@ -557,6 +557,13 @@ class GestaltControllerEnhanced:
             "personality",
             "scheduler",
             "request_id",
+            "action_id",
+            "platform",
+            "session_id",
+            "intention_id",
+            "message_id",
+            "channel_id",
+            "current_input",
             "group_id",
             "user_id",
             "message_type",
@@ -583,6 +590,20 @@ class GestaltControllerEnhanced:
     async def execute_tool(self, tool_name: str, args: Dict[str, Any], context: Dict[str, Any]) -> str:
         """执行工具 - 增强版"""
         start_time = datetime.now().timestamp()
+        requested_tool_name = tool_name
+
+        # DSH-owned 兼容入口必须在 builtin/Skill/AstrBot/MCP 分派前统一收敛，
+        # 否则同一个终端或文件操作仍可能从旁路执行。
+        registry = getattr(self.tool_subnet, "registry", None) if self.tool_subnet else None
+        if registry and registry.get_tool("mcp_dsh_execute"):
+            try:
+                from core.dsh_routing import adapt_dsh_call
+
+                tool_name, args = adapt_dsh_call(tool_name, args)
+                if tool_name != requested_tool_name:
+                    logger.info("[GestaltEnhanced] DSH 统一路由: %s -> %s", requested_tool_name, tool_name)
+            except Exception as exc:
+                logger.debug("[GestaltEnhanced] DSH 路由适配跳过: %s", exc)
 
         # 安全日志
         safe_args = {
@@ -593,7 +614,12 @@ class GestaltControllerEnhanced:
         # Hook: before_tool_execute
         await self.hooks.trigger(
             HookEvent.BEFORE_TOOL_EXECUTE,
-            {"tool_name": tool_name, "args": args, "context": context},
+            {
+                "tool_name": tool_name,
+                "requested_tool_name": requested_tool_name,
+                "args": args,
+                "context": context,
+            },
         )
 
         result = None
@@ -606,16 +632,23 @@ class GestaltControllerEnhanced:
                 result = await self._builtin_tools[tool_name](args, context)
 
             # 1.5 检查Skills工具
-            elif self._skill_manager and self._skill_sandbox:
-                skill_tool = self._skill_manager.get_skill_tool(tool_name)
-                if skill_tool:
-                    result = await self._skill_sandbox.execute(
-                        self._skill_manager.execute_skill_tool,
-                        (tool_name, args, context),
-                    )
+            elif (self._skill_manager and self._skill_sandbox
+                  and self._skill_manager.get_skill_tool(tool_name)):
+                result = await self._skill_sandbox.execute(
+                    self._skill_manager.execute_skill_tool,
+                    (tool_name, args, context),
+                )
 
             # 1.7 检查AstrBot工具
-            elif hasattr(self, "_astrbot_tools") and self._astrbot_tools:
+            elif hasattr(self, "_astrbot_tools") and self._astrbot_tools and any(
+                callable(getattr(tools_obj, tool_name, None))
+                for tools_obj in (
+                    self._astrbot_tools.computer,
+                    self._astrbot_tools.web_search,
+                    self._astrbot_tools.knowledge_base,
+                    self._astrbot_tools.message,
+                )
+            ):
                 # 直接调用工具类的对应方法
                 tools_obj = self._astrbot_tools.computer
                 if hasattr(tools_obj, tool_name):
@@ -656,10 +689,17 @@ class GestaltControllerEnhanced:
             # Hook: tool_error
             await self.hooks.trigger(
                 HookEvent.TOOL_ERROR,
-                {"tool_name": tool_name, "args": args, "error": error},
+                {
+                    "tool_name": tool_name,
+                    "requested_tool_name": requested_tool_name,
+                    "args": args,
+                    "error": error,
+                },
             )
 
         # 记录执行结果
+        if isinstance(result, str) and result.startswith("❌"):
+            success = False
         execution_time = datetime.now().timestamp() - start_time
         tool_result = ToolResult(
             tool_name=tool_name,
@@ -674,7 +714,12 @@ class GestaltControllerEnhanced:
         # Hook: after_tool_execute
         await self.hooks.trigger(
             HookEvent.AFTER_TOOL_EXECUTE,
-            {"tool_name": tool_name, "result": result, "success": success},
+            {
+                "tool_name": tool_name,
+                "requested_tool_name": requested_tool_name,
+                "result": result,
+                "success": success,
+            },
         )
 
         return result if result else "执行完成"

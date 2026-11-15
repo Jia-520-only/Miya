@@ -46,8 +46,60 @@ class ComputerTools:
     """
 
     @staticmethod
+    async def _execute_via_dsh(task: str, timeout: int = 300) -> Optional[str]:
+        """Forward executable computer actions to DSH when the service is ready.
+
+        The old implementations remain as a compatibility fallback for startup
+        races or installations that do not include the DSH MCP service.
+        """
+        try:
+            from core.dsh_routing import execute_dsh
+            from core.context import RequestContext
+            from webnet.ToolNet import get_tool_subnet
+
+            request_context = RequestContext.current()
+            context_values = {
+                "request_id": getattr(request_context, "request_id", None),
+                "user_id": getattr(request_context, "user_id", None),
+                "group_id": getattr(request_context, "group_id", None),
+                "platform": getattr(request_context, "source", None),
+                "sender_name": getattr(request_context, "sender_name", None),
+                "message_id": getattr(request_context, "message_id", None),
+                "session_id": getattr(request_context, "metadata", {}).get("session_id"),
+                "intention_id": getattr(request_context, "metadata", {}).get("intention_id"),
+            }
+            tool_context = {key: value for key, value in context_values.items() if value is not None}
+
+            result = await execute_dsh(
+                get_tool_subnet(),
+                task,
+                timeout=timeout,
+                platform=context_values["platform"] or "terminal",
+                user_id=context_values["user_id"],
+                group_id=context_values["group_id"],
+                sender_name=context_values["sender_name"] or "astrbot",
+                tool_context=tool_context or None,
+            )
+            if result.get("status") == "unavailable":
+                return None
+            if result.get("success"):
+                output = result.get("output")
+                if output is None:
+                    output = result.get("structured_output")
+                return str(output) if output is not None else "操作完成"
+            return str(result.get("error") or result.get("output") or "DSH 执行失败")
+        except Exception as exc:
+            logger.debug("[ComputerTools] DSH 转发不可用，使用兼容实现: %s", exc)
+            return None
+
+    @staticmethod
     async def file_read(path: str, offset: int = 0, limit: int = 100) -> str:
         """读取文件"""
+        dsh_result = await ComputerTools._execute_via_dsh(
+            f"读取文件：{path}（offset={offset}, limit={limit}）"
+        )
+        if dsh_result is not None:
+            return dsh_result
         try:
             with open(path, "r", encoding="utf-8") as f:
                 lines = f.readlines()[offset : offset + limit]
@@ -60,6 +112,12 @@ class ComputerTools:
     @staticmethod
     async def file_write(path: str, content: str, mode: str = "w") -> str:
         """写入文件"""
+        operation = "追加到文件末尾" if mode == "a" else f"按模式 {mode} 写入或编辑"
+        dsh_result = await ComputerTools._execute_via_dsh(
+            f"{operation}文件 {path}，内容如下：\n{content}"
+        )
+        if dsh_result is not None:
+            return dsh_result
         try:
             with open(path, mode, encoding="utf-8") as f:
                 f.write(content)
@@ -70,6 +128,11 @@ class ComputerTools:
     @staticmethod
     async def file_edit(path: str, old: str, new: str) -> str:
         """编辑文件"""
+        dsh_result = await ComputerTools._execute_via_dsh(
+            f"将文件 {path} 中的以下内容替换：\n旧内容：\n{old}\n新内容：\n{new}"
+        )
+        if dsh_result is not None:
+            return dsh_result
         try:
             with open(path, "r", encoding="utf-8") as f:
                 content = f.read()
@@ -89,6 +152,11 @@ class ComputerTools:
     @staticmethod
     async def execute_shell(command: str, timeout: int = 30) -> str:
         """执行Shell命令"""
+        dsh_result = await ComputerTools._execute_via_dsh(
+            f"在当前项目中执行以下 Shell 命令，并返回输出：\n{command}", timeout=timeout
+        )
+        if dsh_result is not None:
+            return dsh_result
         try:
             result = subprocess.run(
                 command,
@@ -107,6 +175,11 @@ class ComputerTools:
     @staticmethod
     async def python_exec(code: str, timeout: int = 30) -> str:
         """执行Python代码"""
+        dsh_result = await ComputerTools._execute_via_dsh(
+            f"执行以下 Python 代码，并返回输出：\n{code}", timeout=timeout
+        )
+        if dsh_result is not None:
+            return dsh_result
         try:
             result = subprocess.run(
                 ["python", "-c", code],
@@ -124,6 +197,11 @@ class ComputerTools:
     @staticmethod
     async def grep(pattern: str, path: str, file_pattern: str = "*") -> str:
         """Grep搜索"""
+        dsh_result = await ComputerTools._execute_via_dsh(
+            f"在目录 {path} 中搜索文本 {pattern}，文件匹配模式为 {file_pattern}。"
+        )
+        if dsh_result is not None:
+            return dsh_result
         try:
             import glob
 

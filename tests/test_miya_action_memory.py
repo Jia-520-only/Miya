@@ -48,6 +48,10 @@ def register(registry, execute):
     ({"success": False}, "failed", False),
     ('{"status": "error", "error": "offline"}', "failed", False),
     ({"status": "queued", "success": True}, "queued", None),
+    ({"status": "timed_out", "success": False, "error": "timeout"}, "timed_out", None),
+    ({"status": "cancelled", "success": False}, "cancelled", None),
+    ({"success": True, "stderr": "warning only"}, "succeeded", True),
+    ("MCP 调用异常: server unavailable", "failed", False),
     ("没有错误或失败的正常说明", "completed", None),
     ("暂无记忆", "completed", None),
     ("❌ 参数错误", "failed", False),
@@ -72,6 +76,7 @@ async def test_registry_result_closes_loop_and_keeps_original_message(registry, 
     started = next(event for event in spine.event_history if event.event_type == LifeEventType.ACTION_STARTED)
     assert action.correlation_id == started.correlation_id == "request-1"
     assert action.payload["action_id"] == started.payload["action_id"]
+    assert execute.await_args.args[1].action_id == action.payload["action_id"]
     assert action.payload["result"]["status"] == "failed"
     assert spine.current_state.life_state.open_loops == []
     assert spine.current_state.life_state.last_action["event_id"] == action.event_id

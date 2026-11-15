@@ -4,7 +4,6 @@
 """
 
 import logging
-import subprocess
 from datetime import datetime
 from typing import Any, Dict
 
@@ -12,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from core.text_loader import get_permission
+from core.dsh_routing import execute_dsh
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,27 @@ class ToolExecuteRequest(BaseModel):
 
     tool_name: str
     parameters: Dict[str, Any] = {}
+
+
+def _web_user_identity(user_info: Dict[str, Any]) -> tuple[str, str]:
+    """Return the raw and canonical identity used by Web tool execution."""
+    value = str(user_info.get("web_user_id") or user_info.get("user_id") or "web_default")
+    raw_id = value[4:] if value.startswith("web_") else value
+    return raw_id, f"web_{raw_id}"
+
+
+def _has_web_tool_permission(user_info: Dict[str, Any], tool_name: str) -> tuple[bool, str]:
+    """Check Web tool access through the single unified permission source."""
+    from core.dsh_routing import permission_tool_names
+    from core.unified_permission import get_permission_engine
+
+    _raw_id, canonical_id = _web_user_identity(user_info)
+    candidates = [f"tool.{name}" for name in permission_tool_names(tool_name)]
+    allowed = any(
+        get_permission_engine().check(canonical_id, permission, context={"platform": "web"})
+        for permission in candidates
+    )
+    return allowed, candidates[0]
 
 
 class ToolRoutes:
@@ -77,18 +98,8 @@ class ToolRoutes:
             """执行工具（需要相应工具权限）"""
             try:
                 # 权限检查 - 检查是否有该工具的执行权限
-                required_permission = f"tool.{request.tool_name}"
-                from webnet.AuthNet.permission_core import PermissionCore
-
-                perm_core = PermissionCore()
-
-                # 从 user_info 获取用户ID
-                web_user_id = user_info.get("web_user_id", "web_default")
-                has_permission = perm_core.check_permission(web_user_id, required_permission)
-
-                if not has_permission:
-                    # 检查是否是系统管理员
-                    has_permission = perm_core.check_permission("system_admin", required_permission)
+                raw_user_id, _canonical_user_id = _web_user_identity(user_info)
+                has_permission, required_permission = _has_web_tool_permission(user_info, request.tool_name)
 
                 if not has_permission:
                     return {
@@ -102,7 +113,8 @@ class ToolRoutes:
                     result = await self.decision_hub.tool_subnet.execute_tool(
                         tool_name=request.tool_name,
                         args=request.parameters,
-                        user_id=1,
+                        user_id=raw_user_id,
+                        platform="web",
                         sender_name="desktop",
                     )
                     return {"success": True, "result": result}
@@ -282,28 +294,26 @@ class ToolRoutes:
                 parameters = request.get("parameters", {})
                 command = request.get("command", "")
 
-                # 如果有 command，尝试作为 shell 命令执行
+                # 命令执行统一进入 DSH，避免 API 路由绕过 ToolNet 权限和审计。
                 if command:
-                    try:
-                        result = subprocess.run(
-                            command,
-                            shell=True,  # nosec B602
-                            capture_output=True,
-                            text=True,
-                            timeout=60,
-                            encoding="utf-8",
-                            errors="replace",
-                        )
-                        output = result.stdout or result.stderr or "命令执行完成"
-                        return {
-                            "success": True,
-                            "result": output,
-                            "exit_code": result.returncode,
-                        }
-                    except subprocess.TimeoutExpired:
-                        return {"success": False, "error": "命令执行超时"}
-                    except Exception as e:
-                        return {"success": False, "error": str(e)}
+                    if not hasattr(self.decision_hub, "tool_subnet") or not self.decision_hub.tool_subnet:
+                        return {"success": False, "message": "工具子网未初始化"}
+                    dsh_result = await execute_dsh(
+                        self.decision_hub.tool_subnet,
+                        f"执行以下 Shell 命令，并返回命令输出与退出码：\n{command}",
+                        timeout=60,
+                        user_id=1,
+                        platform="web",
+                        sender_name="desktop",
+                    )
+                    response = {
+                        "success": bool(dsh_result.get("success")),
+                        "result": dsh_result.get("output", ""),
+                        "exit_code": dsh_result.get("exit_code"),
+                    }
+                    if dsh_result.get("error"):
+                        response["error"] = dsh_result["error"]
+                    return response
 
                 if hasattr(self.decision_hub, "tool_subnet") and self.decision_hub.tool_subnet:
                     # 根据任务类型调用对应工具

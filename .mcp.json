@@ -1,12 +1,5 @@
 {
   "mcpServers": {
-    "miya-soul": {
-      "command": "python",
-      "args": ["mcpserver/miya/server.py"],
-      "env": {},
-      "disabled": false,
-      "autoApprove": []
-    },
     "miya-mineradio": {
       "command": "python",
       "args": ["mcpserver/miya_mineradio/server.py"],

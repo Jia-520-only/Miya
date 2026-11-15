@@ -23,7 +23,8 @@ class MiyaContinuityOrgan(MiyaOrgan):
 
     def on_soul_state(self, state) -> None:
         if (not self.started or not self._spine or not self._coordinator
-                or state.lifecycle_phase not in {LifecyclePhase.RUNNING, LifecyclePhase.IDLE}
+                or state.lifecycle_phase not in {LifecyclePhase.RUNNING, LifecyclePhase.IDLE,
+                                                  LifecyclePhase.DROWSY, LifecyclePhase.SLEEP}
                 or self._spine._loop is None or not self._spine._loop.is_running()):
             return
         now = time.time()
@@ -38,7 +39,8 @@ class MiyaContinuityOrgan(MiyaOrgan):
     async def follow_up(self, intention: dict):
         spine = self._spine
         if (spine is None or self._coordinator is None
-                or spine.phase not in {LifecyclePhase.RUNNING, LifecyclePhase.IDLE}
+                or spine.phase not in {LifecyclePhase.RUNNING, LifecyclePhase.IDLE,
+                                       LifecyclePhase.DROWSY, LifecyclePhase.SLEEP}
                 or time.time() - spine._last_interaction < 60):
             return False
         scope = life_scope(intention)
@@ -52,7 +54,8 @@ class MiyaContinuityOrgan(MiyaOrgan):
             interaction_at = spine._last_interaction
 
             def still_current():
-                return (spine.phase in {LifecyclePhase.RUNNING, LifecyclePhase.IDLE}
+                return (spine.phase in {LifecyclePhase.RUNNING, LifecyclePhase.IDLE,
+                                        LifecyclePhase.DROWSY, LifecyclePhase.SLEEP}
                         and spine._last_interaction == interaction_at
                         and any(item["intention_id"] == reserved["intention_id"]
                                 and item["revision"] == reserved["revision"]

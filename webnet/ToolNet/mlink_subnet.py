@@ -252,6 +252,7 @@ class MLinkToolSubnet:
             "mlink_sent": 0,
             "executed": 0,
             "failed": 0,
+            "unknown": 0,
         }
 
         self.logger = logging.getLogger("MLinkToolSubnet")
@@ -281,6 +282,18 @@ class MLinkToolSubnet:
             执行结果
         """
         self.stats["total_calls"] += 1
+
+        # 兼容入口统一交给 DSH（仅在 DSH 已注册时启用，保留启动竞态回退）。
+        original_tool_name = tool_name
+        try:
+            if self.registry.get_tool("mcp_dsh_execute"):
+                from core.dsh_routing import adapt_dsh_call
+
+                tool_name, args = adapt_dsh_call(tool_name, args)
+                if tool_name != original_tool_name:
+                    self.logger.info("DSH 统一路由: %s -> %s", original_tool_name, tool_name)
+        except Exception as exc:
+            self.logger.debug("DSH 路由适配跳过: %s", exc)
 
         # 1. 感知层预处理
         if self.perception_layer:
@@ -320,8 +333,16 @@ class MLinkToolSubnet:
         # 3. 执行工具
         try:
             result = await self.registry.execute_tool(tool_name, context, **args)
-            self.stats["executed"] += 1
-            self.logger.info(f"工具执行成功: {tool_name}")
+            from core.miya_action import tool_outcome
+
+            outcome = tool_outcome(result)
+            if outcome["success"] is True:
+                self.stats["executed"] += 1
+            elif outcome["success"] is False:
+                self.stats["failed"] += 1
+            else:
+                self.stats["unknown"] += 1
+            self.logger.info("工具执行: %s - %s", tool_name, outcome["status"])
             return result
 
         except Exception as e:
@@ -359,6 +380,7 @@ class MLinkToolSubnet:
             "mlink_sent": self.stats["mlink_sent"],
             "executed": self.stats["executed"],
             "failed": self.stats["failed"],
+            "unknown": self.stats["unknown"],
             "success_rate": f"{(self.stats['executed'] / total * 100):.1f}%" if total > 0 else "0%",
         }
 

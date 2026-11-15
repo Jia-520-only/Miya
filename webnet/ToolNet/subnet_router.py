@@ -140,7 +140,15 @@ class ToolSubnetRouter:
     def _init_subnets(self):
         """初始化子网分类"""
         for subnet_name, tool_names in SUBNET_CATEGORIES.items():
-            self.subnets[subnet_name] = SubnetInfo(name=subnet_name, tool_count=len(tool_names))
+            # The static catalog is only a default grouping.  MCP tools are
+            # discovered at runtime, so the count must reflect the registry
+            # rather than the hand-maintained list above.
+            registered_count = sum(1 for name in tool_names if self.registry.get_tool(name))
+            if subnet_name == "MCPNet":
+                registered_count = len({
+                    name for name in self.registry.tools if name.startswith("mcp_")
+                })
+            self.subnets[subnet_name] = SubnetInfo(name=subnet_name, tool_count=registered_count)
         logger.info(f"子网初始化完成: {self.subnets}")
 
     def get_subnet_for_tool(self, tool_name: str) -> Optional[str]:
@@ -148,6 +156,11 @@ class ToolSubnetRouter:
         for subnet_name, tool_names in SUBNET_CATEGORIES.items():
             if tool_name in tool_names:
                 return subnet_name
+        # MCP capabilities are dynamic.  New MCP services/tools should not
+        # require another manual edit to this router; the adapter already
+        # gives them the canonical ``mcp_<service>_<tool>`` name.
+        if tool_name.startswith("mcp_") and self.registry.get_tool(tool_name):
+            return "MCPNet"
         return None
 
     async def execute_tool(self, tool_name: str, args: Dict[str, Any], context: ToolContext) -> str:
@@ -202,6 +215,22 @@ class ToolSubnetRouter:
                             "config": tool.config if hasattr(tool, "config") else {},
                         }
                     )
+
+        # Include dynamically discovered MCP tools that are not in the
+        # compatibility catalog.  Keep ordering stable for model schemas and
+        # diagnostics.
+        known = {name for names in SUBNET_CATEGORIES.values() for name in names}
+        for tool_name in sorted(self.registry.tools):
+            if tool_name in known or not tool_name.startswith("mcp_"):
+                continue
+            tool = self.registry.get_tool(tool_name)
+            result.setdefault("MCPNet", []).append(
+                {
+                    "name": tool_name,
+                    "config": tool.config if hasattr(tool, "config") else {},
+                }
+            )
+        self.subnets["MCPNet"].tool_count = len(result.get("MCPNet", []))
         return result
 
     def get_subnet_stats(self) -> Dict[str, Dict[str, Any]]:

@@ -78,6 +78,12 @@ class ToolRegistry:
             for key in ("platform", "user_id", "group_id", "session_id", "intention_id", "message_id", "request_id")
         }
         async with track_action(name, scope, kind="tool") as feedback:
+            try:
+                context.action_id = feedback.action_id
+                if feedback.context.get("intention_id"):
+                    context.intention_id = feedback.context["intention_id"]
+            except (AttributeError, TypeError):
+                pass
             result = await self._execute_tool_once(name, context, feedback, **kwargs)
             if feedback.result["status"] == "completed":
                 feedback.result = tool_outcome(result)
@@ -152,8 +158,8 @@ class ToolRegistry:
             包含 allowed 和 required_permission 的字典
         """
         try:
-            from webnet.AuthNet.permission_core import PermissionCore
             from webnet.AuthNet.user_mapper import UserMapper
+            from core.dsh_routing import permission_tool_names
 
             user_id = getattr(context, "user_id", None)
             group_id = getattr(context, "group_id", None)
@@ -165,9 +171,16 @@ class ToolRegistry:
             superadmin = getattr(context, "superadmin", None)
             onebot_client = getattr(context, "onebot_client", None)
 
-            if user_id is None or user_id == 0:
-                self.logger.info("[权限检查] user_id 未指定，跳过权限检查")
-                return {"allowed": True, "required_permission": None}
+            if user_id is None or user_id == 0 or not str(user_id).strip():
+                if getattr(context, "trusted_internal", False):
+                    self.logger.info("[权限检查] 受信内部调用显式跳过用户权限检查")
+                    return {"allowed": True, "required_permission": None, "trusted_internal": True}
+                self.logger.warning("[权限检查] 缺少用户身份，拒绝执行工具 %s", tool_name)
+                return {
+                    "allowed": False,
+                    "required_permission": f"tool.{tool_name}",
+                    "error": "missing_user_identity",
+                }
 
             if superadmin and user_id == superadmin:
                 self.logger.info(f"[权限检查] 用户 {user_id} 是超级管理员，放行")
@@ -185,23 +198,38 @@ class ToolRegistry:
 
             user_mapper = UserMapper()
             unified_user_id = user_mapper.generate_user_id(platform, str(user_id))
-            required_permission = f"tool.{tool_name}"
+            permission_names = permission_tool_names(tool_name)
+            required_permissions = [f"tool.{name}" for name in permission_names]
+            required_permission = required_permissions[0]
 
-            perm_core = PermissionCore()
-            has_permission = perm_core.check_permission(unified_user_id, required_permission)
+            # config/permissions.json 是当前唯一权限源。旧 PermissionCore
+            # 仍保留给兼容接口使用，但工具执行不能回退到其 system_admin
+            # 通配权限，否则未知用户会被意外放行。
+            from core.unified_permission import get_permission_engine
 
-            if not has_permission:
-                has_permission = perm_core.check_permission("system_admin", required_permission)
+            engine = get_permission_engine()
+            permission_context = {"platform": platform, "group_id": group_id}
+            has_permission = any(
+                engine.check(unified_user_id, permission, context=permission_context)
+                for permission in required_permissions
+            )
 
             return {
                 "allowed": has_permission,
                 "required_permission": required_permission,
+                "permission_candidates": required_permissions,
                 "user_id": unified_user_id,
             }
 
         except Exception as e:
-            self.logger.warning(f"[权限检查异常] {e}，允许执行")
-            return {"allowed": True, "required_permission": None, "error": str(e)}
+            # 权限引擎不可用时必须拒绝执行，尤其是 DSH 这类可写入文件、
+            # 执行命令的高权限入口，避免异常被误当成授权。
+            self.logger.error(f"[权限检查异常] {e}，拒绝执行", exc_info=True)
+            return {
+                "allowed": False,
+                "required_permission": f"tool.{tool_name}",
+                "error": str(e),
+            }
 
     def _detect_platform_from_context(self, context: ToolContext) -> str:
         """从上下文检测平台类型"""

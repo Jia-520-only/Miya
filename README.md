@@ -53,7 +53,7 @@ Electron + Vue 3 桌面应用，内嵌 Live2D 独立透明窗口。她会根据�
 
 ### 双手
 
-DeepSeek Harness（DSH，DeepSeek 官方开源 agent harness，以 git submodule 嵌入于 `deepseek-harness/`）作为执行层，内置文件读写/搜索、bash/pwsh 命令、代码分析、子代理、技能、工作流等工具，通过 MCP 协议与守护进程双向通信——大脑想做什么，双手就去执行。当前 `.mcp.json` 启用 2 项原生 MCP 服务：`miya-soul`（灵魂状态查询，17 工具）、`miya-mineradio`（音乐遥控，27 工具）。另有 14 个通过 MCPManager 自动发现的服务模块（AI 绘画、DSH 任务执行、代码运行器、数据库操作、文件系统、游戏伴侣、记忆存储、社区论坛、计算机控制、屏幕视觉、VAM 桥接、网页搜索等），详见 `docs/MCP.md`。
+DeepSeek Harness（DSH，DeepSeek 官方开源 agent harness，以 git submodule 嵌入于 `deepseek-harness/`）作为执行层，内置文件读写/搜索、bash/pwsh 命令、代码分析、子代理、技能、工作流等工具，通过 MCP 协议与守护进程双向通信——大脑想做什么，双手就去执行。当前 `.mcp.json` 保留 `miya-mineradio`（音乐遥控，27 工具）；人格、情绪、记忆和 Spine 状态统一由弥娅主程序维护。另有通过 MCPManager 自动发现的服务模块（AI 绘画、DSH 任务执行、代码运行器、数据库操作、文件系统、游戏伴侣、记忆存储、社区论坛、计算机控制、屏幕视觉、VAM 桥接、网页搜索等），详见 `docs/MCP.md`。
 
 ### 进化
 
@@ -73,13 +73,13 @@ DeepSeek Harness（DSH，DeepSeek 官方开源 agent harness，以 git submodule
 面·外壳     Electron桌面   Web (Vue 3)   Live2D 独立窗口   Terminal (xterm)
 
 手·肢体     Claude Code Engine (Node.js)  ·  60+ 工具  ·  MCP 客户端
-                          │  MCP 协议 (miya-soul / miya-mineradio)
+                          │  MCP 协议 (miya-mineradio + DSH)
 大脑·灵魂   弥娅守护进程 (Python)
             ├── DecisionHub 决策中枢 —— 感知处理 · 响应生成 · 情感引擎 · 记忆管理
             ├── 灵魂锚点 —— 人格 · 身份 · 伦理 · 模型池调度 · 模型协作引擎
             ├── 统一记忆 V3.1 —— 六层记忆 · JSON + SQLite · LifeBook 生命书
             ├── M-Link 消息总线 —— 跨平台统一路由
-            ├── MCPManager —— 统一服务注册发现 (14 自动发现 + 2 原生服务)
+            ├── MCPManager —— 统一服务注册发现 (自动发现服务 + 1 原生服务)
             ├── 蛛网子网 —— QQ · ToolNet · LifeNet · HealthNet
             │              MusicNet · ArtNet · EntertainmentNet · AuthNet · IoT
 
@@ -423,8 +423,7 @@ Miya/
 │   ├── HealthNet/             # 健康管理
 │   └── LifeNet/               # 日常生活管理
 ├── mlink/                     # M-Link 跨平台消息总线
-├── mcpserver/                 # MCP 服务模块 (16 服务 + 2 预留, 详见 docs/MCP.md)
-│   ├── miya/                  # ★ miya-soul 原生 MCP (17 工具)
+├── mcpserver/                 # MCP 服务模块 (详见 docs/MCP.md)
 │   ├── miya_mineradio/        # ★ 音乐遥控 (27 工具, 双端注册)
 │   ├── art_service/           # AI 绘画 (3 工具)
 │   ├── dsh/                   # DSH 子进程执行 (2 工具)
@@ -489,7 +488,6 @@ Miya/
 
 | 服务 | 工具数 | 说明 |
 |------|--------|------|
-| `miya-soul` | 17 | 人格/情感/记忆/模型池/脊柱状态查询 |
 | `miya-mineradio` | 27 | 远程控制 Mineradio 音乐播放器 |
 | `game-play` | — | 游戏伴侣（默认禁用） |
 

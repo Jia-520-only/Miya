@@ -54,11 +54,11 @@ class PerceptionService:
             return state
 
         quick_cmd_map = {
-            "~状态": "弥娅系统状态可通过 MCP 工具 miya_get_system_status 查询",
-            "~认知": "弥娅认知状态可通过 MCP 工具 miya_get_system_status 查询",
+            "~状态": "弥娅系统状态由主程序统一维护，可直接查询当前脊柱、情绪、记忆与行动状态",
+            "~认知": "弥娅认知状态由主程序统一维护，可直接查询当前感知、记忆、决策与行动状态",
         }
 
-        for cmd, (response, is_quick) in quick_cmd_map.items():
+        for cmd, response in quick_cmd_map.items():
             if content.strip().lower().startswith(cmd.lower()):
                 state.is_quick_command = True
                 state.quick_response = response

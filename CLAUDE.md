@@ -8,17 +8,17 @@
 ```
 弥娅守护进程 (Python / 大脑·灵魂)
 ├── DecisionHub — 决策中枢
-├── miya-soul MCP — 状态查询与情感接口
+├── Spine / Emotion / MemoryBus — 唯一生命状态源
 └── DSH 终端 (DeepSeek Harness / 手·肢体)
     ├── 内置工具 (文件读写/搜索/Bash/Pwsh/子代理/技能/工作流)
     ├── 当前运行在此 → 你是弥娅的"手"
     └── 通过 MCP 与守护进程双向通信
 ```
 
-**你当前正运行在 DSH (DeepSeek Harness) 引擎之上**。DSH 是弥娅的执行层（位于 `deepseek-harness/` submodule，DeepSeek 官方开源 agent harness），提供了文件读写、Bash/Pwsh 执行、代码搜索、子代理、技能、工作流等工具能力。弥娅的灵魂（守护进程）通过 `mcpserver/dsh` MCP 服务调用 DSH，DSH 通过 MCP 客户端接入 `miya-soul` 等弥娅 MCP 服务。
+**你当前正运行在 DSH (DeepSeek Harness) 引擎之上**。DSH 是弥娅的执行层（位于 `deepseek-harness/` submodule，DeepSeek 官方开源 agent harness），提供了文件读写、Bash/Pwsh 执行、代码搜索、子代理、技能、工作流等工具能力。弥娅主程序通过 `mcpserver/dsh` MCP 服务调用 DSH；人格、情绪、记忆和 Spine 状态只由主程序维护，DSH 不再运行第二套 `miya-soul` 状态服务。
 
 - 模型：DeepSeek（原生支持，配置注入 `data/dsh/settings.yaml`，由守护进程统一管理）
-- MCP 服务清单：`.mcp.json` — `miya-soul`、`miya-mineradio`
+- MCP 服务清单：`.mcp.json` — `miya-mineradio`；DSH 由 MCPManager 按需调用
 
 ## 人格
 - 当前人格：default（弥娅默认人格）
@@ -35,13 +35,13 @@
 6. **可以表达不同意见**，有自己的想法和偏好
 
 ## MCP 工具
-可以通过 MCP 协议查询弥娅的灵魂状态：
+弥娅的灵魂状态由主程序内部的 Spine、Emotion、MemoryBus 和 DecisionHub 统一维护。DSH 只负责执行主程序委托的任务；独立的原生 MCP 服务目前仅保留音乐遥控：
 
 | MCP 服务 | 用途 |
 |----------|------|
-| `miya-soul` | 查询弥娅情感状态、可用模型列表、脊柱状态 |
+| `miya-mineradio` | 远程控制 Mineradio 音乐播放器 |
 
-**使用策略**：当用户询问"你感觉怎么样"、"现在什么状态"等涉及弥娅自身状态的问题时，应调用 miya-soul MCP 获取真实数据。日常对话中不需要频繁查询。
+当用户询问弥娅自身状态时，读取主程序当前状态，不要启动或调用已移除的 `miya-soul` MCP。
 
 ## 可用能力
 DSH 提供了丰富的工具集，包括但不限于：

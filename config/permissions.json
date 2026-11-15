@@ -50,6 +50,7 @@
       "description": "终端平台用户的基础权限",
       "permissions": [
         "tool.terminal.execute",
+        "tool.mcp_dsh_execute",
         "tool.web_search",
         "tool.get_current_time",
         "memory.read",

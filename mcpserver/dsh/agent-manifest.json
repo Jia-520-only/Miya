@@ -11,7 +11,7 @@
     "tools": [
       {
         "name": "execute",
-        "description": "通过 DSH (DeepSeek Harness) 执行自然语言任务。DSH 内置文件读写/搜索、bash/pwsh 命令执行、代码分析、子代理、技能、工作流编排等工具。用自然语言描述要 DSH 做什么。适合：创建项目结构、运行终端命令、安装依赖、多文件编辑、代码分析、批量重构等复杂操作。",
+        "description": "通过 DSH (DeepSeek Harness) 执行自然语言任务。DSH 是弥娅的统一命令、文件、代码与多步骤项目执行层，内置文件读写/搜索、bash/pwsh 命令执行、代码分析、子代理、技能、工作流编排等工具。用自然语言描述要 DSH 做什么。适合：创建项目结构、运行终端命令、安装依赖、多文件编辑、代码分析、批量重构和电脑自动化等复杂操作。浏览网页、截图、点击页面等浏览器 DOM 操作请直接使用 browse_web，不要绕到 DSH。",
         "parameters": {
           "task": "string (自然语言任务描述，如: 在桌面创建 hello.py 并写入 Hello World)",
           "working_dir": "string (工作目录路径，默认项目根目录)",

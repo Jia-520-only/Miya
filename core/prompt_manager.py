@@ -186,10 +186,10 @@ class PromptManager:
                     )
                     context_parts.append("- 中文输入如果不是明确要求执行操作，优先用自然语言回复")
                     context_parts.append("【重要】示例：")
-                    context_parts.append("- 用户说'ls' → 调用 terminal_command(command='ls')")
+                    context_parts.append("- 用户说'ls' → 调用 mcp_dsh_execute(task='列出当前目录内容')")
                     context_parts.append("- 用户说'猜猜我是谁' → 直接回复，不要调用工具")
                     context_parts.append("- 用户说'你好' → 直接回复，不要调用工具")
-                    context_parts.append("- 用户说'查看当前目录' → 调用 terminal_command(command='ls')")
+                    context_parts.append("- 用户说'查看当前目录' → 调用 mcp_dsh_execute(task='列出当前目录内容')")
                     context_parts.append("")
                     context_parts.append("【记忆管理规则】：")
                     context_parts.append(
