@@ -120,8 +120,12 @@ class MiyaAPI:
             if not request_id or not isinstance(result, dict):
                 raise HTTPException(status_code=400, detail="缺少有效的摄像头观察结果")
             publish_observation_result(request_id, result)
+            source_ids = body.get("browser_source_ids")
+            normalized_result = dict(result)
+            if isinstance(source_ids, list) and source_ids:
+                normalized_result["browser_source_ids"] = source_ids
             record_camera_observation(
-                result,
+                normalized_result,
                 query=str(body.get("query") or ""),
                 mode=str(body.get("mode") or "autonomous"),
                 local_only=body.get("local_only"),
@@ -134,7 +138,12 @@ class MiyaAPI:
             from core.vision_context import get_vision_context
 
             store = get_vision_context()
-            return {"success": True, "stats": store.stats(), "events": store.recent(limit=24)}
+            return {
+                "success": True,
+                "stats": store.stats(),
+                "world": store.current(source="camera"),
+                "events": store.recent(limit=24),
+            }
 
         @self.router.get("/api/vision/presence")
         async def vision_presence_state():

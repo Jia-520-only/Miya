@@ -133,6 +133,18 @@ def test_a_release_that_raises_does_not_erase_a_successful_probe(monkeypatch):
     assert fake.captures[0].released == 1, "设备必须被真正释放"
 
 
+def test_inventory_does_not_open_a_camera_the_browser_already_owns(monkeypatch):
+    fake = _FakeCv2({0: "usable", 1: "usable"})
+    _prepare(monkeypatch, fake)
+    monkeypatch.setattr(camera_devices, "MAX_INDEX", 2)
+
+    result = _REAL_LIST_CAMERA_DEVICES(skip_indices={1})
+
+    assert fake.opens == [0], "后台健康扫描不应抢占浏览器正在预览的摄像头"
+    assert result["devices"][1]["owner"] == "browser"
+    assert result["devices"][1]["usable"] is True
+
+
 def test_a_release_that_raises_does_not_erase_a_failed_probe(monkeypatch):
     fake = _FakeCv2({3: "unopenable"})
     _prepare(monkeypatch, fake)

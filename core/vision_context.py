@@ -14,6 +14,12 @@ from collections import deque
 from typing import Any
 
 
+_TRANSIENT_KINDS = frozenset({
+    "wave", "sit_down", "stand_up", "walk", "clap", "stretch", "nod", "raised_hand",
+})
+_HEALTH_KINDS = frozenset({"camera_health"})
+
+
 class VisionContextStore:
     """Bounded, thread-safe stream of derived visual observations."""
 
@@ -34,6 +40,16 @@ class VisionContextStore:
         safe["source"] = str(safe.get("source") or "unknown")
         safe["summary"] = str(safe.get("summary") or "").strip()[:1000]
         safe["kind"] = str(safe.get("kind") or "observation")
+        source_ids = safe.get("source_ids")
+        if not isinstance(source_ids, list):
+            source_ids = safe.get("camera_source_ids")
+        if not isinstance(source_ids, list) and safe.get("source_id"):
+            source_ids = [safe.get("source_id")]
+        safe["source_ids"] = sorted({
+            str(item).strip()[:160] for item in (source_ids or []) if str(item).strip()
+        })
+        if safe.get("source_id"):
+            safe["source_id"] = str(safe["source_id"]).strip()[:160]
         safe.pop("image_data", None)
         safe.pop("image_url", None)
         with self._lock:
@@ -41,6 +57,8 @@ class VisionContextStore:
             if (
                 previous
                 and previous.get("source") == safe.get("source")
+                and previous.get("kind") == safe.get("kind")
+                and previous.get("source_ids") == safe.get("source_ids")
                 and previous.get("summary") == safe.get("summary")
                 and 0 <= safe["timestamp"] - float(previous.get("timestamp", 0)) < 2.0
             ):
@@ -48,16 +66,84 @@ class VisionContextStore:
             self._events.append(safe)
         return safe
 
-    def recent(self, *, source: str | None = None, limit: int = 12) -> list[dict[str, Any]]:
+    @staticmethod
+    def _matches_source(event: dict[str, Any], source_id: str | None) -> bool:
+        if not source_id:
+            return True
+        wanted = str(source_id)
+        ids = event.get("source_ids") or event.get("camera_source_ids") or []
+        return wanted == str(event.get("source_id") or "") or wanted in {str(item) for item in ids}
+
+    def recent(
+        self, *, source: str | None = None, source_id: str | None = None, limit: int = 12,
+    ) -> list[dict[str, Any]]:
         with self._lock:
             events = list(self._events)
         if source:
             events = [event for event in events if event.get("source") == source]
+        if source_id:
+            events = [event for event in events if self._matches_source(event, source_id)]
         return events[-max(1, int(limit)) :]
 
-    def latest(self, *, source: str | None = None) -> dict[str, Any] | None:
-        events = self.recent(source=source, limit=1)
+    def latest(self, *, source: str | None = None, source_id: str | None = None) -> dict[str, Any] | None:
+        events = self.recent(source=source, source_id=source_id, limit=1)
         return events[0] if events else None
+
+    def current(
+        self, *, source: str | None = None, source_id: str | None = None,
+        now: float | None = None,
+    ) -> dict[str, Any]:
+        """Return the latest event and the latest still-valid sustained state.
+
+        Gestures are news, but they should not replace durable state such as
+        "在电脑前". Keeping both views here prevents each consumer from rebuilding
+        its own interpretation of the event history.
+        """
+        moment = time.time() if now is None else float(now)
+        with self._lock:
+            events = list(self._events)
+        if source:
+            events = [event for event in events if event.get("source") == source]
+        if source_id:
+            events = [event for event in events if self._matches_source(event, source_id)]
+        fresh = [
+            event for event in events
+            if float(event.get("timestamp") or 0.0) <= moment
+            and moment <= float(event.get("expires_at") or 0.0)
+        ]
+        semantic = [event for event in fresh if event.get("kind") not in _HEALTH_KINDS]
+        health_events = [event for event in fresh if event.get("kind") in _HEALTH_KINDS]
+        latest = semantic[-1] if semantic else None
+        state = next(
+            (
+                event for event in reversed(fresh)
+                if event.get("kind") not in _HEALTH_KINDS
+                and str(event.get("kind") or "observation") not in _TRANSIENT_KINDS
+            ),
+            None,
+        )
+        health_by_source: dict[str, dict[str, Any]] = {}
+        for event in health_events:
+            ids = event.get("source_ids") or ([event.get("source_id")] if event.get("source_id") else [])
+            for item in ids:
+                key = str(item).strip()
+                if key:
+                    health_by_source[key] = dict(event)
+        return {
+            "source": source,
+            "source_id": source_id,
+            "latest": dict(latest) if latest else None,
+            "state": dict(state) if state else None,
+            "health": dict(health_events[-1]) if health_events else None,
+            "health_by_source": health_by_source,
+            "sources": sorted(health_by_source),
+            "age_seconds": (
+                None if latest is None else round(max(0.0, moment - float(latest.get("timestamp") or moment)), 3)
+            ),
+            "stale": latest is None and any(event.get("kind") not in _HEALTH_KINDS for event in events),
+            "observed_at": None if latest is None else latest.get("timestamp"),
+            "expires_at": None if latest is None else latest.get("expires_at"),
+        }
 
     def clear(self) -> None:
         with self._lock:
@@ -75,6 +161,7 @@ class VisionContextStore:
             0 <= moment - float(event["timestamp"]) <= max_age
             and moment <= float(event.get("expires_at", event["timestamp"] + max_age))
         )]
+        events = [event for event in events if event.get("kind") not in _HEALTH_KINDS]
         if not events:
             return ""
         title = "[弥娅的摄像头感知]" if source == "camera" else "[弥娅的视觉上下文]"
@@ -95,6 +182,11 @@ class VisionContextStore:
             "screen": sum(1 for event in events if event.get("source") == "screen"),
             "camera": sum(1 for event in events if event.get("source") == "camera"),
             "latest": events[-1] if events else None,
+            "camera_sources": sorted({
+                source_id
+                for event in events if event.get("source") == "camera"
+                for source_id in (event.get("source_ids") or [])
+            }),
         }
 
 
@@ -130,6 +222,7 @@ def record_camera_observation(
         summary = "；".join(parts)
     if not summary:
         summary = "摄像头观察完成" if result.get("status") == "success" else "摄像头观察未得到明确结果"
+    source_ids = _camera_source_ids(result)
     event = _store.add(
         {
             "source": "camera",
@@ -139,6 +232,7 @@ def record_camera_observation(
             "mode": str(mode or "snapshot"),
             "local_only": local_only,
             "status": result.get("status"),
+            "source_ids": source_ids,
         }
     )
     observations = result.get("observations") if isinstance(result, dict) else None
@@ -156,6 +250,7 @@ def record_camera_observation(
                 "confidence": float(action.get("confidence") or 0),
                 "mode": mode,
                 "status": result.get("status"),
+                "source_ids": source_ids,
             })
             event = action_event
     return event
@@ -196,10 +291,95 @@ def record_camera_event(
             "mode": str(mode or "autonomous"),
             "status": str(status or "success"),
             "camera_indices": list(camera_indices or []),
-            "camera_source_ids": [str(item)[:160] for item in (camera_source_ids or []) if str(item).strip()],
+            "source_ids": [str(item)[:160] for item in (camera_source_ids or []) if str(item).strip()],
             "faces": faces,
         }
     )
+
+
+def record_camera_state(
+    *,
+    summary: str,
+    activity: str = "",
+    presence: dict[str, Any] | None = None,
+    confidence: float = 0.0,
+    faces: int | None = None,
+    camera_indices: list[int] | None = None,
+    camera_source_ids: list[str] | None = None,
+    mode: str = "autonomous",
+) -> dict[str, Any]:
+    """Publish one image-free current-state reading from Miya's own observer."""
+    text = str(summary or "").strip()
+    if not text:
+        return {}
+    return _store.add({
+        "source": "camera",
+        "kind": "camera_state",
+        "summary": text[:1000],
+        "activity": str(activity or "")[:160],
+        "presence": dict(presence or {}),
+        "confidence": float(confidence or 0.0),
+        "faces": faces,
+        "camera_indices": list(camera_indices or []),
+        "source_ids": [str(item)[:160] for item in (camera_source_ids or []) if str(item).strip()],
+        "mode": str(mode or "autonomous"),
+    })
+
+
+def _camera_source_ids(result: dict[str, Any] | None) -> list[str]:
+    """Extract stable camera identities without retaining frame payloads."""
+    if not isinstance(result, dict):
+        return []
+    values: list[Any] = []
+    for key in ("source_ids", "camera_source_ids", "browser_source_ids"):
+        if isinstance(result.get(key), list):
+            values.extend(result[key])
+    for item in result.get("captures") or []:
+        if isinstance(item, dict) and item.get("source_id"):
+            values.append(item["source_id"])
+    return sorted({str(item).strip()[:160] for item in values if str(item).strip()})
+
+
+def record_camera_health(
+    *,
+    source_id: str | None,
+    health: str,
+    reason: str = "",
+    index: int | None = None,
+    mode: str = "autonomous",
+    timestamp: float | None = None,
+) -> dict[str, Any]:
+    """Publish device health separately from what the pixels mean.
+
+    A dark or disconnected camera must never become a presence observation.
+    Consumers can show this as a diagnostic while keeping "佳离开了" strictly
+    tied to a valid visual reading.
+    """
+    stable_id = str(source_id or (f"index:{int(index)}" if index is not None else "")).strip()[:160]
+    if not stable_id:
+        return {}
+    state = str(health or "unknown").strip().lower()[:40] or "unknown"
+    label = {
+        "online": "在线",
+        "black_frame": "黑帧",
+        "frozen_frame": "画面冻结",
+        "no_frame": "没有画面",
+        "disconnected": "已断开",
+        "unopenable": "无法打开",
+    }.get(state, state)
+    return _store.add({
+        "source": "camera",
+        "kind": "camera_health",
+        "source_id": stable_id,
+        "source_ids": [stable_id],
+        "health": state,
+        "summary": f"摄像头{label}" + (f"：{str(reason).strip()[:240]}" if str(reason).strip() else ""),
+        "reason": str(reason or "").strip()[:500],
+        "index": index,
+        "mode": str(mode or "autonomous"),
+        "timestamp": timestamp,
+        "expires_at": (float(timestamp) if timestamp is not None else time.time()) + 180.0,
+    })
 
 
 def record_screen_observation(observation: Any) -> dict[str, Any]:

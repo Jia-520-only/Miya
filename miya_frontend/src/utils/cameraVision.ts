@@ -2,6 +2,7 @@ import { ref, shallowRef } from 'vue'
 import API from '@/api/core'
 import { rigCommandFromAnalysis } from '@/utils/facialTracking'
 import { proxySetFacialTracking } from '@/utils/live2dProxy'
+import { CameraFrameDeliverySchedule } from '@/utils/cameraFrameDelivery'
 
 export type CameraMode = 'off' | 'snapshot' | 'companion'
 export type CameraPolicy = 'auto' | 'single' | 'multi'
@@ -105,11 +106,9 @@ const lastPublishedEvents = new Map<string, number>()
 let poseHistory: Array<Record<string, any>> = []
 let signatureCanvas: HTMLCanvasElement | null = null
 let signatureContext: CanvasRenderingContext2D | null = null
-let lastFrameSharedAt = 0
+const frameDelivery = new CameraFrameDeliverySchedule()
+let cameraOpenVersion = 0
 const SNAPSHOT_INTERVAL_MS = 3000
-// How often this side hands a frame to Miya. She decides what it means; the
-// preview only decides how often it can spare one.
-const FRAME_SHARE_INTERVAL_MS = 15_000
 const EVENT_REPEAT_COOLDOWN_MS = 90_000
 
 function handleStreamEnded(sourceId = 'primary') {
@@ -198,7 +197,7 @@ async function refreshCapabilities() {
     const response = await API.mcpCall('screen_vision', 'camera_capabilities')
     const raw = response?.result
     const data = typeof raw === 'string' ? JSON.parse(raw) : raw
-    if (data?.capabilities) localCapabilities.value = { ...data.capabilities, cameraMode: data.camera_mode }
+    if (data?.capabilities) localCapabilities.value = { ...data.capabilities, cameraMode: data.cameraMode }
   } catch {
     localCapabilities.value = {
       status: 'unknown',
@@ -239,18 +238,20 @@ async function open(modeToUse: Exclude<CameraMode, 'off'>) {
     return
   }
 
+  const openVersion = ++cameraOpenVersion
+  const opened: Record<string, MediaStream> = { ...streams.value }
+  const cancelled = () => openVersion !== cameraOpenVersion
   error.value = ''
   status.value = '正在请求摄像头权限'
   publishState()
   try {
     await listDevices()
+    if (cancelled()) return
     const existingSources = activeBrowserSources.value
-    const existingStreams = streams.value
     const existingDeviceIds = new Set(existingSources.map(item => String(item.deviceId || '')))
     const candidates = cameraPolicy.value === 'multi'
       ? devices.value.filter(device => !existingDeviceIds.has(String(device.deviceId || '')))
       : [devices.value.find(device => device.deviceId === selectedDeviceId.value) || devices.value[0]].filter(Boolean)
-    const opened: Record<string, MediaStream> = { ...existingStreams }
     const sources: Array<Record<string, any>> = [...existingSources]
     for (let index = 0; index < candidates.length; index += 1) {
       const device = candidates[index]
@@ -262,9 +263,14 @@ async function open(modeToUse: Exclude<CameraMode, 'off'>) {
             ? { deviceId: { exact: device.deviceId }, width: { ideal: 640 }, height: { ideal: 480 } }
             : { width: { ideal: 640 }, height: { ideal: 480 } },
         })
+        if (cancelled()) {
+          activeStream.getTracks().forEach(track => track.stop())
+          return
+        }
         opened[sourceId] = activeStream
         activeStream.getTracks().forEach(track => track.addEventListener('ended', () => handleStreamEnded(sourceId), { once: true }))
         await attachStreamToVideos(activeStream, sourceId)
+        if (cancelled()) return
         sources.push({ sourceId, deviceId: device?.deviceId || '', label: device?.label || `摄像头 ${index + 1}`, backendIndex: null })
       } catch (err) {
         if (cameraPolicy.value !== 'multi') throw err
@@ -276,6 +282,12 @@ async function open(modeToUse: Exclude<CameraMode, 'off'>) {
     const primaryStream = (primarySource ? opened[primarySource.sourceId] : undefined) || Object.values(opened)[0]
     stream.value = primaryStream || null
     activeBrowserSources.value = sources
+    updateBackendMapping()
+    // Permission can reveal device labels for the first time. Re-read them
+    // before matching a browser source to a physical camera.
+    await listDevices()
+    if (cancelled()) return
+    updateBackendMapping()
     if (!deviceChangeHandler && navigator.mediaDevices.addEventListener) {
       deviceChangeHandler = () => { void listDevices() }
       navigator.mediaDevices.addEventListener('devicechange', deviceChangeHandler)
@@ -287,6 +299,7 @@ async function open(modeToUse: Exclude<CameraMode, 'off'>) {
     }
     publishState()
   } catch (err: any) {
+    if (cancelled()) return
     mode.value = 'off'
     Object.keys(streams.value).forEach(removeStream)
     streams.value = {}
@@ -295,12 +308,21 @@ async function open(modeToUse: Exclude<CameraMode, 'off'>) {
     error.value = err?.name === 'NotAllowedError' ? '摄像头权限被拒绝' : (err?.message || '摄像头启动失败')
     publishState()
     throw err
+  } finally {
+    // A pending getUserMedia request cannot be cancelled. Any stream that
+    // arrives after stop/switch still has to release its hardware tracks.
+    for (const active of Object.values(opened)) {
+      if (!Object.values(streams.value).includes(active)) {
+        active.getTracks().forEach(track => track.stop())
+      }
+    }
   }
 }
 
 function stop(reason = '') {
+  cameraOpenVersion += 1
   companionStartVersion += 1
-  lastFrameSharedAt = 0
+  frameDelivery.reset()
   const releaseIndex = selectedDeviceId.value && backendDeviceMapping.value === 'matched' ? backendDeviceIndex.value : null
   const releasedBrowserSourceIds = activeBrowserSources.value.map(item => item.sourceId).filter(Boolean)
   if (timer) {
@@ -375,14 +397,14 @@ async function publishLocalEvent(
   summary: string,
   confidence = 1,
   options: { repeatable?: boolean, imageData?: string, source?: Record<string, any> } = {},
-) {
+): Promise<boolean> {
   const now = Date.now()
+  let eventKey = ''
   // Repeatable publications (sharing a frame on a slow cadence) must not be
   // swallowed by the de-duplication window that real events rely on.
   if (!options.repeatable) {
-    const key = `${kind}:${summary}`
-    if (now - (lastPublishedEvents.get(key) || 0) < EVENT_REPEAT_COOLDOWN_MS) return
-    lastPublishedEvents.set(key, now)
+    eventKey = `${kind}:${summary}`
+    if (now - (lastPublishedEvents.get(eventKey) || 0) < EVENT_REPEAT_COOLDOWN_MS) return true
   }
   try {
     // A live preview holds the device, so only this side can read frames from
@@ -408,8 +430,11 @@ async function publishLocalEvent(
       ...(source?.label ? { camera_label: source.label } : {}),
       ...(imageData ? { image_data: imageData } : {}),
     })
+    if (eventKey) lastPublishedEvents.set(eventKey, Date.now())
+    return true
   } catch {
     // Event publication is best effort; camera observation must keep running.
+    return false
   }
 }
 
@@ -624,20 +649,36 @@ async function companionTick() {
     localStorage.setItem('miya-camera-heartbeat', String(now))
     // Hand over a frame on a steady cadence. Miya's own observation loop decides
     // what to do with it; this side only supplies the pixels.
-    if (now - lastFrameSharedAt >= FRAME_SHARE_INTERVAL_MS) {
-      lastFrameSharedAt = now
-      const frameSources = cameraPolicy.value === 'multi' ? activeBrowserSources.value : activeBrowserSources.value.slice(0, 1)
+    const frameSources = cameraPolicy.value === 'multi' ? activeBrowserSources.value : activeBrowserSources.value.slice(0, 1)
+    const dueSources = frameSources.filter((source) => {
+      const sourceId = String(source.sourceId || 'primary')
+      return frameDelivery.isDue(sourceId, now)
+    })
+    if (dueSources.length) {
+      let delivered = 0
       if (frameSources.length) {
         analysisInFlight = true
         try {
-          for (const source of frameSources) {
+          for (const source of dueSources) {
             if (tickVersion !== companionStartVersion || mode.value !== 'companion' || !stream.value) return
-            const frame = captureFrame(source.sourceId)
-            if (frame) await publishLocalEvent('companion_frame', '预览正在把画面交给弥娅', 0.5,
-              { repeatable: true, imageData: frame, source })
+            const sourceId = String(source.sourceId || 'primary')
+            try {
+              const frame = captureFrame(sourceId)
+              const accepted = await publishLocalEvent('companion_frame', '预览正在把画面交给弥娅', 0.5,
+                { repeatable: true, imageData: frame, source })
+              if (accepted) {
+                frameDelivery.delivered(sourceId)
+                delivered += 1
+              } else {
+                frameDelivery.failed(sourceId)
+              }
+            } catch (err: any) {
+              frameDelivery.failed(sourceId)
+              localEvent.value = err?.message || '摄像头画面交付失败'
+            }
           }
           if (tickVersion !== companionStartVersion || mode.value !== 'companion' || !stream.value) return
-          status.value = '预览运行中 · 正在把画面交给弥娅'
+          status.value = delivered ? '预览运行中 · 正在把画面交给弥娅' : '预览运行中 · 等待视觉服务'
         } finally {
           analysisInFlight = false
         }
@@ -893,7 +934,12 @@ async function syncObservationRequest() {
     await API.publishCameraResult(
       requestId,
       result || { status: 'error', message: '摄像头观察没有返回结果。', persisted: false },
-      { query: request.query || '', localOnly: requestLocalOnly, mode: 'autonomous' },
+      {
+        query: request.query || '',
+        localOnly: requestLocalOnly,
+        mode: 'autonomous',
+        browserSourceIds: activeBrowserSources.value.map(item => item.sourceId),
+      },
     )
     lastObservationRequestId = requestId
     localStorage.setItem('miya-camera-observation-seen', requestId)
@@ -948,6 +994,7 @@ function stopRemoteCommandPolling() {
 function selectDevice(deviceId: string) {
   selectedDeviceId.value = deviceId
   localStorage.setItem('miya-camera-device', deviceId)
+  updateBackendMapping()
   if (stream.value) {
     const wasCompanion = mode.value === 'companion'
     stop()
@@ -1014,13 +1061,28 @@ function matchBackendIndexForSelectedDevice(): number | null {
   return null
 }
 
+function updateBackendMapping() {
+  backendDeviceMapping.value = 'unmatched'
+  const matched = matchBackendIndexForSelectedDevice()
+  if (matched === null) return
+  backendDeviceMapping.value = 'matched'
+  setBackendDeviceIndex(matched)
+  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '')
+  for (const source of activeBrowserSources.value) {
+    const label = normalize(String(source.label || '').trim())
+    const indices = Object.entries(backendNames.value || {})
+      .filter(([, name]) => normalize(String(name || '').trim()) === label)
+      .map(([index]) => Number(index))
+    source.backendIndex = indices.length === 1 ? indices[0] : null
+  }
+}
+
 async function refreshCameraSources() {
   try {
     const response = await API.getCameraSources()
     backendDevices.value = Array.isArray(response?.devices) ? response.devices : []
     cameraSourcesMessage.value = response?.message || ''
     backendNames.value = response?.names || {}
-    backendDeviceMapping.value = 'unmatched'
     // camelCase: the API layer converts responses, so `usable_indices` is never
     // the key that exists here. Reading the old name made this whole fallback
     // dead code and froze the reported index.
@@ -1041,12 +1103,8 @@ async function refreshCameraSources() {
       message: cameraSourcesMessage.value,
       names: backendNames.value,
     }
-    const matched = matchBackendIndexForSelectedDevice()
-    if (matched !== null) {
-      backendDeviceMapping.value = 'matched'
-      if (matched !== Number(backendDeviceIndex.value)) setBackendDeviceIndex(matched)
-      return backendDevices.value
-    }
+    updateBackendMapping()
+    if (backendDeviceMapping.value === 'matched') return backendDevices.value
     // Do not silently attribute browser frames to a different physical device.
     // Keep a sensible fallback only when no browser camera has been selected.
     if (!selectedDeviceId.value) {

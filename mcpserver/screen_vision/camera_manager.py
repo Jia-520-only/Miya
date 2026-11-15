@@ -175,7 +175,21 @@ class CameraManager:
                 return dict(self._sources)
             self._scanning = True
         try:
-            report = list_camera_devices(probe=True)
+            # A browser preview already owns its camera. Probing it from the
+            # backend races the browser's MediaStream and commonly produces a
+            # black frame or an unopenable result. Keep the browser's frame as
+            # the health source and probe only the other indices.
+            browser_indices: set[int] = set()
+            try:
+                from .camera_stream import get_camera_pool
+
+                pool = get_camera_pool()
+                browser_indices = {
+                    int(index) for index in pool.describe().get("browser_owned", [])
+                }
+            except Exception:  # noqa: BLE001 - inventory must still work alone
+                browser_indices = set()
+            report = list_camera_devices(probe=True, skip_indices=browser_indices)
             with self._lock:
                 previous = dict(self._sources)
             found: dict[int, CameraSource] = {}

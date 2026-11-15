@@ -78,20 +78,51 @@ def vision_context_card(*, now: float | None = None) -> str:
     except Exception:
         logger.debug("[VisionContext] 读取观察过程失败", exc_info=True)
 
-    browser_card = ""
+    world: dict[str, Any] = {}
     try:
         from core.vision_context import get_vision_context
 
-        browser_card = get_vision_context().build_card(source="camera", limit=4, max_age=FRESH_SECONDS, now=moment)
+        world = get_vision_context().current(source="camera", now=moment)
     except Exception:
-        logger.debug("[VisionContext] 读取浏览器摄像头上下文失败", exc_info=True)
+        logger.debug("[VisionContext] 读取视觉当前状态失败", exc_info=True)
+
+    browser_card = ""
+    camera_state = world.get("state")
+    latest_camera_event = world.get("latest")
+    camera_lines: list[str] = []
+    if camera_state:
+        age = max(0.0, moment - float(camera_state.get("timestamp") or moment))
+        summary = str(camera_state.get("summary") or "").strip()
+        if age <= FRESH_SECONDS and summary:
+            camera_lines.append(f"- 当前状态：{summary[:240]}")
+    if latest_camera_event:
+        event_at = float(latest_camera_event.get("timestamp") or moment)
+        event_age = max(0.0, moment - event_at)
+        different_event = (
+            not camera_state
+            or latest_camera_event.get("timestamp") != camera_state.get("timestamp")
+            or latest_camera_event.get("kind") != camera_state.get("kind")
+        )
+        summary = str(latest_camera_event.get("summary") or "").strip()
+        if different_event and event_age <= FRESH_SECONDS and summary:
+            camera_lines.append(f"- 刚刚发生：{summary[:200]}")
+    if camera_lines:
+        browser_card = "[弥娅的摄像头感知]\n" + "\n".join(camera_lines)
+    health_lines: list[str] = []
+    for source_id, health_event in (world.get("health_by_source") or {}).items():
+        health = str(health_event.get("health") or "unknown")
+        if health == "online":
+            continue
+        reason = str(health_event.get("reason") or "").strip()
+        detail = f"：{reason[:120]}" if reason else ""
+        health_lines.append(f"{source_id}={health}{detail}")
 
     interpreted = bool(latest.get("interpreted"))
     latest_at = float(latest.get("at") or 0)
     age = moment - latest_at if latest_at else float("inf")
 
     # Nothing observed at all: stay silent rather than assert a camera exists.
-    if not presence_text and not activity_text and not latest_at and not browser_card:
+    if not presence_text and not activity_text and not latest_at and not browser_card and not health_lines:
         return ""
 
     lines.append("[弥娅的摄像头所见]")
@@ -101,6 +132,8 @@ def vision_context_card(*, now: float | None = None) -> str:
         browser_lines = browser_card.splitlines()[1:]
         if browser_lines:
             lines.append("- 浏览器摄像头：" + "；".join(browser_lines[:3]))
+    if health_lines:
+        lines.append("- 摄像头设备健康（诊断信息，不代表人在场或离开）：" + "；".join(health_lines[:6]))
     if presence_text:
         lines.append(f"- 在场：{presence_text}")
     if activity_text:
@@ -174,5 +207,11 @@ def vision_context_summary(*, now: float | None = None) -> dict[str, Any]:
         out["latest"] = get_vision_stream().latest()
     except Exception:
         out["latest"] = None
+    try:
+        from core.vision_context import get_vision_context
+
+        out["world"] = get_vision_context().current(source="camera", now=moment)
+    except Exception:
+        out["world"] = None
     out["card"] = vision_context_card(now=moment)
     return out

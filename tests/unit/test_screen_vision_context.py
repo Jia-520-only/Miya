@@ -83,6 +83,103 @@ def test_browser_observation_is_shared_without_claiming_the_camera_is_blind():
     assert "浏览器看到人在敲键盘" not in vision_context.vision_context_card(now=moment + 181)
 
 
+def test_world_state_keeps_a_gesture_separate_from_the_current_state():
+    from core.vision_context import get_vision_context
+
+    store = get_vision_context()
+    moment = time.time()
+    store.add({
+        "source": "camera", "kind": "observation", "summary": "佳还在电脑前敲键盘",
+        "timestamp": moment - 2, "expires_at": moment + 120,
+    })
+    store.add({
+        "source": "camera", "kind": "wave", "summary": "佳刚刚挥了挥手",
+        "timestamp": moment, "expires_at": moment + 20,
+    })
+
+    world = store.current(source="camera", now=moment)
+
+    assert world["latest"]["kind"] == "wave"
+    assert world["state"]["summary"] == "佳还在电脑前敲键盘"
+    card = vision_context.vision_context_card(now=moment)
+    assert "当前状态：佳还在电脑前敲键盘" in card
+    assert "刚刚发生：佳刚刚挥了挥手" in card
+
+
+def test_world_state_expires_without_returning_stale_camera_facts():
+    from core.vision_context import get_vision_context
+
+    store = get_vision_context()
+    store.add({
+        "source": "camera", "summary": "过期的摄像头观察",
+        "timestamp": 1, "expires_at": 2,
+    })
+
+    world = store.current(source="camera", now=3)
+
+    assert world["latest"] is None
+    assert world["state"] is None
+    assert world["stale"] is True
+
+
+def test_world_state_is_scoped_to_stable_camera_sources():
+    from core.vision_context import VisionContextStore
+
+    store = VisionContextStore()
+    moment = time.time()
+    store.add({
+        "source": "camera", "source_id": "browser:desk", "kind": "camera_state",
+        "summary": "桌面摄像头看到人在敲键盘", "timestamp": moment,
+    })
+    store.add({
+        "source": "camera", "source_id": "browser:phone", "kind": "camera_state",
+        "summary": "手機摄像头看到空椅子", "timestamp": moment + 0.1,
+    })
+
+    desk = store.current(source="camera", source_id="browser:desk", now=moment + 0.1)
+    phone = store.current(source="camera", source_id="browser:phone", now=moment + 0.1)
+
+    assert desk["state"]["summary"] == "桌面摄像头看到人在敲键盘"
+    assert phone["state"]["summary"] == "手機摄像头看到空椅子"
+
+
+def test_camera_health_does_not_replace_semantic_state_or_latest_event():
+    from core.vision_context import VisionContextStore
+
+    store = VisionContextStore()
+    moment = time.time()
+    store.add({
+        "source": "camera", "kind": "camera_state", "summary": "佳还在电脑前",
+        "source_id": "dshow:desk", "timestamp": moment,
+    })
+    store.add({
+        "source": "camera", "kind": "wave", "summary": "佳刚刚挥手",
+        "source_id": "dshow:desk", "timestamp": moment + 0.1,
+    })
+    store.add({
+        "source": "camera", "kind": "camera_health", "health": "black_frame",
+        "summary": "摄像头黑帧", "source_id": "dshow:desk", "timestamp": moment + 0.2,
+    })
+
+    world = store.current(source="camera", source_id="dshow:desk", now=moment + 0.2)
+
+    assert world["state"]["summary"] == "佳还在电脑前"
+    assert world["latest"]["kind"] == "wave"
+    assert world["health_by_source"]["dshow:desk"]["health"] == "black_frame"
+
+
+def test_record_camera_health_requires_a_stable_source_id():
+    from core.vision_context import VisionContextStore, record_camera_health
+
+    assert record_camera_health(source_id=None, health="disconnected") == {}
+    store = VisionContextStore()
+    event = store.add({
+        "source": "camera", "kind": "camera_health", "source_id": "browser:preview",
+        "health": "disconnected", "summary": "摄像头已断开",
+    })
+    assert event["source_ids"] == ["browser:preview"]
+
+
 def test_the_card_carries_her_reading_face_and_intents():
     _record_observation()
     card = vision_context.vision_context_card()

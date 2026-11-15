@@ -262,7 +262,8 @@ def _probe_index_unlocked(cv2, index: int, width: int, height: int, name: str = 
             "name": name, "reason": "该索引没有可用摄像头"}
 
 
-def list_camera_devices(*, width: int = 640, height: int = 480, probe: bool = True) -> dict[str, Any]:
+def list_camera_devices(*, width: int = 640, height: int = 480, probe: bool = True,
+                        skip_indices: set[int] | list[int] | tuple[int, ...] | None = None) -> dict[str, Any]:
     """Enumerate OpenCV camera indices with an optional one-frame probe.
 
     The range covered is the wider of ``MAX_INDEX`` and the number of devices
@@ -285,6 +286,7 @@ def list_camera_devices(*, width: int = 640, height: int = 480, probe: bool = Tr
     names = dshow_device_names()
     _forget_failures_when_devices_change(names)
     devices: list[dict[str, Any]] = []
+    skipped = {int(index) for index in (skip_indices or ()) if int(index) >= 0}
     # With a device list in hand there is nothing to guess: probing indices past
     # the end of it only opens devices that do not exist, and every open is the
     # riskiest call this process makes. Without ffmpeg the old index range is the
@@ -297,6 +299,16 @@ def list_camera_devices(*, width: int = 640, height: int = 480, probe: bool = Tr
     limit = max(1, MAX_INDEX, len(names))
     for index in range(limit):
         name = name_for_index(index, names=names)
+        if probe and index in skipped:
+            devices.append({
+                "index": index,
+                "available": True,
+                "usable": True,
+                "owner": "browser",
+                "name": name,
+                "reason": "浏览器预览正在使用这台摄像头，本次沿用浏览器画面，不重复打开设备。",
+            })
+            continue
         if not probe:
             # Enumeration without touching hardware. Opening each device to ask
             # "does this one open?" sounded cheap and was not: a camera whose

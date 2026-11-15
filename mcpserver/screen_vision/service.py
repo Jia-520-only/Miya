@@ -1063,6 +1063,20 @@ class ScreenVisionService:
             # cameras at once. Releasing only the selected primary index leaves
             # the other frame buffers owned by the stopped preview.
             get_camera_pool().release_browser(None if source_ids else index)
+            try:
+                from core.vision_context import record_camera_health
+
+                for source_id in (source_ids or [call.get("browser_source_id") or event.get("browser_source_id")]):
+                    if source_id:
+                        record_camera_health(
+                            source_id=str(source_id),
+                            health="disconnected",
+                            reason="浏览器预览已释放",
+                            index=index,
+                            mode="companion",
+                        )
+            except Exception:  # noqa: BLE001 - diagnostics must not block release
+                logger.debug("[ScreenVision] 记录浏览器摄像头释放状态失败", exc_info=True)
             return json.dumps({"status": "success", "released": index}, ensure_ascii=False)
 
         from core.vision_context import get_vision_context
@@ -1073,9 +1087,12 @@ class ScreenVisionService:
         # gestures from the proactive trigger every 15 seconds.
         recorded = None
         if event_kind not in {"companion_frame", "preview_heartbeat"}:
+            browser_source_id = call.get("browser_source_id") or event.get("browser_source_id")
             recorded = get_vision_context().add({
                 "source": "camera",
                 "kind": event_kind,
+                "source_id": browser_source_id,
+                "source_ids": [browser_source_id] if browser_source_id else [],
                 "summary": str(event.get("summary") or "摄像头事件"),
                 "confidence": float(event.get("confidence") or 0),
                 "mode": str(event.get("mode") or "companion"),
@@ -1107,6 +1124,18 @@ class ScreenVisionService:
                     device_id_hash=call.get("device_id_hash") or event.get("device_id_hash"),
                     label=call.get("camera_label") or event.get("camera_label") or "",
                 )
+                try:
+                    from core.vision_context import record_camera_health
+
+                    record_camera_health(
+                        source_id=call.get("browser_source_id") or event.get("browser_source_id"),
+                        health="online",
+                        reason="浏览器帧已到达",
+                        index=index,
+                        mode="companion",
+                    )
+                except Exception:  # noqa: BLE001 - diagnostics must not block frames
+                    logger.debug("[ScreenVision] 记录浏览器摄像头在线状态失败", exc_info=True)
                 # Also publish into the shared pool: the preview owns that device,
                 # so this frame is the only way anything else can see through it.
                 if index is not None and index >= 0:

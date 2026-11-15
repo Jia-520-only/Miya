@@ -202,7 +202,7 @@ export class CoreApiClient extends ApiClient {
   async publishCameraResult(
     requestId: string,
     result: Record<string, any>,
-    extra: { query?: string, mode?: string, localOnly?: boolean } = {},
+    extra: { query?: string, mode?: string, localOnly?: boolean, browserSourceIds?: string[] } = {},
   ): Promise<any> {
     // `query` and the mode are what let the stored observation keep the question
     // it answered; they used to be omitted, so every record lost them.
@@ -212,6 +212,7 @@ export class CoreApiClient extends ApiClient {
       ...(extra.query !== undefined ? { query: extra.query } : {}),
       ...(extra.mode !== undefined ? { mode: extra.mode } : {}),
       ...(extra.localOnly !== undefined ? { local_only: extra.localOnly } : {}),
+      ...(extra.browserSourceIds?.length ? { browser_source_ids: extra.browserSourceIds } : {}),
     })
   }
 

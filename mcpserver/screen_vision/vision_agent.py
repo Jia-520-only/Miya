@@ -899,6 +899,7 @@ class VisionAgent:
                 "owner": owner,
                 "source_id": str(source_info.get("source_id") or ""),
                 "source_name": str(source_info.get("name") or ""),
+                "faces": int(result.get("faces") or 0),
                 # A small JPEG for the panel, not the frame itself.
                 "thumbnail": thumbnail,
                 "reading_text": str(result.get("message") or ""),
@@ -1238,16 +1239,75 @@ class VisionAgent:
         # into these trackers anyway, so her own successful reading of "playing
         # with his phone" was wiped out by the next failed grab, and she reported
         # no activity at all while classifying one every round.
-        saw_something = bool(fused.get("observations"))
         captures = fused.get("captures") or []
+        observations = fused.get("observations") or []
+        saw_something = any(
+            isinstance(item, dict)
+            and isinstance(item.get("result"), dict)
+            and item["result"].get("status") == "success"
+            for item in observations
+        )
+
+        # Device health is a separate stream from visual meaning. A black frame
+        # or a disconnected source must be visible to diagnostics without being
+        # fed into the presence/activity state machines as if Jia had vanished.
+        try:
+            from core.vision_context import record_camera_health
+            from .camera_manager import get_camera_manager
+
+            manager = get_camera_manager()
+            for item in captures:
+                source_id = str(item.get("source_id") or "")
+                if source_id:
+                    record_camera_health(
+                        source_id=source_id,
+                        health="online",
+                        index=item.get("index") if isinstance(item.get("index"), int) else None,
+                        mode="autonomous",
+                        timestamp=reading_at,
+                    )
+            for failure in fused.get("failures") or []:
+                if not isinstance(failure, dict):
+                    continue
+                source_id = str(failure.get("source_id") or "")
+                index = failure.get("index")
+                if not source_id and isinstance(index, int):
+                    source = manager.sources().get(index)
+                    if source is not None:
+                        source_id = str(source.to_dict().get("source_id") or "")
+                failure_message = str(failure.get("message") or "没有得到有效画面")
+                try:
+                    from .camera_stream import get_camera_pool
+
+                    buffer = (get_camera_pool().describe().get("sources") or {}).get(index)
+                    stream_error = str((buffer or {}).get("error") or "")
+                    if stream_error:
+                        failure_message = f"{failure_message}；{stream_error}"
+                except Exception:
+                    pass
+                health = "frozen_frame" if any(term in failure_message for term in ("冻结", "一模一样", "卡住")) else (
+                    "black_frame" if failure.get("blank_frame") else "no_frame"
+                )
+                record_camera_health(
+                    source_id=source_id or None,
+                    health=health,
+                    reason=failure_message,
+                    index=index if isinstance(index, int) else None,
+                    mode="autonomous",
+                    timestamp=reading_at,
+                )
+        except Exception:
+            logger.debug("[VisionAgent] 写入摄像头健康状态失败", exc_info=True)
         if saw_something:
+            presence_snapshot = None
             try:
                 snapshot = presence_from_local_result({"observations": [{
                     "face_signals": fused.get("face_signals"),
                     "pose_quality": fused.get("pose_quality"),
                     "action": fused.get("action"),
                 }], "faces": fused.get("faces"), "luminance": fused.get("luminance")})
-                reading["presence"] = snapshot.to_dict()
+                presence_snapshot = snapshot.to_dict()
+                reading["presence"] = presence_snapshot
             except Exception:
                 logger.debug("[VisionAgent] 在场状态更新失败", exc_info=True)
             # Her autonomous loop is the main observer, so it must feed the
@@ -1256,7 +1316,21 @@ class VisionAgent:
             try:
                 from .activity import observe_action
 
-                observe_action(fused.get("action"), at=reading_at)
+                activity_snapshot = observe_action(fused.get("action"), at=reading_at)
+                from core.vision_context import record_camera_state
+
+                record_camera_state(
+                    summary=str(fused.get("message") or "摄像头观察到当前活动"),
+                    activity=str(getattr(activity_snapshot, "phrase", "") or ""),
+                    presence=presence_snapshot,
+                    confidence=float((fused.get("action") or {}).get("confidence") or 0.0),
+                    faces=int(fused.get("faces") or 0),
+                    camera_indices=[int(item) for item in (fused.get("sources_used") or [])],
+                    camera_source_ids=[
+                        str(item.get("source_id") or "")
+                        for item in (captures or []) if item.get("source_id")
+                    ],
+                )
             except Exception:
                 logger.debug("[VisionAgent] 活动累积更新失败", exc_info=True)
             # Momentary gestures also go into the shared camera context, which is
