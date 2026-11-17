@@ -252,7 +252,16 @@ class MiyaEarthOperatorOrgan(MiyaOrgan):
                 ai_client=self._ai_client,
             )
             self._ai_client.set_tool_registry(self._earth_tool_schema)
-            self._ai_client.set_tool_context({})
+            # This is a daemon-owned operation, not a user/API request. Keep an
+            # explicit trusted identity so the normal tool permission boundary
+            # does not mistake the operator for an anonymous caller.
+            self._ai_client.set_tool_context({
+                "trusted_internal": True,
+                "user_id": "1523878699",
+                "platform": "terminal",
+                "session_id": "earth_operator",
+                "current_input": "autonomous earth online operation",
+            })
             try:
                 response = await self._ai_client.chat(
                     messages=[

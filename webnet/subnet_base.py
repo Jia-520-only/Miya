@@ -93,6 +93,7 @@ class BaseSubnet(ABC):
         group_id: Optional[int] = None,
         message_type: Optional[str] = None,
         sender_name: Optional[str] = None,
+        platform: Optional[str] = None,
     ) -> str:
         """执行工具（子类必须实现）
 
@@ -218,18 +219,22 @@ class ToolRegistrySubnet(BaseSubnet):
         group_id: Optional[int] = None,
         message_type: Optional[str] = None,
         sender_name: Optional[str] = None,
+        platform: Optional[str] = None,
     ) -> str:
         """执行工具"""
         from webnet.ToolNet.registry import ToolContext
 
         context = ToolContext(
             memory_engine=self.config.memory_engine,
-            cognitive_memory=self.config.cognitive_memory,
+            # ToolContext no longer exposes the legacy cognitive_memory field.
+            # Keep the configured value available through the unified memory slot.
+            unified_memory=self.config.cognitive_memory or self.config.memory_engine,
             onebot_client=self.config.onebot_client,
             user_id=user_id,
             group_id=group_id,
             message_type=message_type,
             sender_name=sender_name,
+            platform=platform,
         )
 
         try:

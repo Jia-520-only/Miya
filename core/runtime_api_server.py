@@ -785,6 +785,7 @@ class RuntimeAPIServer:
                                         memory_engine=memory_engine,
                                         unified_memory=memory_engine,
                                         user_id=int(session_id) if session_id.isdigit() else None,
+                                        platform="terminal",
                                         message_type="web",
                                     )
 
@@ -792,6 +793,7 @@ class RuntimeAPIServer:
                                         tool_name=tool_name,
                                         args={},
                                         user_id=context.user_id,
+                                        platform="terminal",
                                         message_type="web",
                                     )
                                     tool_call_result = result

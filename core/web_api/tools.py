@@ -133,6 +133,7 @@ class ToolRoutes:
                         tool_name="web_research",
                         args=request,
                         user_id=1,
+                        platform="web",
                         sender_name="desktop",
                     )
                     return {"success": True, "result": result}
@@ -260,6 +261,7 @@ class ToolRoutes:
                         tool_name="web_search",
                         args=request,
                         user_id=1,
+                        platform="web",
                         sender_name="desktop",
                     )
                     return {"success": True, "result": result}
@@ -330,6 +332,7 @@ class ToolRoutes:
                         tool_name=tool_name,
                         args=parameters,
                         user_id=1,
+                        platform="web",
                         sender_name="desktop",
                     )
                     return {"success": True, "result": result}

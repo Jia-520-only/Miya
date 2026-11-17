@@ -53,7 +53,7 @@ class PerceptionHandler:
         """
         user_id = perception.get("user_id")
         group_id = perception.get("group_id")
-        message_type = perception.get("message_type", "group")
+        platform = perception.get("platform", perception.get("source", ""))
 
         # 管理员总是有权限
         if user_id and self.is_admin(user_id, group_id):
@@ -62,12 +62,15 @@ class PerceptionHandler:
         # 权限子网检查
         if self.auth_subnet:
             try:
-                from webnet.ToolNet.base import ToolContext
+                from core.unified_permission import get_permission_engine
+                from webnet.AuthNet.user_mapper import UserMapper
 
-                context = ToolContext(
-                    user_id=user_id, group_id=group_id, message_type=message_type, onebot_client=self.onebot_client
+                canonical_id = UserMapper().generate_user_id(platform or "unknown", str(user_id))
+                has_perm = get_permission_engine().check(
+                    canonical_id,
+                    "agent.chat",
+                    context={"platform": platform, "group_id": group_id},
                 )
-                has_perm = await self.auth_subnet.check_permission(context)
                 if not has_perm:
                     logger.warning(f"[感知处理器] 权限不足: user_id={user_id}, group_id={group_id}")
                 return has_perm

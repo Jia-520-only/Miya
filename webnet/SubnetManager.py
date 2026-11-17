@@ -72,6 +72,7 @@ class SubnetManager:
         group_id: Optional[int] = None,
         message_type: Optional[str] = None,
         sender_name: Optional[str] = None,
+        platform: Optional[str] = None,
     ) -> str:
         """执行工具（路由到对应子网）
 
@@ -104,6 +105,7 @@ class SubnetManager:
                 group_id=group_id,
                 message_type=message_type,
                 sender_name=sender_name,
+                platform=platform,
             )
         except Exception as e:
             logger.error(f"执行工具 {tool_name} 失败: {e}", exc_info=True)

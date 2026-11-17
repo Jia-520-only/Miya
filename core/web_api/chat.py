@@ -78,6 +78,7 @@ class ChatRoutes:
                     "content": request.message,
                     "user_id": request.session_id,
                     "sender_name": f"{platform}用户-{request.session_id[:8]}",
+                    "message_type": "private",
                 }
 
                 message = Message(

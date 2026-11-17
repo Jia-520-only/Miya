@@ -70,6 +70,7 @@ class EntertainmentSubnet:
         user_id: Optional[int] = None,
         group_id: Optional[int] = None,
         message_type: Optional[str] = None,
+        platform: Optional[str] = None,
     ) -> str:
         """执行娱乐工具
 
@@ -99,6 +100,7 @@ class EntertainmentSubnet:
                 "user_id": user_id,
                 "group_id": group_id,
                 "message_type": message_type,
+                "platform": platform,
             }
 
             # 执行工具

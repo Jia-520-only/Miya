@@ -91,9 +91,15 @@ class PerceptionService:
     async def _check_permission(self, request: ProcessRequest, state: ProcessState) -> ProcessState:
         if self.auth_subnet and hasattr(self.auth_subnet, "check_permission"):
             try:
-                allowed = await self.auth_subnet.check_permission(
-                    user_id=str(request.user_id),
-                    platform=request.platform,
+                from core.unified_permission import get_permission_engine
+                from webnet.AuthNet.user_mapper import UserMapper
+
+                platform = request.platform or "unknown"
+                canonical_id = UserMapper().generate_user_id(platform, str(request.user_id))
+                allowed = get_permission_engine().check(
+                    canonical_id,
+                    "agent.chat",
+                    context={"platform": platform, "group_id": request.group_id},
                 )
                 if not allowed:
                     logger.warning(f"[感知] 用户 {request.user_id} 无权限")
@@ -101,5 +107,7 @@ class PerceptionService:
                     state.skip_reason = "permission_denied"
             except Exception as e:
                 logger.warning(f"[感知] 权限检查失败: {e}")
+                state.should_skip_ai = True
+                state.skip_reason = "permission_check_failed"
 
         return state

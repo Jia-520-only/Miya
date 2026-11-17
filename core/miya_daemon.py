@@ -381,14 +381,18 @@ class MiyaDaemon:
     def get_daemon_status(self) -> Dict[str, Any]:
         """获取守护进程状态"""
         uptime = (datetime.now() - self.start_time).total_seconds() if self.start_time else 0
+        platform_stats = self._registry.get_all_stats()
+        active_platforms = [p for p in platform_stats if p.get("status") != "disabled"]
         return {
             "version": self.VERSION,
             "started": self._started,
             "start_time": self.start_time.isoformat() if self.start_time else None,
             "uptime_seconds": uptime,
             "platforms": {
-                "total": len(self._registry._platform_classes),
-                "online": len(self._registry.get_online_platforms()),
+                # Count actual platform instances/stats so generic desktop/mobile
+                # adapters are included alongside class-registered platforms.
+                "total": len(active_platforms),
+                "online": sum(1 for p in active_platforms if p.get("status") == "online"),
             },
         }
 

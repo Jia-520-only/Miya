@@ -147,13 +147,19 @@ class UnifiedPermissionEngine:
             return False
         self._reload()
 
+        user_id = str(user_id)
+        raw_user_id = user_id
+        platform_prefix = f"{platform}_" if platform else ""
+        if platform_prefix and user_id.startswith(platform_prefix):
+            raw_user_id = user_id[len(platform_prefix) :]
+
         # 精确匹配
-        if user_id in self._superadmin_ids:
+        if user_id in self._superadmin_ids or raw_user_id in self._superadmin_ids:
             return True
 
         # platform_userid 格式
         if platform:
-            check_id = f"{platform}_{user_id}"
+            check_id = f"{platform}_{raw_user_id}"
             if check_id in self._superadmin_ids:
                 return True
 
@@ -167,18 +173,19 @@ class UnifiedPermissionEngine:
                 expected = ids.get(platform, [])
                 if isinstance(expected, str):
                     expected = [expected] if expected else []
-                if str(user_id) in [str(x) for x in expected]:
+                expected_ids = [str(x) for x in expected]
+                if str(user_id) in expected_ids or raw_user_id in expected_ids:
                     return True
 
             # 旧格式兼容：platforms 列表
             platforms = info.get("platforms", [])
-            if platforms and str(user_id) == person_key:
+            if platforms and (str(user_id) == person_key or raw_user_id == person_key):
                 return True
 
         # 从 users 的 linked_to 检查
         for user in self._config.get("users", []):
             linked = user.get("linked_to", "")
-            if linked and linked == user_id:
+            if linked and linked in {user_id, raw_user_id}:
                 return True
 
         return False
@@ -215,7 +222,8 @@ class UnifiedPermissionEngine:
         self._reload()
 
         # Superadmin 拥有所有权限
-        if self.is_superadmin(user_id):
+        platform = (context or {}).get("platform", "")
+        if self.is_superadmin(user_id, platform=platform):
             return True
 
         permissions = self._get_user_permissions(user_id, context)
@@ -228,7 +236,7 @@ class UnifiedPermissionEngine:
 
         self._reload()
 
-        if self.is_superadmin(user_id):
+        if self.is_superadmin(user_id, platform=platform):
             return True
 
         cmd_config = self._config.get("command_permissions", {})
@@ -249,12 +257,12 @@ class UnifiedPermissionEngine:
 
         return True  # 非受保护命令放行
 
-    def get_role_level(self, user_id: str) -> str:
+    def get_role_level(self, user_id: str, platform: str = "") -> str:
         """获取用户角色等级"""
         if not user_id:
             return self.ROLE_USER
         self._reload()
-        if self.is_superadmin(user_id):
+        if self.is_superadmin(user_id, platform=platform):
             return self.ROLE_SUPERADMIN
         return self.ROLE_USER
 

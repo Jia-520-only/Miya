@@ -295,6 +295,177 @@ def test_tool_registry_denies_missing_identity_unless_explicitly_trusted(monkeyp
     assert trusted["allowed"] is True and trusted["trusted_internal"] is True
 
 
+def test_unified_permission_accepts_cross_platform_superadmin_ids(tmp_path):
+    import json
+
+    from core.unified_permission import UnifiedPermissionEngine
+
+    config = {
+        "permission_groups": {"Admin": {"permissions": ["*.*"]}},
+        "platform_defaults": {"weixin_ilink": ["Default"]},
+        "users": [],
+        "superadmins": {"佳": {"ids": {"weixin_ilink": ["1523878699"]}}},
+    }
+    config_path = tmp_path / "permissions.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    engine = UnifiedPermissionEngine(str(config_path))
+
+    assert engine.check(
+        "weixin_ilink_1523878699",
+        "tool.earth_checkin",
+        context={"platform": "weixin_ilink"},
+    ) is True
+
+
+def test_unified_permission_command_and_role_checks_forward_platform(tmp_path):
+    import json
+
+    from core.unified_permission import UnifiedPermissionEngine
+
+    config = {
+        "command_permissions": {"enabled": True, "commands": {"/形态": {}}},
+        "platform_defaults": {"weixin_ilink": ["Default"]},
+        "permission_groups": {"Default": {"permissions": []}},
+        "users": [],
+        "superadmins": {"佳": {"ids": {"weixin_ilink": ["1523878699"]}}},
+    }
+    config_path = tmp_path / "permissions.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    engine = UnifiedPermissionEngine(str(config_path))
+
+    user_id = "weixin_ilink_1523878699"
+    assert engine.check_command(user_id, "/形态", platform="weixin_ilink") is True
+    assert engine.get_role_level(user_id, platform="weixin_ilink") == engine.ROLE_SUPERADMIN
+
+
+def test_compat_tool_registry_subnet_preserves_platform_context():
+    from webnet.subnet_base import ToolRegistrySubnet
+
+    class _Registry:
+        tools = {}
+
+        async def execute_tool(self, _name, context, **_kwargs):
+            self.context = context
+            return "ok"
+
+    registry = _Registry()
+    subnet = ToolRegistrySubnet(registry)
+    result = __import__("asyncio").run(
+        subnet.execute_tool("sample", {}, user_id="42", platform="web")
+    )
+
+    assert result == "ok"
+    assert registry.context.platform == "web"
+
+
+def test_compat_tool_registry_subnet_accepts_legacy_memory_config():
+    from webnet.subnet_base import SubnetConfig, ToolRegistrySubnet
+
+    class _Registry:
+        tools = {}
+
+        async def execute_tool(self, _name, context, **_kwargs):
+            self.context = context
+            return "ok"
+
+    registry = _Registry()
+    config = SubnetConfig(
+        subnet_name="test",
+        subnet_id="test",
+        cognitive_memory=object(),
+    )
+    result = __import__("asyncio").run(
+        ToolRegistrySubnet(registry, config).execute_tool("sample", {}, user_id="42")
+    )
+
+    assert result == "ok"
+    assert registry.context.unified_memory is config.cognitive_memory
+
+
+def test_perception_permission_uses_unified_platform_identity(monkeypatch):
+    from hub.perception_handler import PerceptionHandler
+
+    engine = _PermissionEngine({"agent.chat"})
+    monkeypatch.setattr("core.unified_permission.get_permission_engine", lambda: engine)
+    handler = PerceptionHandler(auth_subnet=object())
+
+    allowed = __import__("asyncio").run(
+        handler.check_permission(
+            {"user_id": "42", "platform": "web", "message_type": "private"}
+        )
+    )
+
+    assert allowed is True
+    assert engine.calls == [
+        ("web_42", "agent.chat", {"platform": "web", "group_id": None})
+    ]
+
+
+@pytest.mark.asyncio
+async def test_service_perception_denies_when_unified_permission_is_missing(monkeypatch):
+    from hub.services.context import ProcessRequest, ProcessState
+    from hub.services.perception import PerceptionService
+
+    engine = _PermissionEngine(set())
+    monkeypatch.setattr("core.unified_permission.get_permission_engine", lambda: engine)
+    auth_subnet = SimpleNamespace(check_permission=lambda *_args, **_kwargs: False)
+    state = await PerceptionService(auth_subnet=auth_subnet)._check_permission(
+        ProcessRequest(content="hello", raw_perception={}, platform="web", user_id="42"),
+        ProcessState(),
+    )
+
+    assert state.should_skip_ai is True
+    assert state.skip_reason == "permission_denied"
+    assert engine.calls == [
+        ("web_42", "agent.chat", {"platform": "web", "group_id": 0})
+    ]
+
+
+def test_user_mapper_does_not_double_prefix_platform_ids():
+    from webnet.AuthNet.user_mapper import UserMapper
+
+    mapper = UserMapper()
+    assert mapper.generate_user_id("web", "web_42") == "web_42"
+
+
+def test_service_orchestrator_prefers_platform_in_message_payload():
+    from hub.services.orchestrator import MiyaOrchestrator
+
+    request = MiyaOrchestrator()._normalize_message(
+        SimpleNamespace(
+            source="web_api",
+            content={"platform": "desktop", "content": "hello", "user_id": "42"},
+        )
+    )
+
+    assert request.platform == "desktop"
+
+
+def test_daemon_status_counts_instance_platforms():
+    from datetime import datetime
+
+    from core.miya_daemon import MiyaDaemon
+
+    daemon = object.__new__(MiyaDaemon)
+    daemon.start_time = datetime.now()
+    daemon._started = True
+
+    class _Registry:
+        def get_all_stats(self):
+            return [
+                {"platform_id": "qqofficial", "status": "online"},
+                {"platform_id": "aiocqhttp", "status": "reconnecting"},
+                {"platform_id": "desktop", "status": "online"},
+                {"platform_id": "mobile", "status": "online"},
+                {"platform_id": "disabled", "status": "disabled"},
+            ]
+
+    daemon._registry = _Registry()
+    status = daemon.get_daemon_status()
+
+    assert status["platforms"] == {"total": 4, "online": 3}
+
+
 @pytest.mark.asyncio
 async def test_check_permission_tool_uses_unified_engine_and_limits_cross_user_queries(monkeypatch):
     from webnet.ToolNet.tools.auth.check_permission import CheckPermissionTool

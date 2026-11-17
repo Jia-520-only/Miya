@@ -304,6 +304,7 @@ class Scheduler:
                 "send_like_callback": getattr(self.onebot_client, "send_like", None) if self.onebot_client else None,
                 "user_id": task.data.get("target_id"),
                 "group_id": task.data.get("target_id") if task.data.get("target_type") == "group" else None,
+                "platform": task.data.get("platform", "terminal"),
                 "message_type": task.data.get("target_type", "private"),
                 "sender_name": "scheduled_task",
             }

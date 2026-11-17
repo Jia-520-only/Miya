@@ -1033,7 +1033,7 @@ class SoulGenerator:
                     try:
                         from core.unified_permission import get_permission_engine
 
-                        if get_permission_engine().is_superadmin(str(uid)):
+                        if get_permission_engine().is_superadmin(str(uid), platform=user_info.get("platform", "")):
                             is_owner = True
                     except Exception:
                         pass

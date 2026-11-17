@@ -157,7 +157,7 @@ class MiyaOrchestrator:
         """将 M-Link 消息或原始感知数据归一化为 ProcessRequest"""
         if hasattr(message, "content"):
             perception = message.content if isinstance(message.content, dict) else {"content": str(message.content)}
-            source = getattr(message, "source", "terminal")
+            source = perception.get("platform") or getattr(message, "source", "terminal")
         elif isinstance(message, dict):
             perception = message
             source = message.get("platform", message.get("source", "terminal"))

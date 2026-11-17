@@ -15,13 +15,14 @@ class FakeAIClient:
         self.reply = reply
         self.calls = []
         self.tool_schema_sizes = []
+        self.contexts = []
         self.registry = lambda: []
 
     def set_tool_registry(self, cb):
         self.registry = cb
 
     def set_tool_context(self, ctx):
-        pass
+        self.contexts.append(ctx)
 
     async def chat(self, messages=None, **kwargs):
         self.calls.append(messages)
@@ -78,8 +79,11 @@ def test_morning_cycle_runs_tools_sends_message_and_persists_state():
     # 弥娅被唤醒时能看到全套地球工具 schema
     ai: FakeAIClient = organ._ai_client
     assert ai.calls and ai.tool_schema_sizes[0] >= 30
+    assert ai.contexts[0]["trusted_internal"] is True
+    assert ai.contexts[0]["session_id"] == "earth_operator"
     # 周期结束清空工具注册，避免污染普通对话
     assert ai.registry() == []
+    assert ai.contexts[-1] == {}
     # 状态持久化: 晨间日期 + 周期数
     with open(organ.state_path, encoding="utf-8") as f:
         saved = json.load(f)

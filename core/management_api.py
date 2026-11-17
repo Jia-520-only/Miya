@@ -307,17 +307,17 @@ class ManagementAPI:
             return {"users": engine.list_users()}
 
         @app.get("/api/v1/auth/users/{user_id}")
-        async def get_user(user_id: str):
+        async def get_user(user_id: str, platform: str = ""):
             engine = self.daemon.permission_engine
             groups = engine.get_user_groups(user_id)
             perms = engine.get_user_permissions_list(user_id)
-            is_super = engine.is_superadmin(user_id)
+            is_super = engine.is_superadmin(user_id, platform=platform)
             return {
                 "user_id": user_id,
                 "groups": groups,
                 "permissions": perms,
                 "is_superadmin": is_super,
-                "role_level": engine.get_role_level(user_id),
+                "role_level": engine.get_role_level(user_id, platform=platform),
             }
 
         @app.post("/api/v1/auth/users/{user_id}/grant")

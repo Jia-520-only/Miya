@@ -134,6 +134,7 @@ class AuthSubnet(BaseSubnet):
         group_id: Optional[int] = None,
         message_type: Optional[str] = None,
         sender_name: Optional[str] = None,
+        platform: Optional[str] = None,
     ) -> str:
         """执行鉴权工具"""
         try:
@@ -144,7 +145,7 @@ class AuthSubnet(BaseSubnet):
 
             context = {
                 "user_id": user_id,
-                "platform": args.get("platform"),
+                "platform": platform or args.get("platform"),
                 "group_id": group_id,
                 "message_type": message_type,
                 "sender_name": sender_name,

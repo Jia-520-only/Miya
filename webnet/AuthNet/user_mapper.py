@@ -42,6 +42,11 @@ class UserMapper:
         Returns:
             统一格式ID: platform_original_id
         """
+        platform = str(platform or "unknown").strip()
+        original_id = str(original_id or "").strip()
+        prefix = f"{platform}_"
+        if original_id.startswith(prefix):
+            original_id = original_id[len(prefix) :]
         return f"{platform}_{original_id}"
 
     def ensure_user_exists(

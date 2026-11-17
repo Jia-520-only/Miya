@@ -726,7 +726,7 @@ class DecisionHub:
         """仅执行技术性注入检查（同步/快速），AI 检测移至并行阶段"""
         if self.security_service:
             try:
-                platform = perception.get("source", "")
+                platform = perception.get("platform", perception.get("source", ""))
                 if MiyaPlatform.requires_injection_check(platform):
                     user_id = str(perception.get("user_id", perception.get("user_id", "unknown")))
                     result = self.security_service.check(content, user_id)
@@ -748,7 +748,7 @@ class DecisionHub:
         # 1. 先检查技术性注入
         if self.security_service:
             try:
-                platform = perception.get("source", "")
+                platform = perception.get("platform", perception.get("source", ""))
                 if MiyaPlatform.requires_injection_check(platform):
                     user_id = str(perception.get("user_id", perception.get("user_id", "unknown")))
                     result = self.security_service.check(content, user_id)
@@ -766,7 +766,7 @@ class DecisionHub:
                 if not self.ai_injection_detector.is_enabled():
                     return None, None
 
-                platform = perception.get("source", "")
+                platform = perception.get("platform", perception.get("source", ""))
                 if MiyaPlatform.requires_injection_check(platform):
                     is_injection, reason = await self.ai_injection_detector.detect(content)
                     if is_injection:
@@ -1899,7 +1899,7 @@ class DecisionHub:
         sender_name = perception.get("sender_name", "用户")
         message_type = perception.get("message_type", "")
         # 兼容多种来源：source字段或platform字段
-        platform = perception.get("source", perception.get("platform", "qq"))
+        platform = perception.get("platform", perception.get("source", "qq"))
 
         logger.info(f"[决策层] 收到感知数据: {sender_name} - {content[:50]}")
 
@@ -2754,7 +2754,9 @@ class DecisionHub:
                 if not perception.get("_pending_ai_injection_check"):
                     return None
                 try:
-                    result = await self._check_ai_injection_parallel(content, perception.get("source", ""))
+                    result = await self._check_ai_injection_parallel(
+                        content, perception.get("platform", perception.get("source", ""))
+                    )
                     return result
                 except Exception:
                     return None
@@ -4522,12 +4524,16 @@ class DecisionHub:
                     "priority": 5,
                 }
 
+            # 保留创建任务时的平台，调度器执行时必须沿用同一权限域。
+            task_args["platform"] = platform
+
             # 调用ToolNet创建定时任务
             result = await self.tool_subnet.execute_tool(
                 tool_name="create_schedule_task",
                 args=task_args,
                 user_id=uid,
                 group_id=perception.get("group_id", 0),
+                platform=platform,
                 message_type=perception.get("message_type", "private"),
                 sender_name=sender_name,
             )
@@ -4713,6 +4719,7 @@ class DecisionHub:
                 if isinstance(user_id, str) and user_id.isdigit()
                 else (user_id if isinstance(user_id, int) else 0),
                 group_id=perception.get("group_id", 0),
+                platform=platform,
                 message_type=perception.get("message_type", "private"),
                 sender_name=sender_name,
                 at_list=perception.get("at_list", []),
