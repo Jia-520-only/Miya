@@ -8,15 +8,14 @@ from datetime import datetime
 from typing import Any
 
 from memory.context_identity import ContextIdentity, effective_group_id, platform_family
+from memory.event_time import clock_context, local_datetime, time_label
 
 logger = logging.getLogger(__name__)
 
 
 def timestamp_value(value: Any) -> float:
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
-    except (ValueError, TypeError, OverflowError, OSError):
-        return 0.0
+    parsed = local_datetime(value)
+    return parsed.timestamp() if parsed else 0.0
 
 
 @dataclass
@@ -40,7 +39,7 @@ class ContextSnapshot:
     errors: list[str] = field(default_factory=list)
 
     def prompt_text(self, max_chars: int = 8000) -> str:
-        parts = []
+        parts = ["【弥娅时间感知】\n" + clock_context()]
         if self.messages:
             lines = []
             for message in self.messages[-12:]:
@@ -59,7 +58,19 @@ class ContextSnapshot:
                     speaker = f"群成员 {speaker}"
                 else:
                     speaker = sender_name or message.role
-                lines.append(f"- [{message.timestamp}] {speaker}: {message.content[:350]}")
+                source = f"群聊 {metadata.get('group_id')}" if is_group else "私聊"
+                privacy = metadata.get("source_privacy") or metadata.get("privacy_level")
+                private_source = (
+                    metadata.get("conversation_scope") == "private"
+                    or metadata.get("visibility") == "private"
+                    or privacy == "private"
+                    or metadata.get("do_not_share") is True
+                )
+                privacy_label = "[私聊来源]" if private_source else ""
+                lines.append(
+                    f"- [{time_label(message.timestamp)}][{source}]{privacy_label} "
+                    f"{speaker}: {message.content[:350]}"
+                )
             parts.append("【近期对话】\n" + "\n".join(lines))
         parts.extend(part for part in (
             self.memory_context, self.working_context, self.pending_context,
@@ -82,7 +93,17 @@ class ContextAssembler:
             for session_id in identity.session_ids:
                 try:
                     messages = await self.history_manager.get_history(session_id, limit=limit)
-                    sources.extend(("cache", message) for message in messages or [])
+                    for message in messages or []:
+                        metadata = dict(getattr(message, "metadata", {}) or {})
+                        cached_group = identity.group_id if session_id.startswith(f"group_{identity.group_id}_") else ""
+                        metadata.setdefault("group_id", cached_group)
+                        metadata.setdefault("conversation_scope", "group" if cached_group else "private")
+                        metadata.setdefault("platform_user_id", identity.platform_user_id)
+                        metadata.setdefault("canonical_user_id", identity.user_id)
+                        metadata.setdefault("platform", identity.platform)
+                        sources.append(("cache", ContextMessage(
+                            message.role, message.content, str(message.timestamp), metadata,
+                        )))
                 except Exception as exc:
                     logger.warning("[ContextAssembler] 会话缓存读取失败 session=%s: %s", session_id, exc)
         try:
@@ -92,10 +113,14 @@ class ContextAssembler:
             platforms = sorted(MiyaPlatform.qq_family()) if platform_family(identity.platform) == "qq" else [identity.platform]
             if identity.group_id and not identity.explicit_session:
                 history = await get_dialogue_history(group_id=identity.group_id, platforms=platforms, limit=limit)
+                user_history = await get_dialogue_history(user_id=identity.user_id, limit=limit)
+                history = list({id(message): message for message in [*history, *user_history]}.values())
             elif identity.explicit_session:
                 history = await get_dialogue_history(session_id=identity.session_id, limit=limit)
+                user_history = await get_dialogue_history(user_id=identity.user_id, limit=limit)
+                history = list({id(message): message for message in [*history, *user_history]}.values())
             else:
-                history = await get_dialogue_history(user_id=identity.user_id, private_only=True, limit=limit)
+                history = await get_dialogue_history(user_id=identity.user_id, limit=limit)
             sources.extend(("unified", message) for message in history or [])
         except Exception as exc:
             logger.warning("[ContextAssembler] 统一对话读取失败: %s", exc)
@@ -136,7 +161,7 @@ class ContextAssembler:
                         "sender_name": str(item.get("sender_name") or ""),
                         "conversation_scope": "group",
                         "memory_event_id": (
-                            f"{identity.platform}:{identity.group_id}:{message_id}" if message_id else ""
+                            f"{platform_family(identity.platform)}:{identity.group_id}:{message_id}" if message_id else ""
                         ),
                         "source": "message_archive",
                     }
@@ -151,20 +176,19 @@ class ContextAssembler:
         for origin, message in sources:
             metadata = dict(getattr(message, "metadata", {}) or {})
             group = effective_group_id(message)
+            metadata.setdefault("group_id", group)
+            metadata.setdefault("platform", getattr(message, "platform", "") or identity.platform)
+            metadata.setdefault("conversation_scope", "group" if group else "private")
             if identity.group_id:
-                # Cache records came from the exact group session IDs above, so
-                # older entries without group metadata are still trusted there.
-                # Unified-memory records must explicitly belong to this group;
-                # otherwise a private record could leak into a group prompt.
-                if origin != "cache" and group != identity.group_id:
+                # The user timeline spans private chats and other groups. Other
+                # members enter through the current group's query/archive only.
+                sender = str(getattr(message, "user_id", "") or metadata.get("canonical_user_id") or "")
+                if group != identity.group_id and sender not in identity.aliases:
                     continue
-            elif group:
-                # Private conversations must never inherit a group message.
-                continue
             role = str(getattr(message, "role", "user"))
             content = str(getattr(message, "content", ""))
             stamp = str(getattr(message, "timestamp", "") or getattr(message, "created_at", ""))
-            event_id = metadata.get("memory_event_id") or metadata.get("delivery_id")
+            event_id = metadata.get("memory_event_id") or metadata.get("delivery_id") or getattr(message, "id", "")
             key = (str(event_id), role)
             if event_id and key in seen_ids:
                 continue

@@ -175,7 +175,7 @@ class ConversationHistoryManager:
         message = ConversationMessage(
             role=role,
             content=content,
-            timestamp=datetime.now().isoformat(),
+            timestamp=(metadata or {}).get("event_timestamp") or datetime.now().isoformat(),
             session_id=session_id,
             images=images,
             agent_id=agent_id,

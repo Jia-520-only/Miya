@@ -77,96 +77,24 @@ def get_permission(key: str, default: Any = None) -> Any:
 
 
 def _get_default_config() -> Dict[str, Any]:
-    """获取默认配置"""
+    """配置文件不可用时的最小回退；完整文案统一维护在 text_config.json。"""
     return {
         "greetings": {
-            "hello": [
-                "你好呀~我是{name}，很高兴认识你！(｡♥‿♥｡)",
-                "你好！我是{name}，欢迎~",
-                "你好，我是{name}。",
-            ],
-            "hi": ["嗨！有什么可以帮你的吗？", "在呢，在呢~", "你好呀！"],
+            "hello": ["你好，我是{name}。"],
+            "hi": ["嗯，我在。"],
             "keywords": ["你好", "hi", "hello", "嗨", "您好", "哈喽", "在吗", "hey"],
         },
         "farewells": {
-            "bye": ["再见！期待下次见面~", "拜拜，下次再聊~", "再见！有需要随时叫我~"],
+            "bye": ["嗯，下次聊。"],
             "keywords": ["再见", "拜拜", "bye", "退出", "exit", "quit"],
-        },
-        "status_tags": {
-            "default": "[{emotion}]",
-            "happy": "[开心]",
-            "sad": "[低落]",
-            "excited": "[兴奋]",
-            "calm": "[平静]",
-            "thinking": "[思考中]",
         },
         "error_messages": {
             "system_error": "系统出了点问题。我记下了，等会再试。",
-            "tool_failed": "工具执行失败了，不过别担心，我会继续帮你想办法~",
-            "no_response": "抱歉，我现在不知道该说什么...",
-            "permission_denied": "这个我暂时做不到呢...",
-        },
-        "affirmations": {
-            "keywords": [
-                "好的",
-                "可以",
-                "没问题",
-                "我知道了",
-                "明白了",
-                "收到",
-                "yes",
-                "y",
-                "是",
-                "确认",
-            ],
-            "responses": ["收到！", "好的~", "明白！"],
-        },
-        "negations": {
-            "keywords": ["不", "不要", "算了", "取消", "no", "n", "否", "取消"],
-            "responses": ["好的，那就这样~", "明白，不勉强你~", "好的，取消啦"],
+            "no_response": "我还没想好怎么说。",
         },
         "welcome": {
-            "terminal": ["欢迎回来~", "我的创造者，欢迎回来。", "主人，欢迎回来！"],
-            "qq": ["我又上线啦~", "我回来啦！"],
-        },
-        "personality_responses": {
-            "warm": {
-                "greeting_end": ["很高兴认识你！(｡♥‿♥｡)", "见到你真开心~"],
-                "help": ["有什么需要帮忙的吗？", "我在的~"],
-            },
-            "neutral": {
-                "greeting_end": ["你好。", "有何贵干？"],
-                "help": ["请说。", "什么事？"],
-            },
-            "playful": {
-                "greeting_end": ["呦呼！", "嘿！"],
-                "help": ["有啥好玩的吗？", "来呀来呀~"],
-            },
-        },
-        "tofu_messages": {
-            "enabled": True,
-            "messages": [
-                "你知道我为什么感冒了吗？因为对你完全没有抵抗力~",
-                "你好像我的资金，让我心神荡漾~",
-                "我的择偶标准只有一个：像你一样就行~",
-            ],
-        },
-        "active_chat": {
-            "morning_greeting": ["早上好！新的一天要开心哦~", "早安！✨"],
-            "night_greeting": ["晚安！祝你好梦~", "晚安~好梦🌙"],
-            "random_topics": ["今天过得怎么样？", "有什么有趣的事吗？", "在想什么呢~"],
-        },
-        "emoji_responses": {
-            "happy": ["😊", "😄", "✨", "🌸"],
-            "sad": ["😢", "💧", "🌧️"],
-            "excited": ["🎉", "✨", "💖"],
-            "thinking": ["🤔", "💭"],
-            "love": ["💕", "💖", "❤️"],
-        },
-        "reminder_messages": {
-            "daily_summary": "今日对话总结：{count}条对话，{topics}个话题",
-            "memory_saved": "这段对话我已经记住啦~",
-            "user_left": "{name}离开啦，我会想他的~",
+            "terminal": ["欢迎回来~"],
+            "qq": ["我回来啦！"],
         },
     }
 
@@ -223,7 +151,7 @@ def get_greeting(name: str = "弥娅", style: str = "default") -> str:
     style_responses = config.get("greetings", {}).get(style, config.get("greetings", {}).get("hello", []))
 
     if not style_responses:
-        return f"你好！我是{name}，欢迎~"
+        return get_text("greetings.hello", "嗯，我在。").format(name=name)
 
     response = random.choice(style_responses)
     return response.format(name=name)
@@ -290,7 +218,7 @@ def get_welcome_message(platform: str = "terminal") -> str:
     messages = get_text(f"welcome.{platform}", [])
     if isinstance(messages, list) and messages:
         return random.choice(messages)
-    return "欢迎回来~"
+    return get_text("welcome.terminal", "欢迎回来~")
 
 
 def get_status_tag(emotion: str = "default") -> str:
@@ -375,16 +303,13 @@ def get_emoji_sending_response(success: bool = True) -> str:
 
 def get_emoji_fallback_response(emoji_name: str) -> str:
     """获取表情包回退响应"""
-    return get_text(
-        "emoji_responses.fallback",
-        f"虽然我无法发送'{emoji_name}'表情包，但我可以用文字表达我的心情：开心",
-    ).format(emoji_name=emoji_name)
+    return get_text("emoji_responses.fallback").format(emoji_name=emoji_name)
 
 
 def get_schedule_response(success: bool, result: str = "") -> str:
     """获取定时任务响应"""
     if success:
-        return get_text("schedule_responses.success", "好的，我已经为你设置好了定时任务！").format(result=result)
+        return get_text("schedule_responses.success").format(result=result)
     return get_text("schedule_responses.failed").format(result=result)
 
 

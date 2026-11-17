@@ -17,7 +17,8 @@ from typing import Any, Dict, List, Optional
 from config.config_utils import get_text
 from core.token_utils import count_message_tokens
 from memory import MemoryLevel, get_memory_bus, load_memory_config
-from memory.context_identity import ContextIdentity
+from memory.context_identity import ContextIdentity, platform_family
+from memory.event_time import event_timestamp
 from memory.historian import get_historian
 
 logger = logging.getLogger(__name__)
@@ -104,18 +105,47 @@ class MemoryManager:
             user_id = identity.user_id or user_id
             group_id = identity.group_id
             session_id = identity.session_id
+            timestamp = event_timestamp(perception)
+            message_id = str(perception.get("message_id") or perception.get("event_id") or "")
+            event_metadata = {
+                **identity.metadata(),
+                "sender_name": sender_name,
+                "speaker_user_id": identity.user_id,
+                "message_type": message_type,
+                "event_timestamp": timestamp,
+                "source_timestamp": str(perception.get("timestamp") or perception.get("time") or ""),
+                "source_platform": platform,
+                "source_group_id": group_id,
+                "source_message_id": message_id,
+                "memory_event_id": (
+                    f"{platform_family(platform)}:{group_id}:{message_id}" if message_id else ""
+                ),
+            }
+            from memory.privacy import privacy_metadata
+
+            event_metadata = privacy_metadata(content, event_metadata)
+            perception["_memory_privacy"] = event_metadata.get("privacy_level", "")
 
             logger.info(f"[记忆管理器] 收到消息: {content[:50]}...")
 
             # 【时间对照】记录交互时间戳
             if self.time_tracker:
                 try:
+                    from memory.time_comparison import TimeComparisonEngine
+
+                    # Capture the previous interaction BEFORE recording this
+                    # request; otherwise every return looks like "just now".
+                    perception["_interaction_time_context"] = TimeComparisonEngine(self.time_tracker).compare(
+                        user_id, platform, group_id=group_id,
+                    ).full_context
                     self.time_tracker.record_interaction(
                         user_id=user_id,
                         platform=platform,
                         role="user",
                         session_start=False,
                         message_preview=content[:50],
+                        group_id=group_id,
+                        timestamp=timestamp,
                     )
                 except Exception:
                     pass
@@ -132,7 +162,7 @@ class MemoryManager:
             # 存储到 MemoryNet 对话历史
             if self.memory_net and self.memory_net.conversation_history:
                 metadata = {
-                    **identity.metadata(),
+                    **event_metadata,
                     "user_id": user_id,
                     "group_id": group_id,
                     "message_type": message_type,
@@ -165,11 +195,9 @@ class MemoryManager:
                 platform=platform,
                 group_id=group_id,
                 metadata={
-                    **identity.metadata(),
-                    "sender_name": sender_name,
-                    "message_type": message_type,
-                    "group_id": group_id,
+                    **event_metadata,
                 },
+                created_at=timestamp,
             )
 
             # Group utterances are shareable across contexts only when the
@@ -206,11 +234,11 @@ class MemoryManager:
                         break
                 if not is_duplicate:
                     memory_metadata = {
-                        **identity.metadata(),
+                        **event_metadata,
                         "source": "auto_extract",
                         "info_type": detected_info_type,
                     }
-                    if group_id:
+                    if is_owner and detected_info_type in group_shareable_types and explicit_self_fact:
                         # Keep provenance without making the memory group-scoped.
                         memory_metadata.update({
                             "visibility": "personal",
@@ -274,6 +302,20 @@ class MemoryManager:
             group_id = identity.group_id
             session_id = identity.session_id
 
+            from memory.privacy import privacy_metadata
+
+            response_metadata = identity.metadata()
+            response_metadata.update({
+                "speaker": "弥娅",
+                "source_platform": platform,
+                "source_group_id": group_id,
+                "source_timestamp": str(perception.get("timestamp") or perception.get("time") or ""),
+            })
+            response_metadata = privacy_metadata(
+                str(perception.get("content") or "") + "\n" + response,
+                {**response_metadata, "source_privacy": perception.get("_memory_privacy", "")},
+            )
+
             if self.time_tracker:
                 try:
                     self.time_tracker.record_interaction(
@@ -282,6 +324,7 @@ class MemoryManager:
                         role="assistant",
                         session_start=False,
                         message_preview=response[:50],
+                        group_id=group_id,
                     )
                 except Exception:
                     pass
@@ -298,7 +341,7 @@ class MemoryManager:
                 platform=platform,
                 group_id=group_id,
                 metadata={
-                    **identity.metadata(),
+                    **response_metadata,
                     "sender_name": "弥娅",
                     "message_type": message_type,
                     "group_id": group_id,
@@ -323,7 +366,7 @@ class MemoryManager:
             if self.memory_net and self.memory_net.conversation_history:
                 try:
                     metadata = {
-                        **identity.metadata(),
+                        **response_metadata,
                         "user_id": user_id,
                         "group_id": group_id,
                         "message_type": message_type,

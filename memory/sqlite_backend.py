@@ -321,16 +321,23 @@ class SQLiteBackend(MemoryBackend):
             if query.scope_user_ids or query.scope_group_id:
                 public = f"({visibility_expression} IN ('public', 'global') OR (user_id = 'global' AND {group_expression} = '' AND {visibility_expression} NOT IN ('private', 'owner', 'group')))"
                 if query.scope_group_id:
-                    scoped = f"({group_expression} = ? AND {visibility_expression} NOT IN ('private', 'owner')"
+                    scope_parts = []
+                    if query.scope_user_ids:
+                        placeholders = ", ".join(["?"] * len(query.scope_user_ids))
+                        scope_parts.append(f"(user_id IN ({placeholders}) AND {visibility_expression} != 'owner')")
+                        params.extend(query.scope_user_ids)
+                    group_scoped = f"({group_expression} = ? AND {visibility_expression} NOT IN ('private', 'owner', 'personal')"
                     params.append(query.scope_group_id)
                     if query.scope_platforms:
                         placeholders = ", ".join(["?"] * len(query.scope_platforms))
-                        scoped += f" AND platform IN ({placeholders})"
+                        group_scoped += f" AND platform IN ({placeholders})"
                         params.extend(query.scope_platforms)
-                    scoped += ")"
+                    group_scoped += ")"
+                    scope_parts.append(group_scoped)
+                    scoped = "(" + " OR ".join(scope_parts) + ")"
                 else:
                     placeholders = ", ".join(["?"] * len(query.scope_user_ids))
-                    scoped = f"user_id IN ({placeholders})"
+                    scoped = f"(user_id IN ({placeholders}) AND {visibility_expression} != 'owner')"
                     params.extend(query.scope_user_ids)
                 conditions.append(f"({public} OR {scoped})")
             if query.min_priority > 0:

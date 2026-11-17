@@ -14,6 +14,8 @@ from memory.context_identity import matches_context_scope
 from memory.core import JsonBackend, MiyaMemoryCore
 from memory.models import MemoryItem, MemoryLevel
 from memory.models import MemoryQuery
+from memory.time_comparison import TimeComparisonEngine
+from memory.time_tracker import TimeTracker
 
 
 def test_context_identity_uses_one_group_session_shape():
@@ -42,6 +44,54 @@ async def test_memory_manager_writes_group_id_to_bus():
     call = manager._bus.store_dialogue.call_args.kwargs
     assert call["group_id"] == "group-1"
     assert call["session_id"] == "group_group-1_user-1"
+
+
+@pytest.mark.asyncio
+async def test_memory_manager_preserves_source_event_time():
+    manager = object.__new__(MemoryManager)
+    manager.memory_net = None
+    manager.time_tracker = None
+    manager._bus = SimpleNamespace(store_dialogue=AsyncMock())
+
+    await manager.store_user_message({
+        "content": "历史群消息",
+        "user_id": "user-1",
+        "group_id": "group-1",
+        "platform": "qq",
+        "message_type": "group",
+        "message_id": "event-1",
+        "timestamp": "2026-10-03T10:02:00+08:00",
+    })
+
+    call = manager._bus.store_dialogue.call_args.kwargs
+    expected = datetime.fromisoformat("2026-10-03T10:02:00+08:00").astimezone().replace(tzinfo=None).isoformat()
+    assert call["created_at"] == expected
+    assert call["metadata"]["event_timestamp"] == expected
+
+
+def test_time_tracker_keeps_cross_platform_and_group_clocks(tmp_path):
+    tracker = TimeTracker(tmp_path)
+    tracker.record_interaction("user-1", "qq", timestamp="2026-10-01T10:00:00+08:00")
+    tracker.record_interaction(
+        "user-1", "aiocqhttp", group_id="group-1", timestamp="2026-10-02T10:00:00+08:00",
+    )
+
+    assert tracker.get_profile("user-1").last_interaction_ts == datetime.fromisoformat(
+        "2026-10-02T10:00:00+08:00"
+    ).timestamp()
+    assert tracker.get_group_profile("group-1", "qq").last_interaction
+
+
+def test_group_time_context_has_absolute_date_and_scope(tmp_path):
+    tracker = TimeTracker(tmp_path)
+    tracker.record_interaction(
+        "user-1", "aiocqhttp", group_id="group-1", timestamp="2026-10-01T10:00:00+08:00",
+    )
+    context = TimeComparisonEngine(tracker).compare("user-1", "qq", group_id="group-1").full_context
+
+    assert "当前时间:" in context
+    assert "交互范围: 本群(group-1)" in context
+    assert "上次交互:" in context
 
 
 @pytest.mark.asyncio
@@ -96,10 +146,10 @@ async def test_context_assembler_merges_cache_and_unified_store():
 
 
 @pytest.mark.asyncio
-async def test_context_assembler_does_not_leak_private_history_into_group():
+async def test_context_assembler_unifies_private_history_into_group():
     private = SimpleNamespace(
         id="private", role="user", content="私聊内容",
-        timestamp="2026-10-03T10:00:00", metadata={}, group_id="",
+        timestamp="2026-10-03T10:00:00", metadata={}, group_id="", user_id="user-1",
     )
     group = SimpleNamespace(
         id="group", role="user", content="群聊内容",
@@ -116,7 +166,7 @@ async def test_context_assembler_does_not_leak_private_history_into_group():
             ContextIdentity.resolve("user-1", "group-1", "qq"), limit=10,
         )
 
-    assert [message.content for message in messages] == ["群聊内容"]
+    assert [message.content for message in messages] == ["私聊内容", "群聊内容"]
 
 
 @pytest.mark.asyncio
@@ -176,6 +226,19 @@ def test_group_context_keeps_speaker_identity_in_prompt_formatting():
     assert "用户：这是群友说的话" not in text
 
 
+def test_recent_dialogue_prompt_keeps_private_source_marker():
+    from memory.context_assembler import ContextMessage, ContextSnapshot
+
+    snapshot = ContextSnapshot(ContextIdentity.resolve("user-1", "group-1", "qq"))
+    snapshot.messages = [ContextMessage(
+        "user", "普通措辞的历史摘要", "2026-11-17T10:00:00", {
+            "conversation_scope": "private", "source_privacy": "private",
+        },
+    )]
+
+    assert "[私聊来源]" in snapshot.prompt_text()
+
+
 @pytest.mark.asyncio
 async def test_context_assembler_reads_onebot_archive_for_qq_alias():
     async def query_messages(**kwargs):
@@ -222,7 +285,7 @@ def test_memory_query_cache_key_is_scoped_by_conversation():
     assert core._get_cache_key(private) != core._get_cache_key(other_platform)
 
 
-def test_memory_context_scope_keeps_group_history_private_and_shares_personal_memories():
+def test_memory_recall_unifies_own_group_experiences_and_shares_personal_memories():
     user_scope = MemoryQuery(scope_user_ids=["owner"])
     group_scope = MemoryQuery(scope_user_ids=["owner"], scope_group_id="group-1")
     group_only = MemoryItem(
@@ -234,7 +297,7 @@ def test_memory_context_scope_keeps_group_history_private_and_shares_personal_me
         metadata={"visibility": "personal", "group_id": ""},
     )
 
-    assert not matches_context_scope(group_only, user_scope)
+    assert matches_context_scope(group_only, user_scope)
     assert matches_context_scope(personal, user_scope)
     assert matches_context_scope(group_only, group_scope)
     assert matches_context_scope(personal, group_scope)

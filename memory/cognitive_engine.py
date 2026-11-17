@@ -22,6 +22,8 @@ from memory.date_boundary import (
     get_date_boundary,
     time_decay_by_boundary,
 )
+from memory.context_identity import effective_group_id
+from memory.event_time import local_datetime, time_label
 
 logger = logging.getLogger("Miya.CognitiveEngine")
 
@@ -440,7 +442,7 @@ class CognitiveEngine:
         # 检查是否是询问个人信息的模式（从配置文件加载）
         is_personal_query = any(pattern in user_input_lower for pattern in self.personal_patterns)
 
-        if (need_anchor_search or is_personal_query) and not group_id:
+        if (need_anchor_search or is_personal_query) and not group_id and not temporal_range:
             logger.info("[认知引擎] 检测到个人信息查询，优先搜索记忆锚点")
 
             # 搜索记忆锚点（全局检索，从配置文件加载的标签）
@@ -512,6 +514,20 @@ class CognitiveEngine:
                     all_memories.extend(fallback_results)
                     break  # 找到一个匹配就够了
 
+        if not all_memories and temporal_range:
+            # "昨天在群里聊了什么" need not contain words or tags from the
+            # messages themselves. Fall back to the scoped timeline, preserving
+            # both the user/group boundary and the requested date range.
+            timeline_query = MemoryQuery(
+                levels=query.levels, start_time=temporal_range.start,
+                end_time=temporal_range.end, limit=limit * 3,
+                sort_by="created_at", sort_order="desc",
+                scope_platforms=query.scope_platforms,
+            )
+            all_memories = await self.memory_core.retrieve(
+                timeline_query, user_id=user_id, group_id=group_id,
+            )
+
         if not all_memories:
             return []
 
@@ -521,7 +537,7 @@ class CognitiveEngine:
             relevance = await self._calculate_relevance(memory, current_topics, keywords, user_input)
             boost = self._get_relevance_boost(memory.id, [m.id for m in all_memories])
             relevance += boost
-            if relevance > 0.1:
+            if relevance > 0.1 or temporal_range:
                 scored_memories.append((memory, relevance))
 
         scored_memories.sort(key=lambda x: x[1], reverse=True)
@@ -739,22 +755,38 @@ class CognitiveEngine:
 
         has_temporal = parse_temporal(user_input) is not None
 
+        def provenance(memory: MemoryItem) -> str:
+            metadata = memory.metadata or {}
+            group = effective_group_id(memory) or str(metadata.get("source_group_id") or "")
+            source = f"群聊 {group}" if group else "个人记忆"
+            if memory.role == "assistant":
+                speaker = "弥娅说"
+            elif memory.role == "user":
+                name = metadata.get("sender_name") or metadata.get("sender") or memory.user_id
+                speaker = f"{name}说"
+            else:
+                speaker = str(metadata.get("speaker_user_id") or memory.user_id)
+            privacy = metadata.get("source_privacy") or metadata.get("privacy_level")
+            private_source = (
+                metadata.get("conversation_scope") == "private"
+                or metadata.get("visibility") == "private"
+                or privacy == "private"
+                or metadata.get("do_not_share") is True
+            )
+            privacy_label = " / 私聊来源" if private_source else ""
+            return f"[{source} / {speaker}{privacy_label}]"
+
         if has_temporal:
             # 时间范围查询 → 按天分组，显示时间线
             by_date = {}
             for memory in memories:
-                date_str = memory.created_at[:10]  # YYYY-MM-DD
-                time_str = memory.created_at[11:16] if len(memory.created_at) > 10 else ""
-                age_label = (memory.metadata or {}).get("age_label", "")
+                dt = local_datetime(memory.created_at)
+                date_str = dt.strftime("%Y-%m-%d") if dt else "时间未知"
+                time_str = dt.strftime("%H:%M:%S") if dt else ""
                 if date_str not in by_date:
                     by_date[date_str] = []
                 entry = f"[{time_str}]" if time_str else ""
-                role_tag = ""
-                if memory.role == "user":
-                    role_tag = f"{getattr(memory, 'sender_name', '') or '用户'}说: "
-                elif memory.role == "assistant":
-                    role_tag = "弥娅说: "
-                by_date[date_str].append(f"    {entry} {role_tag}{memory.content[:120]}")
+                by_date[date_str].append(f"    {entry} {provenance(memory)} {memory.content[:120]}")
 
             for date_str, entries in sorted(by_date.items()):
                 lines.append(f"【{date_str}】")
@@ -765,13 +797,9 @@ class CognitiveEngine:
             # 普通查询 → 按时序展示，使用日期边界标签
             for memory in memories:
                 age_label = (memory.metadata or {}).get("age_label", "")
-                time_str = memory.created_at[11:16] if len(memory.created_at) > 10 else ""
-                date_label = (
-                    age_label if age_label else (memory.created_at[:10] if len(memory.created_at) >= 10 else "")
-                )
-                ts = f"[{date_label} {time_str}]" if date_label else ""
+                ts = f"[{time_label(memory.created_at)}{' / ' + age_label if age_label else ''}]"
                 content_preview = memory.content.replace("\n", " ")[:150]
-                lines.append(f"- {ts} {content_preview}")
+                lines.append(f"- {ts} {provenance(memory)} {content_preview}")
 
         lines.append("")
         lines.append(footer_text)

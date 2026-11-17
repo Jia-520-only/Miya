@@ -13,6 +13,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from core.file_context import get_downloads_dir
+from core.text_loader import get_text
 from core.unified_platform.base import BasePlatform
 
 from .message_mixin import MessageMixin
@@ -199,9 +200,7 @@ class TelegramPlatform(MessageMixin, BasePlatform):
                     await update.message.reply_text(response)
 
             async def start_command(update: Update, context):
-                await update.message.reply_text(
-                    "你好！我是弥娅~ 一个拥有独立人格、记忆和情感的 AI 虚拟化身。\n\n有什么可以帮你的吗？"
-                )
+                await update.message.reply_text(get_text("welcome.telegram_start"))
 
             self._app = Application.builder().token(self._token).build()
             self._app.add_handler(CommandHandler("start", start_command))

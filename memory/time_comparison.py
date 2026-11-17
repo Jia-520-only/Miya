@@ -20,6 +20,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from memory.event_time import clock_context
+
 logger = logging.getLogger(__name__)
 
 
@@ -75,6 +77,7 @@ class TimePerception:
     daily_streak: int
 
     all_platforms_seen: List[str]
+    group_id: str = ""
 
     full_context: str = ""
 
@@ -98,6 +101,7 @@ class TimeComparisonEngine:
         user_id: str,
         current_platform: str,
         session_start_ts: Optional[float] = None,
+        group_id: str = "",
     ) -> TimePerception:
         """生成完整时间感知
 
@@ -117,7 +121,7 @@ class TimeComparisonEngine:
         daily_streak = 0
 
         if self._tracker:
-            profile = self._tracker.get_profile(user_id)
+            profile = self._tracker.get_group_profile(group_id, current_platform) if group_id else self._tracker.get_profile(user_id)
             if profile:
                 last_ts = profile.last_interaction_ts
                 last_platform = profile.last_platform
@@ -165,6 +169,7 @@ class TimeComparisonEngine:
             is_new_session=elapsed > 300,
             daily_streak=daily_streak,
             all_platforms_seen=all_platforms,
+            group_id=group_id,
         )
 
         perception.full_context = self.build_raw_context(perception)
@@ -215,10 +220,10 @@ class TimeComparisonEngine:
             hours = int(elapsed_seconds / 3600)
             label = labels.get("hours", "{hours}小时前聊过").format(hours=hours)
             return label, f"{hours}小时前", "hours"
-        elif elapsed_seconds <= thresholds["today"]:
+        elif last_dt.date() == now.date():
             label = labels.get("today", "今天早些时候聊过").format(period=period)
             return label, "今天", "today"
-        elif elapsed_seconds <= thresholds["yesterday"]:
+        elif (now.date() - last_dt.date()).days == 1:
             label = labels.get("yesterday", "昨天{period}聊过").format(period=period)
             return label, "昨天", "yesterday"
         elif elapsed_seconds <= thresholds["this_week"]:
@@ -331,16 +336,19 @@ class TimeComparisonEngine:
         last_dt_str = ""
         if p.elapsed_seconds > 0 and p.elapsed_seconds != float("inf"):
             last_dt = datetime.fromtimestamp(datetime.now().timestamp() - p.elapsed_seconds)
-            last_dt_str = last_dt.strftime("%m-%d %H:%M")
+            last_dt_str = last_dt.strftime("%Y-%m-%d %H:%M:%S")
 
         facts = [
-            f"当前时间: {datetime.now().strftime('%H:%M')} ({p.time_period_simple})",
+            clock_context(),
         ]
+
+        scope = f"本群({p.group_id})" if p.group_id else "该用户（跨平台）"
+        facts.append(f"交互范围: {scope}")
 
         if last_dt_str:
             facts.append(f"上次交互: {last_dt_str} (在{last_name})")
         elif p.elapsed_seconds == float("inf"):
-            facts.append("上次交互: 无记录 (初次对话)")
+            facts.append("上次交互: 暂无时间记录（不代表初次见面）")
 
         if p.elapsed_seconds > 0 and p.elapsed_seconds != float("inf"):
             facts.append(f"距今间隔: {p.elapsed_short}")

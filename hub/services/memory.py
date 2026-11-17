@@ -48,15 +48,21 @@ class MemoryService:
             # 回退：直接调用 MemoryBus
             try:
                 from memory import get_memory_bus
+                from memory.context_identity import ContextIdentity
+                from memory.event_time import event_timestamp
+
+                identity = ContextIdentity.resolve(request.user_id, request.group_id, request.platform, request.session_id)
                 bus = await get_memory_bus()
                 await bus.store_dialogue(
                     content=request.content,
                     user_id=str(request.user_id),
-                    session_id=request.session_id or request.target_id,
+                    session_id=identity.session_id,
                     platform=request.platform,
                     role="user",
                     group_id=str(request.group_id) if request.is_group else None,
                     tags=["dialogue", "user_input"],
+                    metadata={**identity.metadata(), "sender_name": perception.get("sender_name", "用户")},
+                    created_at=event_timestamp(perception),
                 )
                 logger.debug(f"[记忆] 用户消息已存储: {request.content[:30]}")
             except Exception as e:
@@ -81,15 +87,19 @@ class MemoryService:
         if not stored:
             try:
                 from memory import get_memory_bus
+                from memory.context_identity import ContextIdentity
+
+                identity = ContextIdentity.resolve(request.user_id, request.group_id, request.platform, request.session_id)
                 bus = await get_memory_bus()
                 await bus.store_dialogue(
                     content=state.response,
                     user_id=str(request.user_id),
-                    session_id=request.session_id or request.target_id,
+                    session_id=identity.session_id,
                     platform=request.platform,
                     role="assistant",
                     group_id=str(request.group_id) if request.is_group else None,
                     tags=["dialogue", "assistant_response"],
+                    metadata={**identity.metadata(), "sender_name": "弥娅"},
                 )
                 stored = True
                 logger.debug(f"[记忆] 响应已存储: {state.response[:30]}")

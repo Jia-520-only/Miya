@@ -41,7 +41,11 @@ async def execute(args: List[str], context: Any) -> str:
             return get_text_message("cognitive_memory", "group_profile_private")
     else:
         entity_type = "user"
-        entity_id = target_id or str(context.sender_id)
+        entity_id = target_id or str(
+            getattr(context, "canonical_user_id", "")
+            or getattr(context, "user_id", "")
+            or context.sender_id
+        )
 
     try:
         from utils.render import render_profile_to_image, get_profile_image_path

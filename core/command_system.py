@@ -44,6 +44,7 @@ class CommandContext:
     admin_qq_list: List[int] = field(default_factory=list)
     platform: str = ""
     permission_level: Optional[str] = None
+    canonical_user_id: str = ""
 
     def check_permission(self, required: str) -> bool:
         if required == "public":

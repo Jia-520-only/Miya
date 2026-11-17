@@ -110,7 +110,7 @@ class InjectionHook(ABC):
 
     def cache_key(self, ctx: HookContext) -> str:
         session = ctx.session_id or ctx.user_id or "global"
-        raw = f"{self.name}:{session}:{ctx.platform}:{ctx.is_first_turn}"
+        raw = f"{self.name}:{session}:{ctx.user_id}:{ctx.group_id}:{ctx.platform}:{ctx.is_first_turn}"
         return hashlib.md5(raw.encode()).hexdigest()[:12]
 
     async def build(self, ctx: HookContext) -> str: ...

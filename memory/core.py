@@ -1004,6 +1004,7 @@ class MiyaMemoryCore:
         subject: str = "",
         predicate: str = "",
         obj: str = "",
+        created_at: Optional[str] = None,
     ) -> str:
         """
         存储记忆 - 统一入口
@@ -1087,6 +1088,9 @@ class MiyaMemoryCore:
             group_id = ""
 
         # 创建记忆
+        from memory.event_time import local_datetime
+
+        event_dt = local_datetime(created_at)
         memory = MemoryItem(
             content=content,
             level=level,
@@ -1108,6 +1112,7 @@ class MiyaMemoryCore:
             subject=subject,
             predicate=predicate,
             obj=obj,
+            created_at=event_dt.isoformat() if event_dt else "",
         )
 
         # 双写事务包装：JSON 权威 + SQLite 并行（查询引擎）
@@ -1459,8 +1464,8 @@ class MiyaMemoryCore:
         """
         检索记忆 - 全局检索 + 上下文加权
 
-        用户身份跨平台展开；群聊仅召回对应群及公开记忆。
-        私密用户记忆和所有者视觉不会作为群聊上下文。
+        用户身份跨平台展开，私聊/群聊共享该用户的原文与经历；
+        群聊还包含当前群成员的公开发言，保留原始聊天来源。
         """
         # 【V4.1.12】身份别名展开：同一人的各平台 ID 全部命中
         effective_user_id = user_id

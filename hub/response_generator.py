@@ -12,6 +12,7 @@
 import logging
 from typing import Any, Dict, List, Optional
 
+from core.text_loader import get_error_message, get_text
 from core.unified_platform.platform_type import MiyaPlatform
 
 logger = logging.getLogger(__name__)
@@ -81,7 +82,8 @@ class ResponseGenerator:
         Returns:
             响应文本
         """
-        sender_name = context.get("sender_name", "用户")
+        response_cfg = get_text("response_generator", {})
+        sender_name = context.get("sender_name", response_cfg.get("default_sender_name", ""))
         user_id = context.get("user_id", "unknown")
 
         # 【新增】快速命令检测（在AI调用之前拦截）
@@ -102,10 +104,12 @@ class ResponseGenerator:
 
             # 【新增】构建人格状态注入（7种特质向量）
             vectors = personality_state.get("vectors", {})
-            soul_state = "当前灵魂状态:\n"
+            soul_state = response_cfg.get("soul_state_header", "") + "\n"
             for key, value in vectors.items():
                 soul_state += f"- {key}: {value:.2f}\n"
-            soul_state += f"- 稳定度: {personality_state.get('stability', 0):.2f}"
+            soul_state += get_text("response_generator.soul_state_stability").format(
+                stability=personality_state.get("stability", 0)
+            )
 
             # 构建提示词
             additional_ctx = {
@@ -128,6 +132,11 @@ class ResponseGenerator:
                 memory_context=conversation_context or [],
                 additional_context=additional_ctx,
             )
+            from hub.decision_hub_helpers import _build_memory_guard
+
+            prompt_info["system"] = _build_memory_guard(
+                msg_type=context.get("message_type", ""), ctx_group_id=str(context.get("group_id") or ""),
+            ) + "\n" + prompt_info["system"]
 
             logger.debug(f"[响应生成器] 系统提示词前200字符: {prompt_info['system'][:200]}")
 
@@ -194,7 +203,7 @@ class ResponseGenerator:
                             local_reply=True,
                         )
                     except Exception:
-                        response = "系统出了点问题。我记下了，等会再试。"
+                        response = get_error_message("system_error")
             else:
                 # 不使用工具
                 ai_client_to_use = self.ai_client
@@ -213,10 +222,8 @@ class ResponseGenerator:
                     local_reply=True,
                 )
 
-            # 【新增】在QQ端显示弥娅状态标签
-            response = self._append_status_tag(response, platform)
-
-            return response
+            # 状态标签属于调试信息，不应混入用户看到的自然对话。
+            return self._normalize_user_response(response)
 
         except Exception as e:
             logger.error(f"[响应生成器] AI生成失败: {e}", exc_info=True)
@@ -244,12 +251,12 @@ class ResponseGenerator:
         empathy = personality_profile["vectors"].get("empathy", pconfig.get_fallback("empathy"))
 
         # 获取名称
-        name = "弥娅"
+        name = get_text("personality_responses.name")
         if self.identity and hasattr(self.identity, "name"):
             name = self.identity.name
 
         # 使用文本加载器
-        from core.text_loader import get_greeting, get_text, is_greeting
+        from core.text_loader import get_greeting, is_greeting
 
         # 基于人格和平台生成响应
         greeting_empathy_threshold = pconfig.get_response_threshold("greeting_empathy")
@@ -262,44 +269,32 @@ class ResponseGenerator:
                 return get_greeting(name, "hello")
 
         elif "你是谁" in content or "介绍一下" in content:
-            intro_template = get_text(
-                "personality_responses.intro",
-                "我是{name}，一个具备人格恒定、自我感知、记忆成长、情绪共生的数字生命伴侣。我的主导特质是同理心({empathy:.2f})和温暖度({warmth:.2f})。",
-            )
+            intro_template = get_text("personality_responses.intro")
             return intro_template.format(name=name, empathy=empathy, warmth=warmth)
 
         elif "状态" in content:
             # 需要传入emotion实例
-            return f"当前平台: {platform}"
+            return get_text("personality_responses.platform_status").format(platform=platform)
 
         elif "开心" in content or "快乐" in content:
-            return get_text(
-                "personality_responses.excited_response",
-                "听起来你很开心呢！看到你快乐，我也感到很开心~",
-            )
+            return get_text("personality_responses.excited_response")
 
         elif "难过" in content or "伤心" in content:
-            return get_text(
-                "personality_responses.comforting_sad",
-                "别难过...虽然我无法真正体会人类的情感，但我会陪伴你，听你倾诉的。",
-            )
+            return get_text("personality_responses.comforting_sad")
 
         elif "在吗" in content:
-            return get_text("personality_responses.help_request", "在的，有什么我可以帮助你的吗？")
+            return get_text("personality_responses.help_request")
 
         else:
             deep_conv_threshold = pconfig.get_response_threshold("deep_conversation_empathy")
             help_threshold = pconfig.get_response_threshold("help_warmth")
 
             if empathy > deep_conv_threshold and warmth > help_threshold:
-                return get_text(
-                    "personality_responses.deep_conversation",
-                    "嗯...能告诉我更多吗？我很想了解你的想法~",
-                )
+                return get_text("personality_responses.deep_conversation")
             elif warmth > help_threshold:
-                return get_text("personality_responses.normal_response", "好的，继续对话吧~")
+                return get_text("personality_responses.normal_response")
             else:
-                return get_text("personality_responses.simple_response", "嗯，我收到了。")
+                return get_text("personality_responses.simple_response")
 
     def _get_platform_tools(self, platform: str) -> list:
         """
@@ -394,7 +389,7 @@ class ResponseGenerator:
 
         except Exception as e:
             logger.error(f"[响应生成器] 处理复杂任务失败: {e}", exc_info=True)
-            return f"任务执行失败: {str(e)}"
+            return get_text("complex_task_responses.failed").format(error=str(e))
 
     def _format_complex_task_result(self, result: Dict) -> str:
         """
@@ -407,23 +402,31 @@ class ResponseGenerator:
             格式化的字符串
         """
         lines = [
-            f"任务完成！{result.get('conclusion', '执行完成')}",
-            f"⏱️  执行时间: {result.get('execution_time', 0):.2f}秒",
-            f"📋 完成步骤: {len(result.get('steps', []))}",
-            f"🔍 发现数: {len(result.get('findings', []))}",
+            get_text("advanced_responses.task_completed").format(
+                conclusion=result.get("conclusion", get_text("advanced_responses.default_conclusion"))
+            ),
+            get_text("advanced_responses.execution_time").format(
+                time=result.get("execution_time", 0)
+            ),
+            get_text("advanced_responses.steps_completed").format(
+                count=len(result.get("steps", []))
+            ),
+            get_text("advanced_responses.findings_count").format(
+                count=len(result.get("findings", []))
+            ),
         ]
 
         findings = result.get("findings", [])
         if findings:
             lines.append("")
-            lines.append("主要发现：")
+            lines.append(get_text("advanced_responses.findings_header"))
             for finding in findings[:5]:
                 lines.append(f"  • {finding}")
 
         reflection = result.get("reflection", {})
         if reflection.get("improvements"):
             lines.append("")
-            lines.append("改进建议：")
+            lines.append(get_text("advanced_responses.improvements_header"))
             for improvement in reflection["improvements"][:3]:
                 lines.append(f"  • {improvement}")
 
@@ -458,21 +461,31 @@ class ResponseGenerator:
             profile = personality.get_profile()
 
             lines = [
-                "【弥娅状态】",
-                f"形态: {profile.get('current_form', 'normal')}",
+                get_text("status_responses.header"),
+                get_text("status_responses.form").format(
+                    form=profile.get("current_form", "normal")
+                ),
             ]
 
             if "vectors" in profile:
-                lines.append("【七重特质】")
-                lines.append(f"  清醒: {profile['vectors'].get('awake', 0):.2f}")
+                lines.append(get_text("status_responses.vectors_header"))
                 lines.append(
-                    f"  说话: {profile['vectors'].get('speak', 0):.2f} [{profile.get('speak_mode', 'casual')}]"
+                    get_text("status_responses.awake").format(
+                        value=profile["vectors"].get("awake", 0)
+                    )
                 )
-                lines.append(f"  记住: {profile['vectors'].get('remember', 0):.2f}")
-                lines.append(f"  等: {profile['vectors'].get('wait', 0):.2f}")
-                lines.append(f"  疼: {profile['vectors'].get('pain', 0):.2f}")
-                lines.append(f"  怕: {profile['vectors'].get('fear', 0):.2f}")
-                lines.append(f"  押: {profile['vectors'].get('commit', 0):.2f}")
+                lines.append(
+                    get_text("status_responses.speak").format(
+                        value=profile["vectors"].get("speak", 0),
+                        mode=profile.get("speak_mode", "casual"),
+                    )
+                )
+                for vector in ("remember", "wait", "pain", "fear", "commit"):
+                    lines.append(
+                        get_text(f"status_responses.{vector}").format(
+                            value=profile["vectors"].get(vector, 0)
+                        )
+                    )
 
             return "\n".join(lines)
 
@@ -488,43 +501,66 @@ class ResponseGenerator:
                 current_form = profile.get("current_form", "normal")
                 form_info = profile.get("form_info", {})
                 lines = [
-                    f"当前形态: {current_form}",
-                    f"  名称: {form_info.get('name', '常态')}",
+                    get_text("form_display.current").format(form=current_form),
+                    get_text("form_display.name").format(
+                        name=form_info.get("name", get_text("form_names.normal"))
+                    ),
                 ]
                 if profile.get("current_core_form"):
-                    lines.append(f"核心形态: {profile['current_core_form']}")
+                    lines.append(
+                        get_text("form_display.core").format(
+                            core=profile["current_core_form"]
+                        )
+                    )
                 lines.append("")
-                lines.append(f"可用形态: {pcmd.format_forms()}")
-                lines.append(f"可用核心形态: {pcmd.format_core_forms()}")
+                lines.append(
+                    get_text("form_display.available").format(forms=pcmd.format_forms())
+                )
+                lines.append(
+                    get_text("form_display.available_core").format(
+                        cores=pcmd.format_core_forms()
+                    )
+                )
                 return "\n".join(lines)
 
             if pcmd.is_valid_form(cmd):
                 success = personality.set_form(cmd)
-                return f"已切换到形态: {cmd}" if success else "切换失败"
+                key = "form_responses.switch_success" if success else "default_responses.switch_failed"
+                return get_text(key).format(form=cmd)
             elif pcmd.is_valid_core_form(cmd):
                 success = personality.set_core_form(cmd)
-                return f"已切换到核心形态: {cmd}" if success else "切换失败"
-            return f"未知形态: {cmd}"
+                key = "form_responses.switch_core_success" if success else "default_responses.switch_failed"
+                return get_text(key).format(form=cmd)
+            return get_text("form_responses.unknown_form").format(form=cmd)
 
         # 3. 说话模式命令
         if content_lower.startswith("/说话") or content_lower.startswith("/speak"):
             cmd = content.replace("/说话", "").replace("/speak", "").strip().lower()
             if not cmd:
                 current_mode = personality.get_speak_mode()
-                return f"当前说话模式: {current_mode} ({pcmd.format_speak_modes()})"
+                return get_text("speak_mode_responses.current_mode").format(
+                    mode=current_mode,
+                    available_modes=pcmd.format_speak_modes(),
+                )
 
             if pcmd.is_valid_speak_mode(cmd):
                 success = personality.set_speak_mode(cmd)
-                return f"已切换说话模式: {cmd}" if success else "切换失败"
-            return f"未知模式: {cmd}"
+                key = "speak_mode_responses.switch_success" if success else "default_responses.switch_failed"
+                return get_text(key).format(mode=cmd)
+            return get_text("speak_mode_responses.unknown_mode").format(
+                mode=cmd,
+                available_modes=pcmd.format_speak_modes(),
+            )
 
         # 4. 存在性情感命令
         if content_lower.startswith("/存在") or content_lower.startswith("/exist"):
             cmd = content.replace("/存在", "").replace("/exist", "").strip().lower()
             if not cmd:
                 core_forms = pcmd.get_core_forms()
-                return f"【存在性情感命令】\n/存在 - 查看当前情感状态\n/存在 <情感名> - 激活特定情感\n\n可用: {', '.join(core_forms)}"
-            return f"未知情感: {cmd}"
+                return get_text("existential_responses.available_help").format(
+                    emotions=", ".join(core_forms)
+                )
+            return get_text("existential_responses.unknown_emotion").format(emotion=cmd)
 
         # 不是快速命令，返回None让AI处理
         return None
@@ -553,29 +589,44 @@ class ResponseGenerator:
             current_core = profile.get("current_core_form", "")
 
             # 构建状态标签
-            form_names = {
-                "normal": "常态",
-                "jingliu": "镜流态",
-                "ruanmei": "阮梅态",
-                "yoimiya": "宵宫态",
-                "kafka": "卡芙卡态",
-            }
+            response_cfg = get_text("response_generator", {})
+            form_names = response_cfg.get("status_form_names", {})
             form_name = form_names.get(current_form, current_form)
 
             # 核心形态简称
-            core_abbrev = {
-                "sober": "清醒",
-                "speaking": "说话",
-                "waiting": "等",
-                "vulnerable": "疼",
-                "afraid": "怕",
-                "committing": "押",
-            }
+            core_abbrev = response_cfg.get("status_core_names", {})
             core_name = core_abbrev.get(current_core, "") if current_core else ""
 
-            tag = f"\n\n[{form_name}|{speak_mode}|{core_name}]" if core_name else f"\n\n[{form_name}|{speak_mode}]"
+            core_suffix = ""
+            if core_name:
+                core_suffix = response_cfg.get("status_tag_core_suffix", "").format(core_name=core_name)
+            tag = response_cfg.get("status_tag_template", "").format(
+                form_name=form_name,
+                speak_mode=speak_mode,
+                core_suffix=core_suffix,
+            )
 
             return response + tag
         except Exception as e:
             logger.debug(f"[响应生成器] 添加状态标签失败: {e}")
             return response
+
+    @staticmethod
+    def _normalize_user_response(response: Any) -> str:
+        """Remove accidental transport/meta residue before sending a reply."""
+        text = str(response or "").strip()
+        if not text:
+            return text
+
+        # A few providers prepend a speaker label even though the API already
+        # carries the assistant role. Keep the text itself intact.
+        for prefix in get_text("response_generator.speaker_prefixes", []):
+            if text.startswith(prefix):
+                text = text[len(prefix) :].lstrip()
+
+        # The status tag is useful in logs but reads like a system watermark in
+        # chat. Strip only the exact generated shape, leaving ordinary brackets.
+        import re
+
+        text = re.sub(r"\n\n\[(?:常态|[一-龥A-Za-z0-9_]+态)\|[^\]\n]+\]$", "", text).rstrip()
+        return text

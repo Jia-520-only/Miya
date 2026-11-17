@@ -640,6 +640,12 @@ async def _dispatch_slash_command(
             platform=getattr(platform, "platform_id", ""),
             permission_level="user",
         )
+        try:
+            from memory.identity_resolver import get_identity_resolver
+
+            ctx.canonical_user_id = get_identity_resolver().canonicalize(str(user_id))
+        except Exception:
+            pass
 
         # 注入平台能力
         if ctx.platform in {"qq", "onebot", "aiocqhttp"}:

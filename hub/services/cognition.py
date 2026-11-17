@@ -62,7 +62,10 @@ class CognitionService:
                     message=request.content,
                     history=[],
                     ai_client=None,
-                    user_info={"user_id": str(request.user_id), "name": request.sender_name},
+                    user_info={
+                        "user_id": str(request.user_id), "name": request.sender_name,
+                        "group_id": request.group_id, "is_group": request.is_group, "platform": request.platform,
+                    },
                     personality_info=self._get_personality_info(),
                     cognitive_memory=None,
                 )

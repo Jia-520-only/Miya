@@ -298,7 +298,10 @@ async def test_queue_acceptance_and_claim_are_not_confirmed_delivery(spine, deli
 
 
 @pytest.mark.asyncio
-async def test_failed_send_can_retry_without_falsifying_first_outcome(spine, delivery_hub):
+async def test_failed_send_can_retry_without_falsifying_first_outcome(spine, delivery_hub, monkeypatch):
+    # This test exercises transport retry semantics; the privacy gate is covered
+    # separately and must be explicitly approved here.
+    monkeypatch.setattr("memory.privacy._reply_reviewer", AsyncMock(return_value=True))
     sender = AsyncMock(side_effect=[False, True])
     delivery_hub.platform_registry = SimpleNamespace(get=lambda _: SimpleNamespace(
         is_online=True, send_group_message=sender,
@@ -311,6 +314,27 @@ async def test_failed_send_can_retry_without_falsifying_first_outcome(spine, del
     assert [event.payload["result"]["status"] for event in events] == ["failed", "sent"]
     assert events[0].payload["action_id"] != events[1].payload["action_id"]
     assert events[0].correlation_id == events[1].correlation_id == "retry"
+
+
+@pytest.mark.asyncio
+async def test_rejected_proactive_message_can_be_reviewed_again(spine, delivery_hub, monkeypatch):
+    reviewer = AsyncMock(side_effect=[False, True])
+    monkeypatch.setattr("memory.privacy._reply_reviewer", reviewer)
+    sender = AsyncMock(return_value=True)
+    delivery_hub.platform_registry = SimpleNamespace(get=lambda _: SimpleNamespace(
+        is_online=True, send_group_message=sender,
+    ))
+
+    first = await delivery_hub._dispatch_proactive_message(
+        "你好呀", "group", chat_type="group", platform="qqofficial", delivery_id="privacy-retry",
+    )
+    second = await delivery_hub._dispatch_proactive_message(
+        "你好呀", "group", chat_type="group", platform="qqofficial", delivery_id="privacy-retry",
+    )
+
+    assert first.status == "rejected"
+    assert second.status == "sent"
+    sender.assert_awaited_once()
 
 
 @pytest.mark.asyncio

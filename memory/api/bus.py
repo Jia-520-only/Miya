@@ -167,6 +167,7 @@ class MemoryBus:
         subject: str = "",
         predicate: str = "",
         obj: str = "",
+        created_at: Optional[str] = None,
     ) -> str:
         """通用存储 — 自动分类 + JSON/SQLite 双写"""
         core = await self._ensure_core()
@@ -191,6 +192,7 @@ class MemoryBus:
             subject=subject,
             predicate=predicate,
             obj=obj,
+            created_at=created_at,
         )
 
     async def store_dialogue(
@@ -203,6 +205,7 @@ class MemoryBus:
         group_id: Optional[str] = None,
         tags: Optional[List[str]] = None,
         metadata: Optional[Dict] = None,
+        created_at: Optional[str] = None,
     ) -> str:
         """存储对话记录"""
         return await self.store(
@@ -216,6 +219,7 @@ class MemoryBus:
             tags=tags,
             group_id=group_id or "",
             metadata=metadata,
+            created_at=created_at,
         )
 
     async def store_important(
@@ -353,8 +357,6 @@ class MemoryBus:
             query=req.query,
             user_id=req.user_id or None,
             group_id=req.group_id or None,
-            session_id=req.session_id or None,
-            platform=req.platform if req.platform and req.platform != "unknown" else None,
             tags=req.tags,
             level=req.level,
             levels=req.levels,
@@ -363,6 +365,14 @@ class MemoryBus:
             start_time=req.start_time,
             end_time=req.end_time,
         )
+
+        # Session/platform describe the current entry point. Recall spans the
+        # same person's entries; only current-group members need platform scope.
+        if req.group_id and req.platform and req.platform != "unknown":
+            from core.unified_platform.platform_type import MiyaPlatform
+            from memory.context_identity import platform_family
+
+            q.scope_platforms = sorted(MiyaPlatform.qq_family()) if platform_family(req.platform) == "qq" else [req.platform]
 
         core = await self._ensure_core()
         memories = await core.retrieve(q)

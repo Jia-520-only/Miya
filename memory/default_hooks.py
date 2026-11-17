@@ -46,6 +46,9 @@ class IdentityHook(InjectionHook):
                 anchors = json.load(f)
 
             facts = [a.get("fact", "") for a in anchors if a.get("fact")]
+            # The current sharing preference supersedes legacy anchor wording
+            # that treated every ordinary preference as an absolute secret.
+            facts.append("记忆统一保留，普通日常由我按场合自主判断；亲密、涩涩与私密信息知道但不向旁人透露。")
             if facts:
                 return "【弥娅身份与原则】\n" + "\n".join(f"- {fact}" for fact in facts)
         except Exception as e:
@@ -67,7 +70,7 @@ class UserProfileHook(InjectionHook):
         super().__init__("user_profile_hook")
 
     async def build(self, ctx: HookContext) -> str:
-        if not ctx.user_id or ctx.group_id:
+        if not ctx.user_id:
             return ""
 
         lines = [f"【关于 {ctx.user_id} 的事情】"]

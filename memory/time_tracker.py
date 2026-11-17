@@ -19,6 +19,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from memory.context_identity import normalize_group_id, platform_family
+from memory.event_time import local_datetime
+
 logger = logging.getLogger(__name__)
 
 
@@ -62,6 +65,7 @@ class TimeTracker:
         self._lock_file = self._data_dir / "time_tracker.lock"
 
         self._profiles: Dict[str, UserTimeProfile] = {}
+        self._group_profiles: Dict[str, UserTimeProfile] = {}
         self._dirty = False
         self._last_save = 0.0
         self._save_interval = 30.0
@@ -91,6 +95,8 @@ class TimeTracker:
                         daily_counts=raw.get("daily_counts", {}),
                     )
                     self._profiles[uid] = profile
+                for key, raw in data.get("group_profiles", {}).items():
+                    self._group_profiles[key] = UserTimeProfile(**raw)
         except Exception as e:
             logger.warning("[TimeTracker] 加载失败: %s", e)
             self._profiles = {}
@@ -110,6 +116,7 @@ class TimeTracker:
                     "updated_at": datetime.now().isoformat(),
                     "profile_count": len(self._profiles),
                     "profiles": {uid: asdict(p) for uid, p in self._profiles.items()},
+                    "group_profiles": {key: asdict(p) for key, p in self._group_profiles.items()},
                 }
                 tmp_path = self._file_path.with_suffix(".tmp")
                 with open(tmp_path, "w", encoding="utf-8") as f:
@@ -124,9 +131,12 @@ class TimeTracker:
             logger.warning("[TimeTracker] 保存失败: %s", e)
 
     def _get_or_create(self, user_id: str) -> UserTimeProfile:
-        uid = str(user_id)
+        from memory.identity_resolver import get_identity_resolver
+
+        uid = get_identity_resolver().canonicalize(str(user_id))
         if uid not in self._profiles:
-            self._profiles[uid] = UserTimeProfile(user_id=uid)
+            previous = self.get_profile(uid)
+            self._profiles[uid] = UserTimeProfile(**{**asdict(previous), "user_id": uid}) if previous else UserTimeProfile(user_id=uid)
         return self._profiles[uid]
 
     def record_interaction(
@@ -136,13 +146,28 @@ class TimeTracker:
         role: str = "user",
         session_start: bool = False,
         message_preview: str = "",
+        group_id: str = "",
+        timestamp: Optional[str] = None,
     ):
         """记录一次交互"""
-        uid = str(user_id)
-        profile = self._get_or_create(uid)
-        now = time.time()
-        now_iso = datetime.now().isoformat()
-        today = datetime.now().strftime("%Y-%m-%d")
+        event_dt = local_datetime(timestamp) or datetime.now()
+        now = event_dt.timestamp()
+        now_iso = event_dt.isoformat()
+        self._update_profile(self._get_or_create(user_id), platform, now, now_iso, session_start)
+        group_id = normalize_group_id(group_id)
+        if group_id:
+            key = f"{platform_family(platform)}:{group_id}"
+            profile = self._group_profiles.setdefault(key, UserTimeProfile(user_id=key))
+            self._update_profile(profile, platform, now, now_iso, session_start)
+        self._dirty = True
+        self._save()
+
+    @staticmethod
+    def _update_profile(profile: UserTimeProfile, platform: str, now: float, now_iso: str, session_start: bool):
+        today = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+        # Replayed history must never move the latest interaction backwards.
+        if now < profile.last_interaction_ts:
+            return
 
         if not profile.first_interaction:
             profile.first_interaction = now_iso
@@ -180,7 +205,7 @@ class TimeTracker:
         if profile.last_active_date != today:
             if profile.last_active_date:
                 last_date = datetime.strptime(profile.last_active_date, "%Y-%m-%d")
-                delta = (datetime.now() - last_date).days
+                delta = (datetime.fromtimestamp(now).date() - last_date.date()).days
                 if delta == 1:
                     profile.daily_streak += 1
                 elif delta > 1:
@@ -189,25 +214,29 @@ class TimeTracker:
                 profile.daily_streak = 1
             profile.last_active_date = today
 
-        self._dirty = True
-        self._save()
-
     def get_profile(self, user_id: str) -> Optional[UserTimeProfile]:
-        return self._profiles.get(str(user_id))
+        from memory.identity_resolver import get_identity_resolver
+
+        aliases = get_identity_resolver().expand(str(user_id))
+        profiles = [self._profiles[alias] for alias in aliases if alias in self._profiles]
+        return max(profiles, key=lambda profile: profile.last_interaction_ts, default=None)
+
+    def get_group_profile(self, group_id: str, platform: str) -> Optional[UserTimeProfile]:
+        return self._group_profiles.get(f"{platform_family(platform)}:{normalize_group_id(group_id)}")
 
     def get_all_profiles(self) -> Dict[str, UserTimeProfile]:
         return dict(self._profiles)
 
     def get_last_interaction_time(self, user_id: str) -> float:
-        profile = self._profiles.get(str(user_id))
+        profile = self.get_profile(user_id)
         return profile.last_interaction_ts if profile else 0.0
 
     def get_last_interaction_platform(self, user_id: str) -> str:
-        profile = self._profiles.get(str(user_id))
+        profile = self.get_profile(user_id)
         return profile.last_platform if profile else "unknown"
 
     def get_platform_timeline(self, user_id: str) -> Dict[str, Dict]:
-        profile = self._profiles.get(str(user_id))
+        profile = self.get_profile(user_id)
         return dict(profile.platform_timeline) if profile else {}
 
     def flush(self):

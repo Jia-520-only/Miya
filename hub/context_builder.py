@@ -27,6 +27,7 @@ import logging
 import json
 import asyncio
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from core.token_utils import count_message_tokens
@@ -79,6 +80,7 @@ class ContextBuilder:
         is_deep_discussion: bool = False,
         group_id: str = "",
         platform: str = "unknown",
+        current_message_id: str = "",
     ) -> ContextAllocation:
         if not consumers:
             consumers = [
@@ -95,6 +97,10 @@ class ContextBuilder:
 
         raw_messages = await self._load_messages(
             session_id, user_id, max_needed, group_id=group_id, platform=platform,
+        )
+        raw_messages = self._exclude_current_message(
+            raw_messages, current_input=current_input, current_message_id=current_message_id,
+            group_id=group_id, platform=platform,
         )
 
         # 行动回执是独立经历，不伪装成已发送的助手对话。
@@ -159,6 +165,40 @@ class ContextBuilder:
             allocation.slices[consumer.consumer] = self._allocate_with_evidence(raw_messages, evidence_messages, consumer)
 
         return allocation
+
+    @staticmethod
+    def _exclude_current_message(
+        messages: List[Any], *, current_input: str, current_message_id: str,
+        group_id: str, platform: str,
+    ) -> List[Any]:
+        """History ends before the current turn, which is supplied separately."""
+        from memory.context_identity import platform_family
+        from memory.event_time import local_datetime
+
+        expected_event_id = ""
+        if current_message_id:
+            expected_event_id = (
+                f"{platform_family(platform)}:{group_id}:{current_message_id}"
+            )
+        for index in range(len(messages) - 1, -1, -1):
+            message = messages[index]
+            metadata = getattr(message, "metadata", {}) or {}
+            if expected_event_id and metadata.get("memory_event_id") == expected_event_id:
+                return messages[:index] + messages[index + 1:]
+
+        # Older history sources may not retain event IDs. Only drop a matching
+        # latest entry recorded during this turn; preserve earlier repeats.
+        if current_input:
+            now = datetime.now().astimezone().replace(tzinfo=None)
+            for index in range(len(messages) - 1, -1, -1):
+                message = messages[index]
+                if getattr(message, "role", "") != "user" or getattr(message, "content", "") != current_input:
+                    continue
+                stamp = local_datetime(getattr(message, "timestamp", ""))
+                if stamp and abs((now - stamp).total_seconds()) <= 120:
+                    return messages[:index] + messages[index + 1:]
+                break
+        return messages
 
     def _allocate_with_evidence(self, messages, evidence, consumer: ConsumerRequest) -> ContextSlice:
         # 证据有独立的小额预算，保留大部分对话容量和最新用户消息。

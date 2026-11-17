@@ -571,29 +571,96 @@ def test_miya_shop_custom_items_full_lifecycle():
     assert store.delete_miya_shop_item("miya_whisper") is False
 
 
-def test_earth_shop_management_tool_executes_via_toolnet():
-    """弥娅的商城管理工具经 ToolNet 注册表真实执行 (不再返回 工具系统未初始化)"""
+@pytest.mark.parametrize("action", ["list", "create"])
+@pytest.mark.parametrize(
+    ("tool_context", "allowed"),
+    [
+        pytest.param({"platform": "terminal", "user_id": "shop_manager"}, True, id="authorized"),
+        pytest.param({"platform": "terminal", "trusted_internal": True}, True, id="miya-internal"),
+        pytest.param({"platform": "terminal", "user_id": "visitor"}, False, id="unauthorized"),
+        pytest.param({}, False, id="anonymous"),
+    ],
+)
+def test_earth_shop_management_tool_executes_via_toolnet(tmp_path, monkeypatch, tool_context, allowed, action):
+    """真实执行商城工具和权限检查；测试身份与存档均隔离于用户数据。"""
     import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import Mock
 
+    from core import ai_client, earth_online_store, unified_permission
     from core.ai_client import BaseAIClient
 
-    class _FakeCall:
-        class function:
-            name = "earth_manage_miya_shop"
-            arguments = '{"action": "list"}'
-        id = "call_shop"
+    permission_path = tmp_path / "permissions.json"
+    permission_path.write_text(json.dumps({
+        "permission_groups": {
+            "ShopManager": {"permissions": ["tool.earth_manage_miya_shop"]},
+            "Default": {"permissions": []},
+        },
+        "users": [{"user_id": "terminal_shop_manager", "permission_groups": ["ShopManager"]}],
+    }), encoding="utf-8")
+    engine = unified_permission.UnifiedPermissionEngine(str(permission_path))
+    monkeypatch.setattr(unified_permission, "get_permission_engine", lambda: engine)
+    monkeypatch.setattr(ai_client, "_toolnet_subnet", None)
+
+    store = EarthOnlineStore(db_path=str(tmp_path / "earthonline.db"))
+    get_store = Mock(return_value=store)
+    monkeypatch.setattr(earth_online_store, "get_earth_store", get_store)
+    call = SimpleNamespace(
+        function=SimpleNamespace(
+            name="earth_manage_miya_shop",
+            arguments=json.dumps({"action": action, "item_key": "test_shop_item", "name": "测试商品"}),
+        ),
+        id="call_shop",
+    )
 
     async def _run():
         client = BaseAIClient(api_key="test", model="test")
-        _, result = await client._execute_tool_call(_FakeCall(), {})
+        _, result = await client._execute_tool_call(call, tool_context)
         return result
 
     result = asyncio.run(_run())
     assert "未初始化" not in str(result)
-    assert "弥娅商城 · 管理视图" in str(result)
+    custom_keys = {item["key"] for item in store.list_miya_shop_managed() if item.get("is_custom")}
+    if allowed:
+        assert ("弥娅商城 · 管理视图" if action == "list" else "已上架新商品") in str(result)
+        get_store.assert_called_once()
+        assert ("test_shop_item" in custom_keys) is (action == "create")
+    else:
+        assert "权限不足" in str(result)
+        get_store.assert_not_called()
+        assert "test_shop_item" not in custom_keys
 
 
 # ── v17: 路径隔离 / 流水 / 体力恢复 / 睡眠 / 抽卡 / 日常 / 纪念日 / 纪行 ──
+
+
+@pytest.mark.asyncio
+async def test_configured_owner_and_miya_have_all_earth_tool_permissions(monkeypatch):
+    from core import unified_permission
+    from core.earth_online_operator import MiyaEarthOperatorOrgan
+    from hub.platform_tools import PlatformToolsManager
+    from webnet.ToolNet.base import ToolContext
+    from webnet.ToolNet.registry import ToolRegistry
+
+    config_path = pathlib.Path(__file__).resolve().parents[1] / "config" / "permissions.json"
+    engine = unified_permission.UnifiedPermissionEngine(str(config_path))
+    monkeypatch.setattr(unified_permission, "get_permission_engine", lambda: engine)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    contexts = [ToolContext(platform=platform, user_id=raw_id)
+                for platform, raw_ids in config["superadmins"]["佳"]["ids"].items()
+                for raw_id in raw_ids]
+    assert contexts
+    contexts.append(ToolContext(platform="terminal", trusted_internal=True, session_id="earth_operator"))
+
+    names = set(PlatformToolsManager.EARTH_TOOLS)
+    schema = MiyaEarthOperatorOrgan._earth_tool_schema()
+    assert schema
+    names.update(entry["function"]["name"] for entry in schema)
+    registry = ToolRegistry()
+    for context in contexts:
+        for name in sorted(names):
+            permission = await registry._check_tool_permission(name, context)
+            assert permission["allowed"], (context.platform, context.user_id, name, permission)
 
 
 def test_store_paths_follow_db_directory():

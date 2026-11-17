@@ -62,6 +62,7 @@ from hub.decision_hub_helpers import (  # noqa: E402
     _build_integrated_status,
     _build_memory_guard,
     _build_spine_status_prompt,
+    _format_reply_context,
     _get_emotion_guidance,
     _is_reminder_request,
     _load_strategy_descriptions,
@@ -415,16 +416,21 @@ class DecisionHub:
         except Exception as e:
             logger.debug(f"[时间感知] 初始化失败: {e}")
 
-    def _get_temporal_awareness(self, user_id: str = "", platform: str = "") -> str:
+    def _get_temporal_awareness(
+        self, user_id: str = "", platform: str = "", group_id: str = "", interaction_context: str = "",
+    ) -> str:
         """构建时间感知文本（含时间对照）"""
-        try:
-            if not hasattr(self, "_birth_data") or not self._birth_data:
-                return ""
-            birth = datetime.fromisoformat(self._birth_data["created_at"])
-            days = (datetime.now() - birth).days
-            uptime = datetime.now() - self._started_at if hasattr(self, "_started_at") else None
+        from memory.event_time import clock_context
 
-            parts = [f"弥娅已陪伴佳 {days} 天（诞生于 {birth.strftime('%Y-%m-%d')}）"]
+        clock = clock_context()
+        try:
+            birth_data = getattr(self, "_birth_data", {}) or {}
+            parts = [clock]
+            if birth_data.get("created_at"):
+                birth = datetime.fromisoformat(birth_data["created_at"])
+                days = (datetime.now() - birth).days
+                parts.append(f"弥娅已陪伴佳 {days} 天（诞生于 {birth.strftime('%Y-%m-%d')}）")
+            uptime = datetime.now() - self._started_at if hasattr(self, "_started_at") else None
             if uptime:
                 h = int(uptime.total_seconds() // 3600)
                 m = int((uptime.total_seconds() % 3600) // 60)
@@ -471,9 +477,8 @@ class DecisionHub:
                     learner = get_pattern_learner()
                     engine.set_tracker(tracker)
                     learner.set_tracker(tracker)
-                    perception = engine.compare(user_id, platform)
-                    if perception and perception.full_context:
-                        raw_facts = perception.full_context
+                    raw_facts = interaction_context or engine.compare(user_id, platform, group_id=group_id).full_context
+                    if raw_facts:
                         parts.append(f"\n[时间事实]\n{raw_facts}")
                     # 模式学习者
                     peak_desc = learner.get_peak_hours_description(user_id)
@@ -485,7 +490,7 @@ class DecisionHub:
                 except Exception as e:
                     logger.debug(f"[时间感知] TimeComparison 失败: {e}")
 
-            last_active = self._birth_data.get("last_active_at")
+            last_active = birth_data.get("last_active_at")
             if last_active:
                 try:
                     gap = datetime.now() - datetime.fromisoformat(last_active)
@@ -495,7 +500,7 @@ class DecisionHub:
                     pass
             return " | ".join(parts)
         except Exception:
-            return ""
+            return clock + (f"\n[时间事实]\n{interaction_context}" if interaction_context else "")
 
     def _start_deferred_init(self):
         """后台线程初始化非关键子系统（安全、协作引擎、主动聊天）"""
@@ -930,6 +935,18 @@ class DecisionHub:
                     return cached[1]
                 async with track_action("message.deliver", life_context, kind="delivery") as feedback:
                     try:
+                        if chat_type == "group":
+                            from memory.privacy import check_public_reply
+
+                            public_message = await check_public_reply(
+                                message, group_id=target_id, context={
+                                    **life_context, "current_input": "主动群聊发言", "trigger_type": trigger_type,
+                                },
+                            )
+                            if not public_message:
+                                result = DeliveryResult("rejected", delivery_id, "privacy_review")
+                                feedback.result = {"status": "rejected", "success": False, "reason": "privacy_review"}
+                                return result
                         result = await self._dispatch_proactive_message_once(
                             message, target_id, chat_type, platform, trigger_type, store_memory, delivery_id,
                         )
@@ -1726,10 +1743,70 @@ class DecisionHub:
             from core.soul_generator import init_soul_generator
 
             self._soul_generator = init_soul_generator()
+            from memory.privacy import set_reply_reviewer
+
+            set_reply_reviewer(self._review_public_reply)
             logger.info("[灵魂] 🎭 灵魂发生器已初始化")
         except Exception as e:
             logger.warning(f"[灵魂] 初始化跳过: {e}")
             self._soul_generator = None
+
+    async def _review_public_reply(self, draft: str, context: dict) -> bool:
+        """Use the configured soul model, without giving it reply tools."""
+        if not self._soul_generator:
+            return False
+        client = None
+        if self.model_pool:
+            soul_model_id = self.model_pool._config.get("system_defaults", {}).get("soul_model", "deepseek_v4_flash_official")
+            if soul_model_id:
+                client = self.model_pool.create_ai_client(soul_model_id)
+        if client is None:
+            client = self.ai_client
+        if client is None:
+            return False
+        return await self._soul_generator.review_public_reply(draft, context, client)
+
+    async def _rewrite_group_reply_from_public_input(self, content: str, platform: str) -> str:
+        """Recover a rejected draft using only the message visible in this group."""
+        from core.ai_client import AIMessage
+
+        client = getattr(self, "ai_client", None)
+        model_pool = getattr(self, "model_pool", None)
+        if client is None and model_pool:
+            model_id = model_pool._config.get("system_defaults", {}).get("soul_model")
+            if model_id:
+                client = model_pool.create_ai_client(model_id)
+        if client is None:
+            return ""
+
+        try:
+            response = await client.chat(
+                messages=[
+                    AIMessage(
+                        role="system",
+                        content=(
+                            "你在群聊中为弥娅重写一句自然、直接的回复。只根据用户这条当前公开消息作答；"
+                            "不要提及或暗示私聊、旧记忆、未公开背景，也不要解释隐私规则。"
+                            "若当前消息是邀请或招呼，就轻松接话。只输出回复正文。"
+                        ),
+                    ),
+                    AIMessage(
+                        role="user",
+                        content=json.dumps(
+                            {"platform": platform, "current_public_message": content},
+                            ensure_ascii=False, default=str,
+                        ),
+                    ),
+                ],
+                tools=[],
+                tool_choice="none",
+                use_miya_prompt=False,
+                max_tokens=240,
+            )
+        except Exception as exc:
+            logger.warning("[场合判断] 群聊回复重写失败: %s", type(exc).__name__)
+            return ""
+        return response.strip() if isinstance(response, str) else ""
 
     def _init_auth_subnet(self) -> None:
         """
@@ -2287,12 +2364,6 @@ class DecisionHub:
 
         response = await self._generate_response_cross_platform(content, platform, perception)
 
-        # 7. 主动聊天系统 v2.0 + 智能表情包（fire-and-forget，不阻塞响应返回）
-        if response:
-            asyncio.create_task(self._handle_proactive_chat(perception, content, response), name="proactive")
-            if not ("画好了" in response or "发过去了" in response or "画出了" in response):
-                asyncio.create_task(self._handle_smart_emoji(response, perception))
-
         # 【新增】QQ端状态标签（仅日志，不添加到响应中）
         if MiyaPlatform.is_qq(platform) and response and self.personality:
             from core.text_loader import get_form_name
@@ -2309,7 +2380,30 @@ class DecisionHub:
             current_form = self.personality.current_form if hasattr(self.personality, "current_form") else "normal"
             if hasattr(self.emotion, "set_form"):
                 self.emotion.set_form(current_form)
+            before_coloring = response
             response = self.emotion.influence_response(response)
+            if response != before_coloring:
+                from memory.privacy import check_public_reply
+
+                checked_response = await check_public_reply(
+                    response, group_id=perception.get("group_id", ""),
+                    context=perception.get("_privacy_review_context", {}),
+                )
+                if not checked_response and perception.get("group_id"):
+                    checked_response = await self._rewrite_group_reply_from_public_input(content, platform)
+                    if checked_response:
+                        perception["_privacy_review_context"]["revised_from_public_input"] = True
+                        checked_response = await check_public_reply(
+                            checked_response, group_id=perception.get("group_id", ""),
+                            context=perception["_privacy_review_context"],
+                        )
+                response = checked_response
+
+        # Only approved speech can trigger public follow-up or outbound memory.
+        if response:
+            asyncio.create_task(self._handle_proactive_chat(perception, content, response), name="proactive")
+            if not ("画好了" in response or "发过去了" in response or "画出了" in response):
+                asyncio.create_task(self._handle_smart_emoji(response, perception))
 
         # 6. 存储AI回复到记忆（fire-and-forget，不阻塞响应返回）
         if response:
@@ -2408,6 +2502,37 @@ class DecisionHub:
         return response
 
     async def _generate_response_cross_platform(self, content, platform: str, context: dict = None) -> str:
+        """Let Miya think with unified memory, then check public speech."""
+        from memory.privacy import check_public_reply, speech_context
+
+        perception = context if context is not None else {}
+        review_context = {
+            "platform": platform, "group_id": perception.get("group_id", ""),
+            "user_id": perception.get("user_id", ""), "current_input": content,
+        }
+        perception["_privacy_review_context"] = review_context
+        token = speech_context.set(review_context)
+        try:
+            response = await self._generate_draft_cross_platform(content, platform, perception)
+            checked = await check_public_reply(
+                response, group_id=perception.get("group_id", ""), context=review_context,
+            )
+            if checked or not response or not perception.get("group_id"):
+                return checked
+
+            # A conservative reviewer can reject an otherwise ordinary draft.
+            # Re-answer from the public message alone, then apply the same gate.
+            revised = await self._rewrite_group_reply_from_public_input(content, platform)
+            if not revised:
+                return ""
+            review_context["revised_from_public_input"] = True
+            return await check_public_reply(
+                revised, group_id=perception.get("group_id", ""), context=review_context,
+            )
+        finally:
+            speech_context.reset(token)
+
+    async def _generate_draft_cross_platform(self, content, platform: str, context: dict = None) -> str:
         """
         生成响应（跨平台统一）
 
@@ -2543,6 +2668,7 @@ class DecisionHub:
                     ],
                     needs_recall=_needs_recall,
                     is_deep_discussion=_is_deep,
+                    current_message_id=str(perception.get("message_id") or ""),
                 )
 
                 self._last_context_allocation = allocation
@@ -2602,8 +2728,6 @@ class DecisionHub:
                     if _search_strategy_cache is None:
                         search_config_path = Path(__file__).parent.parent / "config" / "text_config.json"
                         if search_config_path.exists():
-                            import json
-
                             with open(search_config_path, "r", encoding="utf-8") as f:
                                 full_config = json.load(f)
                             _search_strategy_cache = full_config.get("search_strategy", {})
@@ -2858,7 +2982,8 @@ class DecisionHub:
                             user_info={
                                 "user_id": user_id,
                                 "group_id": perception.get("group_id"),
-                                "is_group": (perception.get("message_type") == "group"),
+                                "is_group": bool(identity.group_id),
+                                "platform": identity.platform,
                             },
                             personality_info=personality_info,
                             cognitive_memory=cognitive_memory,
@@ -2884,6 +3009,8 @@ class DecisionHub:
             temporal = self._get_temporal_awareness(
                 user_id=user_id_str,
                 platform=platform,
+                group_id=ctx_group_id,
+                interaction_context=perception.get("_interaction_time_context", ""),
             )
             if temporal:
                 awareness_text = (awareness_text or "") + f"\n【弥娅时间感知】{temporal}"
@@ -2947,8 +3074,15 @@ class DecisionHub:
             # 等待 Phase 2 任务（soul 已在后台与 Phase 1 并行运行）
             # 等待灵魂 AI 分析完成，确保当前轮次使用最新鲜的情绪上下文
             cognitive_memory_context, soul_result = await soul_task
+            # The same user has different audiences in private and group chat.
+            # Old snapshots keyed only by user must never become group context.
+            soul_cache_key = json.dumps([
+                identity.user_id, identity.group_id, identity.platform, identity.session_id,
+            ], ensure_ascii=False)
             if soul_result and soul_result.get("emotions"):
-                self._last_soul_data = soul_result
+                self._last_soul_data = (
+                    self._soul_generator.public_appraisal(soul_result) if identity.group_id else soul_result
+                )
 
             # 处理 Soul Generator 结果 (共用于两条路径)
             emotion_context_for_collab = ""
@@ -3002,7 +3136,7 @@ class DecisionHub:
 
                 # 更新缓存供下一轮复用
                 self._set_soul_cache(
-                    user_id_str,
+                    soul_cache_key,
                     {
                         "emotion_context": emotion_context_for_collab,
                         "cognitive_memory": cognitive_memory_context,
@@ -3012,7 +3146,7 @@ class DecisionHub:
                 self._save_soul_snapshot()
             # soul 分析失败时，尝试使用缓存兜底
             if not emotion_context_for_collab:
-                cached = self._get_soul_cache(user_id_str)
+                cached = self._get_soul_cache(soul_cache_key)
                 cached_emotion = cached.get("emotion_context", "")
                 if cached_emotion:
                     emotion_context_for_collab = cached_emotion
@@ -3040,26 +3174,7 @@ class DecisionHub:
 
             # 获取引用消息信息
             reply_info = context.get("reply")
-            reply_context = ""
-            if reply_info:
-                # 兼容 ReplySegment 对象和字典
-                if hasattr(reply_info, "get"):
-                    sender_name = reply_info.get("sender_name", "未知")
-                    content = reply_info.get("content", "")[:100]
-                    image_url = reply_info.get("image_url")
-                elif hasattr(reply_info, "sender_name"):
-                    sender_name = getattr(reply_info, "sender_name", "未知")
-                    content = getattr(reply_info, "content", "")[:100]
-                    image_url = getattr(reply_info, "image_url", None)
-                else:
-                    sender_name = "未知"
-                    content = ""
-                    image_url = None
-
-                if image_url:
-                    reply_context = f"\n[引用消息] 来自: {sender_name}\n内容: {content}\n图片URL: {image_url}"
-                else:
-                    reply_context = f"\n[引用消息] 来自: {sender_name}\n内容: {content}"
+            reply_context = _format_reply_context(reply_info)
 
             # 获取文件信息
             files_info = context.get("files", [])
@@ -3295,6 +3410,14 @@ class DecisionHub:
                 recipient=context.get("recipient", ""),
             )
             prompt_info["system"] = memory_guard + "\n" + prompt_info["system"]
+            # Keep the source material available to the final speech check,
+            # including free-text soul context, summaries and profile anchors.
+            review_context = perception.get("_privacy_review_context")
+            if review_context is not None:
+                review_context["remembered_context"] = {
+                    "system": prompt_info["system"], "user": prompt_info["user"],
+                    "history": conversation_context,
+                }
 
             # 设置工具上下文和 ToolNet（符合 MIYA 框架）
             if self.tool_subnet:
@@ -3435,7 +3558,7 @@ class DecisionHub:
                         final_system_prompt = prompt_info["system"]
                         if cognitive_memory_context:
                             final_system_prompt = (
-                                "\n\n【以下是弥娅记忆系统检索到的与你当前对话相关的过往记录，请在回复中自然引用这些记忆，让对话更连贯】\n"
+                                "\n\n【统一记忆：用于完整理解当前对话；说出口前按场合与隐私判断，不直接复述私密经历】\n"
                                 + cognitive_memory_context
                                 + "\n【记忆记录结束】\n\n"
                                 + final_system_prompt
@@ -3502,8 +3625,6 @@ class DecisionHub:
                             _thinking = collab_result.thinking
 
                         # B方案：存储情绪上下文到短期记忆
-                        import json
-
                         from memory import store_auto
 
                         emotion_memory_content = (
@@ -3570,6 +3691,8 @@ class DecisionHub:
                             "reflection": _reflection or "",
                             "thinking": _thinking or "",
                         }
+                        if identity.group_id:
+                            self._last_soul_output = self._soul_generator.public_appraisal(self._last_soul_output)
                         logger.debug(
                             f"[SSE] _last_soul_output (collab): inner={bool(_inner_thought)}, emotions={list(_emotions.keys()) if _emotions else []}"
                         )
@@ -3757,6 +3880,8 @@ class DecisionHub:
                     "attribution": _attribution,
                     "reflection": _reflection,
                 }
+                if identity.group_id:
+                    self._last_soul_data = self._soul_generator.public_appraisal(self._last_soul_data)
                 _dominant = _soul_result.get("dominant_emotion", "未知") if _soul_result else "未知"
 
                 # 记录提取到的数据
@@ -3771,8 +3896,6 @@ class DecisionHub:
 
             # B方案：存储情绪上下文到短期记忆（带 #emotion_context tag）
             if _soul_result:
-                import json
-
                 from memory import store_auto
 
                 emotion_memory_content = (
@@ -3888,6 +4011,8 @@ class DecisionHub:
                         "attribution": _attribution,
                         "reflection": _reflection,
                     }
+                    if identity.group_id:
+                        self._last_soul_data = self._soul_generator.public_appraisal(self._last_soul_data)
                     logger.debug(
                         f"[SSE] 已存储灵魂数据: emotions={list(self._last_soul_data['emotions'].keys())}, inner={_inner_thought[:20]}"
                     )
@@ -3899,7 +4024,7 @@ class DecisionHub:
 
                 # 存储思考过程供 SSE 输出
                 if hasattr(self, "_last_soul_data") and self._last_soul_data:
-                    self._last_soul_data["thinking"] = ai_reasoning[:800]
+                    self._last_soul_data["thinking"] = "" if identity.group_id else ai_reasoning[:800]
 
                 # 合并两个思考过程
                 thinking_content = ""
@@ -3961,6 +4086,8 @@ class DecisionHub:
                 "reflection": _reflection or "",
                 "thinking": thinking_content or "",
             }
+            if identity.group_id and self._soul_generator:
+                self._last_soul_output = self._soul_generator.public_appraisal(self._last_soul_output)
             logger.debug(
                 f"[SSE] _last_soul_output: inner={bool(_inner_thought)}, emotions={list(_emotions.keys()) if _emotions else []}"
             )
@@ -4042,7 +4169,7 @@ class DecisionHub:
         if any(kw in content for kw in who_are_keywords):
             intro_template = get_text(
                 "personality_responses.intro",
-                "我是{name}，一个具备人格恒定、自我感知、记忆成长、情绪共生的数字生命伴侣。我的主导特质是同理心({empathy:.2f})和温暖度({warmth:.2f})。",
+                "我是{name}，叫我弥娅就好。",
             )
             return intro_template.format(name=name, empathy=empathy, warmth=warmth)
 

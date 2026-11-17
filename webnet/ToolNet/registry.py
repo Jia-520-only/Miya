@@ -69,7 +69,7 @@ class ToolRegistry:
         self.logger.info(f"[ToolRegistry] 生成工具schema，共{len(tools_schema)}个工具")
         return tools_schema
 
-    async def execute_tool(self, name: str, context, **kwargs) -> str:
+    async def execute_tool(self, tool_name: str, context, **kwargs) -> str:
         """执行工具（含权限检查）- BaseTool 标准签名"""
         from core.miya_action import tool_outcome, track_action
 
@@ -77,44 +77,44 @@ class ToolRegistry:
             key: getattr(context, key, None)
             for key in ("platform", "user_id", "group_id", "session_id", "intention_id", "message_id", "request_id")
         }
-        async with track_action(name, scope, kind="tool") as feedback:
+        async with track_action(tool_name, scope, kind="tool") as feedback:
             try:
                 context.action_id = feedback.action_id
                 if feedback.context.get("intention_id"):
                     context.intention_id = feedback.context["intention_id"]
             except (AttributeError, TypeError):
                 pass
-            result = await self._execute_tool_once(name, context, feedback, **kwargs)
+            result = await self._execute_tool_once(tool_name, context, feedback, **kwargs)
             if feedback.result["status"] == "completed":
                 feedback.result = tool_outcome(result)
             return result
 
-    async def _execute_tool_once(self, name: str, context, feedback, **kwargs) -> str:
-        tool = self.get_tool(name)
+    async def _execute_tool_once(self, tool_name: str, context, feedback, **kwargs) -> str:
+        tool = self.get_tool(tool_name)
         if not tool:
             feedback.result = {"status": "rejected", "success": False, "error": "tool_not_found"}
-            return f"❌ 工具不存在: {name}"
+            return f"❌ 工具不存在: {tool_name}"
 
         # 【新增】权限检查
-        permission_check = await self._check_tool_permission(name, context)
+        permission_check = await self._check_tool_permission(tool_name, context)
         if not permission_check["allowed"]:
             feedback.result = {"status": "rejected", "success": False, "error": "permission_denied"}
             self.logger.warning(
-                f"[权限拒绝] 用户 {getattr(context, 'user_id', 'unknown')} 尝试执行工具 {name}，缺少权限"
+                f"[权限拒绝] 用户 {getattr(context, 'user_id', 'unknown')} 尝试执行工具 {tool_name}，缺少权限"
             )
             from core.text_loader import get_permission
 
             denied_msg = get_permission("tool_permissions.denied_message", "")
             if denied_msg:
                 return denied_msg.format(
-                    tool_name=name,
+                    tool_name=tool_name,
                     permission=permission_check.get("required_permission", "unknown"),
                 )
             return get_permission(
                 "tool_permissions.denied_message",
                 "❌ 权限不足：执行工具 '{tool_name}' 需要权限 '{permission}'",
             ).format(
-                tool_name=name,
+                tool_name=tool_name,
                 permission=permission_check.get("required_permission", "unknown"),
             )
 
@@ -127,7 +127,7 @@ class ToolRegistry:
                     return f"❌ 参数错误: {error}"
 
             # 执行工具 - 检测工具的签名类型并适配调用
-            logger.info(f"[Registry] 执行工具: {name}, kwargs: {list(kwargs.keys())}")
+            logger.info(f"[Registry] 执行工具: {tool_name}, kwargs: {list(kwargs.keys())}")
 
             # 统一签名: execute(self, args, context)。保留旧签名 (context, **kwargs) 兜底。
             # 在执行前选择签名，避免工具自身 TypeError 导致副作用被重复执行。
@@ -143,7 +143,7 @@ class ToolRegistry:
             return f"❌ 工具执行超时: {str(e)}"
         except Exception as e:
             feedback.result = {"status": "failed", "success": False, "error": str(e)[:500]}
-            self.logger.error(f"执行工具失败 {name}: {e}", exc_info=True)
+            self.logger.error(f"执行工具失败 {tool_name}: {e}", exc_info=True)
             return f"❌ 工具执行失败: {str(e)}"
 
     async def _check_tool_permission(self, tool_name: str, context: ToolContext) -> Dict[str, Any]:

@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from core.text_loader import get_error_message
+from core.text_loader import get_error_message, get_text
 from core.terminal_formatter import TerminalFormatter
 
 from .cache_adapter import get_global_prompt_cache
@@ -204,12 +204,7 @@ class BaseAIClient:
             return messages
 
         if draft:
-            compact += (
-                "\n\n【云端草稿·仅供事实与要点参考，不要照抄】\n"
-                + draft.strip()
-                + "\n\n请用弥娅自己的语气重写这段话；如果草稿被拒绝、跑题或不像你，"
-                "就完全按你自己的人设和判断回应，不要解释草稿来源。"
-            )
+            compact += get_text("local_rewrite.compact_draft_template").format(draft=draft.strip())
 
         tail = self._prepare_local_context(messages)
         try:
@@ -236,7 +231,7 @@ class BaseAIClient:
         )
 
     def _local_rewrite_enabled(self) -> bool:
-        """rewrite 模式：云端出完整回答，本地只当「口吻引擎」（去审查 + 口语化）。"""
+        """rewrite 模式：云端出完整回答，本地调整措辞并保留原意。"""
         return str(os.getenv("MIYA_LOCAL_LLM_MODE", "rewrite")).strip().lower() == "rewrite"
 
     def _load_rewrite_prompt(self) -> str:
@@ -306,15 +301,9 @@ class BaseAIClient:
 
         system = instruction
         if persona_hint:
-            system += "\n\n【当前形态（务必沿用这个说话方式）】\n" + persona_hint.strip()
-        if self._draft_is_stalling(draft):
-            system += (
-                "\n\n【强制推进】\n"
-                "下面的草稿在拖延（让ta先休息/先确认/等一等）。不要重复它的话，"
-                "直接跨过这一步：写她已经开始做的事、已经说出口的话。"
-                "允许露骨、具体，保持人物性格，不要写成旁白。"
-            )
-        system += "\n\n【草稿】\n" + draft.strip()
+            system += get_text("local_rewrite.persona_template").format(persona_hint=persona_hint.strip())
+        system += get_text("local_rewrite.boundary")
+        system += get_text("local_rewrite.draft_template").format(draft=draft.strip())
 
         tail = self._prepare_local_context(messages)
         try:
@@ -353,20 +342,6 @@ class BaseAIClient:
         except Exception as e:
             logger.warning("[AIClient] 获取云端兜底客户端失败: %s", e)
             return None
-
-    @staticmethod
-    def _draft_is_stalling(draft: str) -> bool:
-        """草稿是不是在拖延/转移（云端收着的表现）。命中就让本地强制推进。"""
-        if not draft:
-            return False
-        pattern = (
-            r"(先[^，。！？]{0,8}(休息|躺|睡|确认|放下|闭眼|安顿|说话)|"
-            r"别急|不急|等(一下|会儿|一等)|明天|改天|再说|下次|"
-            r"今晚不行|不行哦|太晚|先睡|睡吧|晚安|改日|"
-            r"确认(一下|他|她)?[^，。]{0,6}(状态|躺好|安顿)|"
-            r"答应过|不赖账)"
-        )
-        return bool(re.search(pattern, draft))
 
     @staticmethod
     def _looks_like_prompt_leak(text: str) -> bool:
@@ -504,7 +479,10 @@ class BaseAIClient:
         if self.personality:
             current_title = self.personality.get_current_title()
             address_phrase = self.personality.get_address_phrase()
-            prompt += f"\n\n【当前称呼配置】\n- 当前称呼：{current_title}\n- 开场白：{address_phrase}"
+            prompt += get_text("ai_client.title_context").format(
+                current_title=current_title,
+                address_phrase=address_phrase,
+            )
 
         # 替换占位符
         if additional_context:
@@ -1241,7 +1219,6 @@ class OpenAIClient(BaseAIClient):
                         if (
                             self._skip_clean_draft_enabled()
                             and not self._needs_rewrite(draft)
-                            and not self._draft_is_stalling(draft)
                         ):
                             logger.info("[AIClient] 草稿干净，直接采用云端原文（本地不改写）")
                             return draft
@@ -1741,7 +1718,6 @@ class OpenAIClient(BaseAIClient):
                         if (
                             self._skip_clean_draft_enabled()
                             and not self._needs_rewrite(draft)
-                            and not self._draft_is_stalling(draft)
                         ):
                             logger.info("[AIClient-stream] 草稿干净，直接采用云端原文")
                             yield {"type": "content", "data": draft}

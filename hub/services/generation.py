@@ -41,9 +41,34 @@ class GenerationService:
         if state.should_skip_ai:
             logger.info(f"[生成] 跳过 AI 生成: {state.skip_reason}")
             state.response = state.quick_response or state.skip_reason
+            from memory.privacy import check_public_reply
+
+            state.response = await check_public_reply(
+                state.response,
+                group_id=request.group_id,
+                context={
+                    "current_input": request.content,
+                    "platform": request.platform,
+                    "user_id": request.user_id,
+                    "group_id": request.group_id,
+                    "quick_response": True,
+                },
+            )
             return state
 
         state = await self._generate_response(request, state)
+
+        from memory.privacy import check_public_reply
+
+        state.response = await check_public_reply(
+            state.response, group_id=request.group_id,
+            context={
+                "current_input": request.content, "platform": request.platform,
+                "user_id": request.user_id, "group_id": request.group_id,
+                "remembered_context": state.context_snapshot.prompt_text() if state.context_snapshot else "",
+                "internal_soul": state.soul_data,
+            },
+        )
 
         return state
 
@@ -114,6 +139,9 @@ class GenerationService:
             parts.append(state.emotion_context)
         if state.context_snapshot:
             parts.append(state.context_snapshot.prompt_text())
+        from hub.decision_hub_helpers import _build_memory_guard
+
+        parts.append(_build_memory_guard(msg_type=request.message_type, ctx_group_id=str(request.group_id)))
 
         return "\n\n".join(parts)
 

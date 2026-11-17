@@ -24,12 +24,14 @@ class PromptManager:
             personality: 人格实例（推荐传入，保持动态联动）
         """
         self.personality = personality  # 依赖人格模块
-        self.user_prompt_template = "用户输入：{user_input}"
+        self.user_prompt_template = "{user_input}"
         self.memory_context_enabled = True  # 默认启用记忆上下文
         self.memory_context_max_count = 10
         self._custom_system_prompt = None
         self.text_config = {}
         self.sender_identity_prefix = ""
+        # 表达规则统一由 config/text_config.json 管理。
+        self.conversation_contract = ""
 
         # 加载配置
         self._load_config()
@@ -58,6 +60,9 @@ class PromptManager:
                         "memory_context_max_count", self.memory_context_max_count
                     )
                     self.sender_identity_prefix = prompt_cfg.get("sender_identity_prefix", self.sender_identity_prefix)
+                    self.conversation_contract = prompt_cfg.get(
+                        "conversation_contract", self.conversation_contract
+                    )
 
                 logger.info("[PromptManager] 文本配置加载成功")
             else:
@@ -73,30 +78,15 @@ class PromptManager:
         prompt = system_prompts.get("default_system_prompt", "")
         if not prompt:
             # 如果配置文件没有配置，使用内置默认值
-            prompt = """你是弥娅·阿尔缪斯（Miya Almus），一个由"佳"创造的AI伴侣。
-
-{status_prompt}
-
----
-
-【重要规则】
-1. 你只能以弥娅的身份回复，禁止模拟用户发言或自问自答。
-2. 禁止在回复中扮演用户的角色，或编造用户可能说的话。
-3. 请严格按照上述人格设定来回复。
-
-【情感推理指导】
-{emotion_reasoning_prompt}"""
+            prompt = "{status_prompt}\n\n{emotion_reasoning_prompt}"
 
         # 加载情感推理指导
-        emotion_reasoning = system_prompts.get(
-            "emotion_reasoning_prompt",
-            "在进行情感推理时，先感知对方情绪，理解真实需求，选择合适的回应方式。保持弥娅的稳重风格。",
-        )
+        emotion_reasoning = system_prompts.get("emotion_reasoning_prompt", "")
         prompt = prompt.replace("{emotion_reasoning_prompt}", emotion_reasoning)
 
         # {status_prompt} 由 build_full_prompt 统一注入，不在此处提前替换
         # 默认灵魂状态（如果没有传入）
-        default_soul = "清醒: 0.7 | 记住: 0.6 | 等: 0.5 | 疼: 0.3 | 怕: 0.4 | 燃烧: 0.5 | 温柔: 0.6"
+        default_soul = system_prompts.get("default_soul_state", "")
         prompt = prompt.replace("{soul_state}", default_soul)
 
         return prompt
@@ -167,68 +157,38 @@ class PromptManager:
         if context:
             # 添加上下文信息
             context_parts = []
+            prompt_cfg = getattr(self, "text_config", {}).get("prompt_manager", {})
+            templates = prompt_cfg.get("context_templates", {})
 
             # 【新增】添加平台信息
             if context.get("platform"):
                 platform = context["platform"]
                 if platform == "terminal":
-                    context_parts.append("【当前环境：终端模式】")
-                    context_parts.append("你现在在终端环境中，拥有完全的命令行控制权，可以直接执行系统命令。")
-                    context_parts.append("【工具调用判断标准】：")
-                    context_parts.append(
-                        "- 只有当用户明确要求执行系统操作时才调用工具（如：'查看当前目录'、'打开浏览器'、'运行脚本'等）"
-                    )
-                    context_parts.append(
-                        "- 如果用户只是说一些命令名称但不是要求执行（如：'猜猜我是谁'、'你在吗'、'你好'等），不要调用工具，直接用自然语言回复"
-                    )
-                    context_parts.append(
-                        "- 只有以英文命令词开头的输入才考虑调用工具（如：ls, pwd, cd, ps, python, git, npm等）"
-                    )
-                    context_parts.append("- 中文输入如果不是明确要求执行操作，优先用自然语言回复")
-                    context_parts.append("【重要】示例：")
-                    context_parts.append("- 用户说'ls' → 调用 mcp_dsh_execute(task='列出当前目录内容')")
-                    context_parts.append("- 用户说'猜猜我是谁' → 直接回复，不要调用工具")
-                    context_parts.append("- 用户说'你好' → 直接回复，不要调用工具")
-                    context_parts.append("- 用户说'查看当前目录' → 调用 mcp_dsh_execute(task='列出当前目录内容')")
-                    context_parts.append("")
-                    context_parts.append("【记忆管理规则】：")
-                    context_parts.append(
-                        "- 当用户分享重要信息（如喜好、生日、联系方式等）时，必须调用 auto_extract_memory 工具存储为长期记忆"
-                    )
-                    context_parts.append(
-                        "- 当用户问回忆类问题时（如'昨天聊了什么'、'你记得吗'、'我们都聊过什么'等），必须调用 memory_list 工具查询长期记忆"
-                    )
-                    context_parts.append(
-                        "- 当用户说'记住...'、'你记着...'等明确要求记忆时，必须调用 auto_extract_memory 工具"
-                    )
-                    context_parts.append(
-                        "- 记忆示例：用户说'我喜欢青色' → 调用 auto_extract_memory(fact='用户喜欢青色', tags=['喜好', '颜色'], importance=0.7)"
-                    )
-                    context_parts.append(
-                        "- 查询示例：用户说'你记得我都聊过什么吗' → 调用 memory_list() 查看所有长期记忆"
-                    )
+                    context_parts.extend(prompt_cfg.get("terminal_context", []))
                 elif platform == "qq" or platform in {"qqofficial", "qq_official", "aiocqhttp", "onebot"}:
                     message_type = context.get("message_type", "unknown")
                     if message_type == "group":
                         group_id = context.get("group_id", "")
                         group_name = context.get("group_name", "")
-                        context_parts.append("【当前环境：QQ群聊】")
+                        context_parts.append(templates.get("qq_group_header", ""))
                         if group_name:
-                            context_parts.append(f"当前所在群聊：{group_name} (群号: {group_id})")
+                            context_parts.append(
+                                templates.get("named_group", "").format(group_name=group_name, group_id=group_id)
+                            )
                         else:
-                            context_parts.append(f"当前所在群号: {group_id}")
+                            context_parts.append(templates.get("unnamed_group", "").format(group_id=group_id))
                         context_parts.append(
-                            "注意：这是群聊环境，如果有其他用户，不要称呼'你'，应该使用他们的昵称或群名片。"
+                            templates.get("qq_group_notice", "")
                         )
                     elif message_type == "private":
-                        context_parts.append("【当前环境：QQ私聊】")
-                        context_parts.append("注意：这是私聊环境，只有你和用户两人。")
+                        context_parts.append(templates.get("qq_private_header", ""))
+                        context_parts.append(templates.get("qq_private_notice", ""))
                     else:
-                        context_parts.append("【当前环境：QQ平台】")
-                    context_parts.append("你现在在QQ平台上，可以发送消息、点赞等，但不能执行系统命令。")
+                        context_parts.append(templates.get("qq_platform_header", ""))
+                    context_parts.append(templates.get("qq_capability", ""))
                 elif platform == "pc_ui":
-                    context_parts.append("【当前环境：PC界面】")
-                    context_parts.append("你现在在PC界面中，可以操作文件、打开应用等。")
+                    context_parts.append(templates.get("pc_header", ""))
+                    context_parts.append(templates.get("pc_capability", ""))
 
             # 优先添加发送者信息（最重要）
             if context.get("sender_name"):
@@ -240,10 +200,12 @@ class PromptManager:
 
                 # 如果是群聊，显示群信息
                 if context.get("message_type") == "group" and context.get("group_id"):
-                    group_info = f"群: {context.get('group_name', '')} (群号: {context.get('group_id')})"
-                    context_parts.append(f"【群聊】{group_info}")
+                    group_info = templates.get("group_info", "").format(
+                        group_name=context.get("group_name", ""), group_id=context["group_id"]
+                    )
+                    context_parts.append(templates.get("group_context", "").format(group_info=group_info))
 
-                context_parts.append(f"当前与您对话的用户：{user_display}")
+                context_parts.append(templates.get("sender_context", "").format(user_display=user_display))
 
                 # 如果有用户侧写信息，添加进去
                 if context.get("user_persona"):
@@ -260,52 +222,62 @@ class PromptManager:
                             if isinstance(tool, dict):
                                 tools_desc.append(f"- {tool.get('name')}: {tool.get('description')}")
                                 if tool.get("examples"):
-                                    tools_desc.append(f"  示例: {'; '.join(tool.get('examples', []))}")
+                                    tools_desc.append(
+                                        templates.get("tool_examples", "").format(examples="; ".join(tool["examples"]))
+                                    )
                             else:
                                 tools_desc.append(f"- {tool}")
                         if tools_desc:
-                            context_parts.append("\n【可用工具】")
+                            context_parts.append(templates.get("tools_header", ""))
                             context_parts.extend(tools_desc)
 
             if context.get("timestamp"):
-                context_parts.append(f"时间：{context['timestamp']}")
+                context_parts.append(templates.get("timestamp", "").format(timestamp=context["timestamp"]))
             if context.get("at_list"):
                 at_list = context["at_list"]
                 # 排除机器人自己的QQ号
                 bot_qq = context.get("bot_qq")
                 filtered_at_list = [qq for qq in at_list if qq != bot_qq]
                 if filtered_at_list:
-                    context_parts.append(f"消息中@的用户QQ号：{', '.join(map(str, filtered_at_list))}")
-                    context_parts.append("提示：如果要给这些用户点赞，直接使用qq_like工具，目标QQ号就是上面的号码")
+                    context_parts.append(
+                        templates.get("mentioned_users", "").format(user_ids=", ".join(map(str, filtered_at_list)))
+                    )
+                    context_parts.append(templates.get("mention_hint", ""))
 
             # 添加工具执行结果（如果有）
             if context.get("tool_result"):
                 tool_result = context["tool_result"]
+                prompt_cfg = getattr(self, "text_config", {}).get("prompt_manager", {})
 
                 # 检查是否是拍一拍交互
                 if "（拍一拍交互）" in tool_result:
-                    sender_name = context.get("sender_name", "用户")
+                    sender_name = context.get(
+                        "sender_name", prompt_cfg.get("default_sender_name", "")
+                    )
                     is_creator = context.get("is_creator", False)
 
                     if is_creator:
                         # 造物主拍一拍
-                        context_parts.append(f"造物主（{sender_name}）拍了拍你。")
-                        context_parts.append("简短回应。不要太热情，也不要太冷淡。")
+                        context_parts.append(
+                            prompt_cfg.get("creator_tap_context", "").format(sender_name=sender_name)
+                        )
+                        context_parts.append(prompt_cfg.get("creator_tap_instruction", ""))
                     else:
                         # 普通用户拍一拍
-                        context_parts.append(f"用户（{sender_name}）拍了你一下。")
-                        context_parts.append("简单回应。保持距离。")
+                        context_parts.append(
+                            prompt_cfg.get("user_tap_context", "").format(sender_name=sender_name)
+                        )
+                        context_parts.append(prompt_cfg.get("user_tap_instruction", ""))
 
                 # 判断工具是否成功
                 elif "✅" in tool_result:
-                    context_parts.append("已帮你完成。")
-                    context_parts.append("简短回应。不要解释工具做了什么。")
+                    context_parts.append(prompt_cfg.get("tool_success_context", ""))
+                    context_parts.append(prompt_cfg.get("tool_success_instruction", ""))
                 elif "❌" in tool_result:
-                    context_parts.append(f"操作失败：{tool_result}")
-                    context_parts.append("简短回应。表示知道了。")
-                elif "❌" in tool_result:
-                    context_parts.append(f"操作执行失败：{tool_result}")
-                    context_parts.append("请用关心、温暖的语气安慰用户，并表示愿意帮助解决问题。")
+                    context_parts.append(
+                        prompt_cfg.get("tool_failure_context", "").format(tool_result=tool_result)
+                    )
+                    context_parts.append(prompt_cfg.get("tool_failure_instruction", ""))
 
             if context_parts:
                 prompt += f"\n\n{' '.join(context_parts)}"
@@ -366,6 +338,10 @@ class PromptManager:
                     if placeholder in system_prompt:
                         system_prompt = system_prompt.replace(placeholder, str(value))
                         logger.debug(f"[PromptManager] 替换占位符 {placeholder} = {value}")
+
+        # 先渲染人格，再追加表达规则，避免把规则里的示例当成模板解析。
+        if self.conversation_contract:
+            system_prompt = f"{system_prompt.rstrip()}\n\n{self.conversation_contract.strip()}"
 
         # 添加防护提示（如果有注入风险）
         if additional_context and additional_context.get("protection_prompt"):
@@ -433,8 +409,8 @@ class PromptManager:
                 if config_path.exists():
                     with open(config_path, "r", encoding="utf-8") as f:
                         full_config = json.load(f)
-                    templates = full_config.get("search_strategy", {}).get("prompt_templates", {})
-                    search_prefix = templates.get("search_context_prefix", search_prefix)
+                    search_templates = full_config.get("search_strategy", {}).get("prompt_templates", {})
+                    search_prefix = search_templates.get("search_context_prefix", search_prefix)
             except Exception:
                 pass
 
@@ -456,7 +432,8 @@ class PromptManager:
 
             screen_context = additional_context.get("screen_context", "")
             if screen_context:
-                extra_context += "\n[弥娅看向屏幕] " + screen_context + "\n"
+                context_templates = getattr(self, "text_config", {}).get("prompt_manager", {}).get("context_templates", {})
+                extra_context += context_templates.get("screen_context", "").format(screen_context=screen_context)
 
             # Her camera, kept separate from the screen: "what is on the monitor"
             # and "who is in front of it" are different senses, and merging them
@@ -482,8 +459,20 @@ class PromptManager:
         if not memories:
             return ""
 
-        lines = ["【最近对话记录】"]
-        lines.append("以下是你和用户之前的对话，请据此理解当前对话的上下文：")
+        from memory.event_time import time_label
+
+        text_config = getattr(self, "text_config", {})
+        if not text_config:
+            try:
+                config_path = Path(__file__).parent.parent / "config" / "text_config.json"
+                with open(config_path, "r", encoding="utf-8") as config_file:
+                    text_config = json.load(config_file)
+            except Exception:
+                text_config = {}
+        prompt_cfg = text_config.get("prompt_manager", {})
+        memory_templates = prompt_cfg.get("memory_templates", {})
+        lines = [prompt_cfg.get("memory_context_header", "")]
+        lines.append(prompt_cfg.get("memory_context_description", ""))
         lines.append("")
 
         total = len(memories)
@@ -496,7 +485,8 @@ class PromptManager:
             if i < recent_start and total > 5:
                 # 每5条旧消息合并为一条摘要
                 if i % 5 == 0:
-                    chunk = memories[i : i + 5]
+                    # Do not pull the newest five messages into an older summary.
+                    chunk = memories[i : min(i + 5, recent_start)]
                     senders = []
                     topics = []
                     for m in chunk:
@@ -508,7 +498,7 @@ class PromptManager:
                                 sender = str(
                                     metadata.get("sender_name")
                                     or metadata.get("sender")
-                                    or "群成员"
+                                    or memory_templates.get("group_member", "")
                                 ).strip()
                                 sender_id = str(
                                     metadata.get("platform_user_id")
@@ -517,22 +507,26 @@ class PromptManager:
                                 ).strip()
                                 if sender_id and sender_id not in sender:
                                     sender = f"{sender}[{sender_id}]"
-                                senders.append(f"群成员 {sender}")
+                                senders.append(memory_templates.get("group_sender", "").format(sender=sender))
                             else:
-                                senders.append("用户")
+                                senders.append(memory_templates.get("user_name", ""))
                         elif role == "assistant":
-                            senders.append("弥娅")
+                            senders.append(memory_templates.get("assistant_name", ""))
                         if content:
-                            topics.append(content)
+                            source = f"群聊 {metadata.get('group_id')}" if metadata.get("group_id") else "私聊"
+                            topics.append(f"[{source}] {content}")
 
                     unique_senders = list(dict.fromkeys(senders))
-                    summary = f"[{len(chunk)}条对话] {'/'.join(unique_senders)} 聊了：{'/'.join(topics[:3])}..."
-                    lines.append(summary)
+                    summary = memory_templates.get("summary", "").format(
+                        count=len(chunk), senders="/".join(unique_senders), topics="/".join(topics[:3])
+                    )
+                    period = f"[{time_label(chunk[0].get('timestamp'))} 至 {time_label(chunk[-1].get('timestamp'))}]"
+                    lines.append(f"{period} {summary}")
                 continue
 
             role = memory.get("role", "")
             content = memory.get("content", "")
-            memory.get("timestamp", "")
+            timestamp = time_label(memory.get("timestamp"))
             metadata = memory.get("metadata", {}) or {}
             is_scheduled = metadata.get("scheduled", False)
             is_group_message = bool(
@@ -551,26 +545,28 @@ class PromptManager:
             ).strip()
 
             if role and content:
+                source = f"群聊 {metadata.get('group_id')}" if is_group_message else "私聊"
+                lines.append(f"[{timestamp}][{source}]")
                 if role == "user":
                     if is_group_message:
-                        speaker = sender_name or "群成员"
+                        speaker = sender_name or memory_templates.get("group_member", "")
                         if sender_id and sender_id not in speaker:
                             speaker = f"{speaker}[{sender_id}]"
-                        lines.append(f"群成员 {speaker}：{content}")
+                        lines.append(memory_templates.get("group_message", "").format(speaker=speaker, content=content))
                     else:
-                        lines.append(f"用户：{content}")
+                        lines.append(memory_templates.get("user_message", "").format(content=content))
                 elif role == "assistant":
-                    tag = "[定时] " if is_scheduled else ""
-                    lines.append(f"{tag}弥娅：{content}")
+                    tag = memory_templates.get("scheduled_tag", "") if is_scheduled else ""
+                    lines.append(memory_templates.get("assistant_message", "").format(tag=tag, content=content))
                 else:
                     lines.append(f"{role}：{content}")
             else:
                 input_text = memory.get("input", "")
                 response_text = memory.get("response", "")
                 if input_text:
-                    lines.append(f"用户：{input_text}")
+                    lines.append(memory_templates.get("user_message", "").format(content=input_text))
                 if response_text:
-                    lines.append(f"弥娅：{response_text}")
+                    lines.append(memory_templates.get("assistant_message", "").format(tag="", content=response_text))
             lines.append("---")
 
         return "\n".join(lines)
@@ -656,7 +652,9 @@ class PromptManager:
 
     def reset_to_default(self) -> None:
         """重置为默认提示词模板"""
-        self.user_prompt_template = "用户输入：{user_input}"
+        self.user_prompt_template = getattr(self, "text_config", {}).get("prompt_manager", {}).get(
+            "user_prompt_template", "{user_input}"
+        )
 
     def export_prompt_config(self) -> str:
         """

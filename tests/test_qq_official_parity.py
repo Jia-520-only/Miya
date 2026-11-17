@@ -330,7 +330,10 @@ def test_official_tools_share_business_features_and_filter_onebot_actions(alias)
 
 
 @pytest.mark.anyio
-async def test_message_tool_uses_official_adapter_and_respects_failure(platform):
+async def test_message_tool_uses_official_adapter_and_respects_failure(platform, monkeypatch):
+    import memory.privacy as privacy
+
+    monkeypatch.setattr(privacy, "_reply_reviewer", AsyncMock(return_value=True))
     onebot = SimpleNamespace(send_group_message=AsyncMock(return_value=True))
     context = ToolContext(
         platform="qqofficial", platform_adapter=platform, onebot_client=onebot,

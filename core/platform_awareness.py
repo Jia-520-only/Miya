@@ -234,13 +234,9 @@ class PlatformAwareness:
         except Exception:
             pass
 
-        try:
-            from memory.time_tracker import get_time_tracker
-
-            tracker = get_time_tracker()
-            tracker.record_interaction(uid, pid, role="user")
-        except Exception:
-            pass
+        # MemoryManager records the actual dialogue event once, with its group
+        # and source timestamp. Platform activity must not reset that clock
+        # before the reply computes the interval since the previous dialogue.
 
     # ── 核心 API：查询当前活跃平台 ──
 

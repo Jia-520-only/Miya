@@ -19,12 +19,14 @@ logger = logging.getLogger(__name__)
 
 
 def _get_cognitive_dir() -> Path:
-    cfg_dir = get_cognitive_config("storage", default={}).get("data_dir", "")
+    profile_config = get_cognitive_config("profile", default={})
+    cfg_dir = profile_config.get("path", "") if isinstance(profile_config, dict) else ""
     if cfg_dir:
         return Path(cfg_dir)
     return (
         Path(os.getenv("MIYA_DATA_DIR", Path(__file__).resolve().parent.parent.parent.parent.parent / "data"))
         / "cognitive"
+        / "profiles"
     )
 
 

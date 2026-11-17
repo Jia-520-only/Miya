@@ -57,6 +57,22 @@ class SendMessageTool(BaseTool):
         if not message:
             return "❌ 消息内容不能为空"
 
+        from memory.context_identity import normalize_group_id
+        from memory.privacy import check_public_reply, speech_context
+
+        send_group_id = normalize_group_id(target_group_id)
+        if not send_group_id and not target_user_id:
+            send_group_id = normalize_group_id(getattr(actual_context, "group_id", ""))
+        if send_group_id:
+            review_context = dict(speech_context.get() or {})
+            review_context.update({
+                "target_group_id": send_group_id,
+                "current_input": getattr(actual_context, "current_input", None) or review_context.get("current_input", ""),
+            })
+            message = await check_public_reply(message, group_id=send_group_id, context=review_context)
+            if not message:
+                return "❌ 这条消息不适合在当前群聊公开，尚未发送。"
+
         adapter = resolve_platform_adapter(actual_context)
         if adapter is None and getattr(actual_context, "platform", None) in {None, "qq", "aiocqhttp", "onebot"}:
             adapter = getattr(actual_context, "onebot_client", None)
@@ -75,7 +91,7 @@ class SendMessageTool(BaseTool):
 
         try:
             # 确定发送目标
-            send_group_id = target_group_id
+            send_group_id = target_group_id or send_group_id
             if not send_group_id and not target_user_id and getattr(actual_context, "message_type", None) == "group":
                 send_group_id = getattr(actual_context, "group_id", None)
 

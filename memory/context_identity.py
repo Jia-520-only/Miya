@@ -62,6 +62,7 @@ class ContextIdentity:
             return tuple(dict.fromkeys([
                 self.session_id,
                 *(f"group_{self.group_id}_{alias}" for alias in self.aliases),
+                *(f"user_{alias}" for alias in self.aliases),
             ]))
         return tuple(dict.fromkeys([self.session_id, *(f"user_{alias}" for alias in self.aliases)]))
 
@@ -91,15 +92,12 @@ def matches_context_scope(memory: Any, query: Any) -> bool:
             and visibility not in {"private", "owner", "personal"}
             and (not query.scope_platforms or memory.platform in query.scope_platforms)
         )
-        personal = bool(
-            visibility == "personal"
-            and not group_id
-            and memory.user_id in (query.scope_user_ids or [])
+        user_experience = bool(
+            visibility != "owner" and memory.user_id in (query.scope_user_ids or [])
         )
-        return in_group or personal
+        return in_group or user_experience
     if memory.user_id not in (query.scope_user_ids or []):
         return False
-    # A user's messages from a group are not private memories, even when the
-    # same canonical user ID is used for both scopes. Legacy group records are
-    # excluded by group_id even if they predate the visibility field.
-    return not group_id and visibility not in {"group", "owner"}
+    # All of this user's private/group experiences are one timeline; source
+    # metadata keeps each recalled event attributable to its original chat.
+    return visibility != "owner"
