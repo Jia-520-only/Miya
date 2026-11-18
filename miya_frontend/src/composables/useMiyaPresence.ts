@@ -7,7 +7,8 @@ const presence = shallowRef(normalizeMiyaPresence(null))
 const connection = ref<'connecting' | 'online' | 'offline'>('connecting')
 const updatedAt = ref<Date | null>(null)
 const clock = ref(Date.now())
-const streaming = ref(false)
+const lastStreamAt = ref<number | null>(null)
+const streaming = computed(() => lastStreamAt.value !== null && clock.value - lastStreamAt.value <= 12000)
 let consumers = 0
 let timer: ReturnType<typeof setInterval> | undefined
 let pending: AbortController | undefined
@@ -57,7 +58,7 @@ async function refreshPresence() {
 
 function connectStream() {
   stream?.close()
-  streaming.value = false
+  lastStreamAt.value = null
   if (document.hidden || !consumers || typeof EventSource === 'undefined')
     return
   const source = new EventSource(`${API.endpoint}/api/observatory/events`)
@@ -67,15 +68,15 @@ function connectStream() {
       return
     try {
       acceptSnapshot(JSON.parse((event as MessageEvent).data))
-      streaming.value = true
+      lastStreamAt.value = Date.now()
     }
     catch {
-      streaming.value = false
+      lastStreamAt.value = null
     }
   })
   source.onerror = () => {
     if (stream === source)
-      streaming.value = false
+      lastStreamAt.value = null
   }
 }
 
@@ -83,7 +84,7 @@ function onVisibilityChange() {
   if (document.hidden) {
     stream?.close()
     stream = undefined
-    streaming.value = false
+    lastStreamAt.value = null
     pending?.abort()
     pending = undefined
   }
@@ -102,7 +103,7 @@ export function useMiyaPresence() {
       connectStream()
       timer = setInterval(() => {
         clock.value = Date.now()
-        if (!document.hidden && (!streaming.value || clock.value - lastReceivedAt > 12000) && clock.value - lastPollAt >= 15000)
+        if (!document.hidden && !streaming.value && clock.value - lastPollAt >= 15000)
           void refreshPresence()
       }, 3000)
       document.addEventListener('visibilitychange', onVisibilityChange)
@@ -125,7 +126,7 @@ export function useMiyaPresence() {
       document.removeEventListener('visibilitychange', onVisibilityChange)
       stream?.close()
       stream = undefined
-      streaming.value = false
+      lastStreamAt.value = null
       pending?.abort()
       pending = undefined
     }

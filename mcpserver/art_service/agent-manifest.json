@@ -36,12 +36,15 @@
       },
       {
         "name": "comfyui",
-        "description": "本机 ComfyUI 中文 AI 助手、绘图、图生视频统一入口。需要画图/做视频/让弥娅自主创作时优先使用。先 list_workflows 或 describe_workflow；中文需求用 assist_prompt 取得提示词，再 generate 提交。视频需要 first_frame：可先生成图片，get_task 成功后 upload_media 上传 local_paths，再将 input_name 填入视频参数。generate 返回 queued 只代表入队，必须用 get_task 查到 success 才能声称生成完成；同一任务不要重复提交。完成后用 send_platform_file 发送 local_paths。视频默认 W6A8 稳定方案、288×512、5秒、静音；更改参数前先 describe_workflow。",
+        "description": "本机 ComfyUI 工作流入口。用户提出画图、视频、编辑、换人、超分等需求时，先用 search_workflows(query=需求关键词) 搜索最多6个候选，根据名称和用途选最匹配的 workflow_path，再 describe_workflow 查看参数和可执行状态，最后 generate_workflow。parameters_json 用工作流描述里列出的 node_id.field 键覆盖参数。不要把全部工作流目录展开到对话。工作流缺少节点或含停用节点时不可提交。generate_workflow 返回 queued 只代表入队，必须用 get_task 查到 success 才能声称完成；同一任务不要重复提交。完成后用 send_platform_file 发送 local_paths。固定 image/video 工作流仍可用原 generate 流程。",
         "parameters": {
-          "action": "string - list_workflows / describe_workflow / assist_prompt / upload_media / generate / get_task",
+          "action": "string - search_workflows / describe_workflow / generate_workflow / list_workflows / assist_prompt / upload_media / generate / get_task",
           "workflow": "string - 可选，image 绘图或 video 视频；默认 image",
+          "query": "string - 可选，search_workflows 使用的需求关键词，例如人物替换、文生图、视频、超分",
+          "limit": "int - 可选，搜索候选数量，默认6，最多8",
+          "workflow_path": "string - 可选，必须使用 search_workflows 返回的 workflow_path，用于 describe_workflow 或 generate_workflow",
           "prompt": "string - 可选，assist_prompt 时为中文需求；generate 时为最终提示词",
-          "parameters_json": "string - 可选，JSON对象字符串，例如 {\"width\":512,\"height\":512,\"seed\":42} 或 {\"first_frame\":\"miya/xxx.png\",\"seconds\":5}；可用参数及默认值见 describe_workflow",
+          "parameters_json": "string - 可选，JSON对象字符串。固定工作流示例 {\"width\":512,\"height\":512,\"seed\":42}；自主工作流使用 describe_workflow 返回的 node_id.field 键，例如 {\"10.image\":\"miya/xxx.png\",\"3.seed\":42}",
           "file_path": "string - 可选，仅 upload_media 使用，本机素材文件的绝对路径；返回 input_name",
           "prompt_id": "string - 可选，仅 get_task 使用，generate 返回的任务编号",
           "wait_seconds": "number - 可选，仅 get_task 使用，每次最多等待20秒，默认20；0表示立即查询"

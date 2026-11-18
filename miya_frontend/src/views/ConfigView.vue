@@ -1682,9 +1682,10 @@ function getRouteModel(key: string): string {
           </h3>
           <div class="color-picker-grid">
             <div v-for="c in group.colors" :key="colorStorageKey(group.id, c.key)" class="color-picker-item">
-              <label class="cp-label">{{ c.label }}</label>
+              <label :for="`color-${group.id}-${c.key}`" class="cp-label">{{ c.label }}</label>
               <div class="cp-row">
                 <input
+                  :id="`color-${group.id}-${c.key}`"
                   type="color"
                   :value="componentColors[colorStorageKey(group.id, c.key)] || c.default"
                   class="cp-input"

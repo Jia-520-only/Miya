@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { RuntimeLog } from '@/utils/miyaRuntimeLogs'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { observatorySceneColors } from '@/composables/useComponentColors'
 import { useMiyaFluxPreferences } from '@/composables/useMiyaFluxPreferences'
 import { useMiyaPresence } from '@/composables/useMiyaPresence'
 import { porcelainEmotionColor } from '@/utils/miyaFluxTheme'
@@ -49,6 +50,8 @@ const portraitPayload = computed(() => ({
   flow: portrait.value.flow,
 }))
 
+const palettePayload = computed(() => props.framed ? { type: 'miya:palette', ...observatorySceneColors.value } : null)
+
 function syncPortrait() {
   frame.value?.contentWindow?.postMessage({ ...portraitPayload.value }, targetOrigin)
 }
@@ -57,7 +60,13 @@ function syncScene() {
   frame.value?.contentWindow?.postMessage({ ...payload.value, paused: paused.value || document.hidden }, targetOrigin)
 }
 
+function syncPalette() {
+  if (palettePayload.value)
+    frame.value?.contentWindow?.postMessage({ ...palettePayload.value }, targetOrigin)
+}
+
 function syncAll() {
+  syncPalette()
   syncScene()
   syncPortrait()
 }
@@ -79,6 +88,7 @@ function receiveReady(event: MessageEvent) {
 
 watch(payload, syncScene)
 watch(portraitPayload, syncPortrait)
+watch(palettePayload, syncPalette)
 onMounted(() => {
   window.addEventListener('message', receiveReady)
   document.addEventListener('visibilitychange', syncScene)

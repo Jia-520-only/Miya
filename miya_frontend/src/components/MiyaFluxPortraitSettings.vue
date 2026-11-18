@@ -88,7 +88,7 @@ function restore() {
     </button>
     <Teleport to="body">
       <div v-if="expanded" class="portrait-dismiss" aria-hidden="true" @click="close" />
-      <section v-if="expanded" id="miya-portrait-editor" class="portrait-editor" role="dialog" aria-label="自定义弥娅头像" @keydown.esc.stop="close">
+      <section v-if="expanded" id="miya-portrait-editor" class="portrait-editor miya-porcelain-surface" role="dialog" aria-label="自定义弥娅头像" @keydown.esc.stop="close">
         <header>
           <div><span>青花 · 映像</span><small>PORCELAIN / PORTRAIT</small></div><button ref="closeButton" aria-label="关闭头像设置" @click="close">
             ×
@@ -125,31 +125,31 @@ function restore() {
 
 <style scoped>
 .portrait-settings { position: relative; }
-.portrait-trigger { display: flex; align-items: center; gap: 7px; padding: 5px 8px; min-height: 32px; border: 1px solid rgba(148,184,239,.23); border-radius: 4px; color: #c4d8f2; background: rgba(19,38,70,.64); font-size: 11px; cursor: pointer; white-space: nowrap; }
-.portrait-trigger:hover,.portrait-trigger[aria-expanded=true] { background: rgba(76,116,185,.22); border-color: rgba(177,205,245,.5); }
+.portrait-trigger { display: flex; align-items: center; gap: 7px; padding: 5px 8px; min-height: 32px; border: 1px solid var(--porcelain-line); border-radius: 4px; color: var(--porcelain-blue); background: var(--porcelain-tint); font-size: 11px; cursor: pointer; white-space: nowrap; }
+.portrait-trigger:hover,.portrait-trigger[aria-expanded=true] { background: var(--porcelain-tint-strong); border-color: var(--porcelain-blue); }
 .portrait-trigger > img { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; }
-.portrait-dismiss { position: fixed; inset: 0; z-index: 1000; background: #02051099; }
-.portrait-editor { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 1001; width: min(340px,calc(100vw - 32px)); max-height: min(640px,calc(100dvh - 80px)); overflow: auto; overscroll-behavior: contain; padding: 20px; border: 1px solid rgba(148,184,239,.38); border-radius: 8px; color: #dce6f4; background: linear-gradient(145deg,#12213b,#080f1f 85%); box-shadow: 0 18px 60px #020510b3; }
-.portrait-editor > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 15px; border-bottom: 1px solid #a0c1ee24; }
+.portrait-dismiss { position: fixed; inset: 0; z-index: 1000; background: color-mix(in srgb, var(--miya-observatory-ink, #183568) 33%, transparent); }
+.portrait-editor { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 1001; width: min(340px,calc(100vw - 32px)); max-height: min(640px,calc(100dvh - 80px)); overflow: auto; overscroll-behavior: contain; padding: 20px; border: 1px solid var(--porcelain-line); border-radius: 8px; color: var(--porcelain-ink); background: linear-gradient(145deg,var(--porcelain-white),var(--porcelain-wash) 85%); box-shadow: 0 18px 60px var(--porcelain-shadow); }
+.portrait-editor > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 15px; border-bottom: 1px solid var(--porcelain-line); }
 .portrait-editor > header > div { display: grid; gap: 6px; }
-.portrait-editor > header span { font: 16px SimSun,serif; letter-spacing: .16em; color: #e4ecf7; }
-.portrait-editor > header small { color: #7897c2; font: 8px Consolas,monospace; letter-spacing: .1em; }
-.portrait-editor > header > button { width: 28px; height: 28px; background: transparent; color: #aec6e8; cursor: pointer; font-size: 20px; }
+.portrait-editor > header span { font: 16px SimSun,serif; letter-spacing: .16em; color: var(--porcelain-ink); }
+.portrait-editor > header small { color: var(--porcelain-muted); font: 8px Consolas,monospace; letter-spacing: .1em; }
+.portrait-editor > header > button { width: 28px; height: 28px; background: transparent; color: var(--porcelain-blue); cursor: pointer; font-size: 20px; }
 .portrait-preview-row { display: flex; align-items: center; gap: 15px; margin: 18px 0; }
-.portrait-preview { width: 80px; height: 80px; flex-shrink: 0; overflow: hidden; border: 2px solid #b6cfec; border-radius: 50%; box-shadow: 0 0 0 4px #5582c91f; }
+.portrait-preview { width: 80px; height: 80px; flex-shrink: 0; overflow: hidden; border: 2px solid var(--porcelain-line); border-radius: 50%; box-shadow: 0 0 0 4px var(--porcelain-tint); }
 .portrait-preview img { width: 100%; height: 100%; object-fit: cover; }
 .portrait-preview-row p { margin: 0 0 7px; font-size: 11px; }
-.portrait-preview-row small { color: #8ea5c6; font-size: 10px; line-height: 1.8; }
+.portrait-preview-row small { color: var(--porcelain-muted); font-size: 10px; line-height: 1.8; }
 .portrait-file { display: none; }
 .portrait-buttons { display: flex; gap: 8px; margin-bottom: 18px; }
-.portrait-buttons button { flex: 1; min-height: 32px; border: 1px solid #94b8ef38; border-radius: 3px; background: #648fdb18; color: #c6d8f3; cursor: pointer; font-size: 11px; }
-.portrait-buttons button:hover { background: #648fdb30; }
+.portrait-buttons button { flex: 1; min-height: 32px; border: 1px solid var(--porcelain-line); border-radius: 3px; background: var(--porcelain-tint); color: var(--porcelain-muted); cursor: pointer; font-size: 11px; }
+.portrait-buttons button:hover { background: var(--porcelain-tint-strong); }
 .portrait-buttons button:disabled { cursor: wait; opacity: .5; }
-.portrait-editor > label { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 13px; color: #adc1dc; font-size: 10px; }
-.portrait-editor > label > span { color: #e1ebf8; font-family: Consolas,monospace; }
-.portrait-editor input[type=range] { width: 100%; height: 14px; margin: 0; accent-color: #8cafe6; cursor: pointer; }
-.portrait-help { margin: 16px 0 0; color: #6d86aa; font-size: 9px; line-height: 1.8; }
-.portrait-feedback { margin: 10px 0 0; color: #b5d7f7; font-size: 10px; line-height: 1.8; }
-.portrait-feedback.failed { color: #f1b0b8; }
+.portrait-editor > label { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 13px; color: var(--porcelain-muted); font-size: 10px; }
+.portrait-editor > label > span { color: var(--porcelain-ink); font-family: Consolas,monospace; }
+.portrait-editor input[type=range] { width: 100%; height: 14px; margin: 0; accent-color: var(--porcelain-blue); cursor: pointer; }
+.portrait-help { margin: 16px 0 0; color: var(--porcelain-muted); font-size: 9px; line-height: 1.8; }
+.portrait-feedback { margin: 10px 0 0; color: var(--porcelain-blue); font-size: 10px; line-height: 1.8; }
+.portrait-feedback.failed { color: var(--porcelain-warning); }
 @media (max-width: 480px) { .portrait-trigger { gap: 4px; padding-inline: 5px; font-size: 10px; } .portrait-trigger > img { width: 17px; height: 17px; } }
 </style>

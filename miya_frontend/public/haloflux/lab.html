@@ -81,6 +81,10 @@ html.miya-ambient header,html.miya-ambient .panels{display:none}
 html.miya-ambient .stage{position:fixed;inset:0;z-index:0;height:100%}
 html.miya-ambient .stage::after{opacity:.46}
 html.miya-ambient .ov{display:none}
+html.miya-porcelain,html.miya-porcelain body{background:var(--miya-glaze,#f5f8fd)}
+html.miya-porcelain .stage::after{display:none}
+html.miya-porcelain #stage{filter:url(#porcelain-ink)}
+#stage-portrait{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
 
 .feed{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:flex-end;font-size:9px;line-height:1.4;overflow:hidden}
 .feed div{white-space:nowrap;color:var(--dim)}
@@ -131,9 +135,19 @@ html.miya-ambient .ov{display:none}
   .panels{grid-template-columns:minmax(0,1fr);padding:8px 16px 16px}
 }
 </style>
-<script>if(new URLSearchParams(location.search).has('ambient'))document.documentElement.classList.add('miya-ambient')</script>
+<script>
+const stageParams = new URLSearchParams(location.search);
+if (stageParams.has('ambient')) document.documentElement.classList.add('miya-ambient');
+if (stageParams.has('framed') && stageParams.has('miya')) document.documentElement.classList.add('miya-porcelain');
+</script>
 </head>
 <body>
+<svg width="0" height="0" aria-hidden="true" style="position:absolute">
+  <filter id="porcelain-ink" x="0%" y="0%" width="100%" height="100%" color-interpolation-filters="sRGB">
+    <!-- Map the light-driven field to cobalt pigment on white glaze without recoloring the portrait. -->
+    <feColorMatrix type="matrix" values="-.196 -.66 -.064 0 .99  -.166 -.56 -.054 0 .995  -.09 -.30 -.03 0 1  0 0 0 1 0" />
+  </filter>
+</svg>
 <div class="app">
   <header>
     <div class="brand"><h1>RYDER CODE / Ms MAIKEBAIs CAT</h1><p>RESEARCH PAPERS → REPRODUCIBLE EXPERIMENTS</p></div>
@@ -199,6 +213,9 @@ function fit(c) {
    MAIN STAGE
    ========================================================= */
 const stage = document.getElementById('stage'); let S = stage.getContext('2d'); const S_MAIN = S;
+const portraitStage = document.documentElement.classList.contains('miya-porcelain') ? document.createElement('canvas') : null;
+if (portraitStage) { portraitStage.id = 'stage-portrait'; portraitStage.setAttribute('aria-hidden', 'true'); stage.after(portraitStage); }
+const portraitContext = portraitStage?.getContext('2d');
 let W, H, cx, cy, R, RO, RMAX, thV, thS;
 let webBase, webLayers = [], layerEnv = [0, 0, 0], trailC, glowC, laneC;
 let curves = [], runners = [], comets = [], cards = [], wedges = [], pulses = [];
@@ -387,6 +404,7 @@ function resizeStage() {
   const r = stage.getBoundingClientRect();
   W = r.width; H = r.height;
   stage.width = W * DPR; stage.height = H * DPR;
+  if (portraitStage) { portraitStage.width = stage.width; portraitStage.height = stage.height; }
   cx = W * 0.07; cy = H * 0.5;
   R = Math.max(H * 0.78, W * 0.30);
   RO = R + Math.max(90, Math.min(240, H * 0.3, W * 0.13)) * C.ringWidth;
@@ -1056,7 +1074,7 @@ function drawRing(dt) {
   S.globalCompositeOperation = 'source-over';
   S.save(); S.translate(cx, cy);
   S.beginPath(); S.arc(0, 0, RO, 0, TAU); S.arc(0, 0, R, 0, TAU, true);
-  S.fillStyle = MIYA ? '#060e20' : '#040506'; S.fill('evenodd');
+  S.fillStyle = portraitStage ? '#232c3f' : MIYA ? '#060e20' : '#040506'; S.fill('evenodd');
   let regen = 1;
   for (const s of slots) {
     const A = s.a + ringRot;
@@ -1232,7 +1250,16 @@ function drawStage(dt) {
     S.fillStyle = vg; S.fillRect(0, 0, W, H);
   }
 
-  if (MIYA) { camT(S, DPR); MIYA.draw(S, cx, cy, R); const center = toScreen(cx, cy); MIYA.publishGeometry(center.x, center.y, cam.z); }
+  if (MIYA) {
+    if (portraitContext) {
+      portraitContext.resetTransform();
+      portraitContext.clearRect(0, 0, portraitStage.width, portraitStage.height);
+      camT(portraitContext, DPR);
+    }
+    camT(S, DPR);
+    MIYA.draw(S, cx, cy, R, portraitContext);
+    const center = toScreen(cx, cy); MIYA.publishGeometry(center.x, center.y, cam.z);
+  }
   if (!AMBIENT) drawCallout();
 }
 

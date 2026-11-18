@@ -1,10 +1,10 @@
-import { useStorage } from '@vueuse/core'
+import { createSharedComposable, useStorage } from '@vueuse/core'
 import { computed } from 'vue'
 
 export type MiyaFluxMode = 'resonance' | 'surge' | 'quiet'
 export type MiyaFluxComposition = 'complete' | 'closeup'
 
-export function useMiyaFluxPreferences() {
+export const useMiyaFluxPreferences = createSharedComposable(() => {
   const mode = useStorage<MiyaFluxMode>('miya-flux-mode', 'resonance')
   const storedComposition = useStorage<string>('miya-flux-composition', 'complete')
   const composition = computed<MiyaFluxComposition>({
@@ -25,10 +25,11 @@ export function useMiyaFluxPreferences() {
   function savePortrait(image: string) {
     const next = { image, zoom: 1, x: 50, y: 42, flow: portrait.value.flow }
     // Verify persistence before changing the visible image, so a full disk/quota
-    // leaves the previous portrait intact and can be explained by the editor.
+    // leaves the previous portrait intact. The shared ref updates the scene
+    // even when useStorage skips writing the already-persisted value.
     localStorage.setItem('miya-flux-portrait', JSON.stringify(next))
     portrait.value = next
   }
 
   return { mode, composition, paused, portrait, avatarSource, savePortrait }
-}
+})

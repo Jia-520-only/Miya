@@ -123,7 +123,7 @@ function reading(value: number | null | undefined) {
     </div>
     <svg ref="orbit" viewBox="0 0 440 405" class="runtime-orrery" aria-label="记忆、运行记录、感知与连接三个副环">
       <defs>
-        <radialGradient :id="`${uid}-glaze`"><stop offset="0" stop-color="#0a1529" stop-opacity=".94" /><stop offset=".72" stop-color="#0a1529" stop-opacity=".8" /><stop offset="1" stop-color="#0a1529" stop-opacity=".1" /></radialGradient>
+        <radialGradient :id="`${uid}-glaze`"><stop offset="0" stop-color="var(--porcelain-white)" stop-opacity=".94" /><stop offset=".72" stop-color="var(--porcelain-white)" stop-opacity=".8" /><stop offset="1" stop-color="var(--porcelain-white)" stop-opacity=".1" /></radialGradient>
         <path v-for="ring in rings" :id="`${uid}-${ring.id}`" :key="ring.id" :d="`M ${ring.radius - 4},0 a ${ring.radius - 4},${ring.radius - 4} 0 1,1 ${-2 * (ring.radius - 4)},0 a ${ring.radius - 4},${ring.radius - 4} 0 1,1 ${2 * (ring.radius - 4)},0`" />
       </defs>
       <path class="orbital-link" d="M149 236 L155 244 M284 231 L291 239" />
@@ -168,7 +168,7 @@ function reading(value: number | null | undefined) {
       </g>
     </svg>
     <Teleport to="body">
-      <div v-if="activeRing" ref="inspector" class="runtime-inspector" :style="inspectorPosition" aria-live="off">
+      <div v-if="activeRing" ref="inspector" class="runtime-inspector miya-porcelain-surface" :style="inspectorPosition" aria-live="off">
         <div><strong>{{ activeLayer ? `${activeLayer.label}记忆` : activeRing.label }}</strong><b v-if="activeLayer">{{ reading(presence.memoryLayers[activeLayer.id]) }} <small>个节点</small></b><b v-else-if="activeRing.id === 'memory'">{{ reading(presence.memoryCount) }} <small>个节点</small></b><b v-else-if="activeRing.id === 'connection'">{{ reading(presence.onlinePlatforms) }} / {{ reading(presence.platformCount) }} <small>在线 / 启用</small></b></div>
         <p>{{ preview ? runtimeExcerpt(preview, 76) : '此分类暂未收到运行记录' }}</p>
         <small>{{ activeLayer ? '最近记忆模块日志 · 点选查看存量与完整记录' : activeRing.id === 'execution' ? '中心数字为近 60 秒接收的日志条数 · 点选查看' : '点选查看完整记录' }}</small>
@@ -182,48 +182,48 @@ function reading(value: number | null | undefined) {
 </template>
 
 <style scoped>
-.runtime-rings { position: relative; color: #b1c9e9; min-width: 0; }
-.runtime-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 16px; color: #7d9bc2; font: 8px/1.6 Consolas,monospace; letter-spacing: .12em; }
+.runtime-rings { position: relative; color: var(--porcelain-muted); min-width: 0; }
+.runtime-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 16px; color: var(--porcelain-muted); font: 8px/1.6 Consolas,monospace; letter-spacing: .12em; }
 .runtime-heading small { font: 9px/1.5 sans-serif; letter-spacing: 0; white-space: nowrap; }
-.runtime-heading small[data-status=online] { color: #b1d4dc; }
+.runtime-heading small[data-status=online] { color: var(--porcelain-blue); }
 .runtime-orrery { display: block; width: 100%; overflow: visible; }
-.orbital-link { fill: none; stroke: #8fbbef; stroke-width: .6; opacity: .4; stroke-dasharray: 2 5; }
-.hairline { fill: none; stroke: #9cc1ed; stroke-width: .65; opacity: .55; }
+.orbital-link { fill: none; stroke: var(--porcelain-blue); stroke-width: .6; opacity: .4; stroke-dasharray: 2 5; }
+.hairline { fill: none; stroke: var(--porcelain-blue); stroke-width: .65; opacity: .55; }
 .inner-line { opacity: .3; }
-.instrument-tick { stroke: #c2d7ee; stroke-width: .7; fill: none; }
-.sweep-line { fill: none; stroke: #bfdfff; stroke-width: 1; opacity: .65; }
+.instrument-tick { stroke: var(--porcelain-blue); stroke-width: .7; fill: none; }
+.sweep-line { fill: none; stroke: var(--porcelain-blue); stroke-width: 1; opacity: .65; }
 .ring-turn { animation: runtime-turn var(--turn-duration) linear infinite; }
 .ring-turn.reverse { animation-direction: reverse; }
 .is-still .ring-turn,.runtime-ring.is-active .ring-turn { animation-play-state: paused; }
-.log-ribbon { fill: #aac9e9; font-family: Consolas,'Microsoft YaHei',monospace; letter-spacing: .3px; opacity: .85; }
+.log-ribbon { fill: var(--porcelain-blue); font-family: Consolas,'Microsoft YaHei',monospace; letter-spacing: .3px; opacity: .85; }
 .log-ribbon.is-warning { stroke: none; }
-.runtime-micro-panel path { fill: none; stroke: #adccec; stroke-width: .4; opacity: .35; }
-.runtime-micro-panel text { fill: #92b4d7; font: 3.3px Consolas,'Microsoft YaHei',monospace; }
-.is-warning { fill: #e8c89f; stroke: #e8c89f; }
-.event-trace { stroke: #d9efff; stroke-width: 1; fill: none; }
-.event-trace.is-warning { stroke: #e8c89f; }
+.runtime-micro-panel path { fill: none; stroke: var(--porcelain-blue); stroke-width: .4; opacity: .35; }
+.runtime-micro-panel text { fill: var(--porcelain-muted); font: 3.3px Consolas,'Microsoft YaHei',monospace; }
+.is-warning { fill: var(--porcelain-warning); stroke: var(--porcelain-warning); }
+.event-trace { stroke: var(--porcelain-blue); stroke-width: 1; fill: none; }
+.event-trace.is-warning { stroke: var(--porcelain-warning); }
 .ring-core,.memory-core,.ring-label { cursor: pointer; outline: none; }
 .core-hit,.layer-hit { fill: transparent; stroke: transparent; }
-.core-name,.layer-name { fill: #b4cce7; font: 10px 'Microsoft YaHei',sans-serif; pointer-events: none; }
-.core-value { fill: #e0ecf8; font: 18px Consolas,monospace; pointer-events: none; }
-.core-caption { fill: #7395ba; font: 6px Consolas,'Microsoft YaHei',sans-serif; pointer-events: none; }
+.core-name,.layer-name { fill: var(--porcelain-muted); font: 10px 'Microsoft YaHei',sans-serif; pointer-events: none; }
+.core-value { fill: var(--porcelain-ink); font: 18px Consolas,monospace; pointer-events: none; }
+.core-caption { fill: var(--porcelain-muted); font: 6px Consolas,'Microsoft YaHei',sans-serif; pointer-events: none; }
 .layer-name { font-size: 10px; }
-.layer-value { fill: #d2e5fb; font: 12px Consolas,monospace; pointer-events: none; }
-.layer-changed .layer-hit { stroke: #cae6ff; stroke-width: .8; }
-.layer-changed .layer-value { fill: #fff; }
-.ring-core:hover .core-hit,.ring-core:focus-visible .core-hit,.memory-core:hover .core-hit,.memory-core:focus-visible .core-hit,.ring-label:hover .layer-hit,.ring-label:focus-visible .layer-hit { stroke: #b9d9ff; stroke-width: .8; stroke-dasharray: 2 4; }
-.ring-label[data-selected=true] .layer-hit { stroke: #c9e1fb; stroke-width: .8; }
+.layer-value { fill: var(--porcelain-ink); font: 12px Consolas,monospace; pointer-events: none; }
+.layer-changed .layer-hit { stroke: var(--porcelain-blue); stroke-width: .8; }
+.layer-changed .layer-value { fill: var(--porcelain-ink); }
+.ring-core:hover .core-hit,.ring-core:focus-visible .core-hit,.memory-core:hover .core-hit,.memory-core:focus-visible .core-hit,.ring-label:hover .layer-hit,.ring-label:focus-visible .layer-hit { stroke: var(--porcelain-blue); stroke-width: .8; stroke-dasharray: 2 4; }
+.ring-label[data-selected=true] .layer-hit { stroke: var(--porcelain-blue); stroke-width: .8; }
 .is-active .hairline { opacity: .9; }
 .is-offline .log-ribbon { opacity: .4; }
-.runtime-caption { margin: -13px 16px 0; color: #9bb7d8; font: 10px/1.8 'Microsoft YaHei',sans-serif; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-height: 18px; }
-.runtime-caption span { font: 9px Consolas,monospace; color: #6e8cb3; margin-right: 9px; }
-.runtime-footnote { display: block; padding: 3px 16px 0; color: #6e88ac; font-size: 8px; }
-.runtime-inspector { position: fixed; z-index: 60; width: min(240px,calc(100vw - 24px)); box-sizing: border-box; padding: 10px 12px; background: #0a1429f5; border: 1px solid #a8c9ee44; border-radius: 4px; box-shadow: 0 8px 28px #02071266; pointer-events: none; }
+.runtime-caption { margin: -13px 16px 0; color: var(--porcelain-muted); font: 10px/1.8 'Microsoft YaHei',sans-serif; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-height: 18px; }
+.runtime-caption span { font: 9px Consolas,monospace; color: var(--porcelain-muted); margin-right: 9px; }
+.runtime-footnote { display: block; padding: 3px 16px 0; color: var(--porcelain-muted); font-size: 8px; }
+.runtime-inspector { position: fixed; z-index: 60; width: min(240px,calc(100vw - 24px)); box-sizing: border-box; padding: 10px 12px; background: var(--porcelain-white); border: 1px solid var(--porcelain-line); border-radius: 4px; box-shadow: 0 8px 28px var(--porcelain-shadow); pointer-events: none; }
 .runtime-inspector > div { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
-.runtime-inspector strong { font-size: 12px; font-weight: 500; color: #deebfa; }
-.runtime-inspector b { font: 16px Consolas,monospace; color: #e5f0ff; overflow-wrap: anywhere; }
-.runtime-inspector p { margin: 8px 0; color: #b9cde5; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
-.runtime-inspector small { color: #8faaca; font: 10px/1.6 'Microsoft YaHei',sans-serif; }
+.runtime-inspector strong { font-size: 12px; font-weight: 500; color: var(--porcelain-ink); }
+.runtime-inspector b { font: 16px Consolas,monospace; color: var(--porcelain-ink); overflow-wrap: anywhere; }
+.runtime-inspector p { margin: 8px 0; color: var(--porcelain-muted); font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+.runtime-inspector small { color: var(--porcelain-muted); font: 10px/1.6 'Microsoft YaHei',sans-serif; }
 @keyframes runtime-turn { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .ring-turn { animation: none; } }
 </style>

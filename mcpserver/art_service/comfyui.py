@@ -11,6 +11,7 @@ from urllib.parse import urlencode, urlsplit
 import httpx
 
 from core.path_resolver import get_config_dir, get_data_dir
+from .comfy_workflows import MEDIA_EXTENSIONS, inspect_workflow, relative_media_path, search_workflows, submit_workflow
 
 
 WORKFLOWS = {
@@ -48,36 +49,6 @@ WORKFLOWS = {
         },
     },
 }
-MEDIA_EXTENSIONS = {
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".webp",
-    ".bmp",
-    ".gif",
-    ".mp4",
-    ".mov",
-    ".mkv",
-    ".webm",
-    ".wav",
-    ".mp3",
-    ".flac",
-    ".m4a",
-    ".ogg",
-    ".aac",
-}
-
-
-def relative_media_path(value):
-    value = str(value).replace("\\", "/")
-    path = Path(value)
-    if not value or path.is_absolute() or path.drive or any(p in ("..", ".") for p in value.split("/")) or ":" in value:
-        raise ValueError("素材名必须是 ComfyUI input 内的相对路径")
-    if path.suffix.lower() not in MEDIA_EXTENSIONS:
-        raise ValueError("只支持图片、视频和音频素材")
-    return path.as_posix()
-
-
 class ComfyUIWorkshop:
     def __init__(self, config_dir=None, data_dir=None):
         self.config_dir = Path(config_dir) if config_dir is not None else get_config_dir() / "artnet"
@@ -153,7 +124,52 @@ class ComfyUIWorkshop:
             parameters = json.loads(parameters)
         if not isinstance(parameters, dict):
             raise ValueError("parameters_json 必须是 JSON 对象")
-        async with httpx.AsyncClient(timeout=30, trust_env=False, follow_redirects=False) as client:
+        async with httpx.AsyncClient(
+            base_url=self.base_url, timeout=30, trust_env=False, follow_redirects=False
+        ) as client:
+            if action == "search_workflows":
+                items = await self._json(client, "GET", "/h3_console/workflow-hub/catalog")
+                matches = search_workflows(items.get("items", []), str(call.get("query") or ""), call.get("limit", 6))
+                return {
+                    "status": "success",
+                    "query": str(call.get("query") or ""),
+                    "count": len(matches),
+                    "workflows": matches,
+                    "instructions": "根据名称、用途分类和需求选择 workflow_path，再调用 describe_workflow 查看参数。",
+                }
+            if action == "describe_workflow" and call.get("workflow_path"):
+                workflow_path = str(call.get("workflow_path") or "").strip()
+                details = await inspect_workflow(client, workflow_path)
+                details.pop("_workflow")
+                details.pop("_schemas")
+                return {"status": "success", **details}
+            if action == "generate_workflow":
+                workflow_path = str(call.get("workflow_path") or "").strip()
+                details, result = await submit_workflow(
+                    client, workflow_path, str(call.get("prompt") or ""), parameters
+                )
+                prompt_id = str(uuid.UUID(result["prompt_id"]))
+                task_dir = self.data_dir / prompt_id
+                task_dir.mkdir(parents=True, exist_ok=True)
+                (task_dir / "task.json").write_text(
+                    json.dumps(
+                        {
+                            "workflow": details["name"],
+                            "workflow_path": details["workflow_path"],
+                            "base_url": self.base_url,
+                            "prompt_id": prompt_id,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+                return {
+                    "status": "queued",
+                    "prompt_id": prompt_id,
+                    "workflow_path": details["workflow_path"],
+                    "workflow": details["name"],
+                    "message": "已提交；稍后用 get_task 查询，同一任务不要重复提交。",
+                }
             if action == "list_workflows":
                 stats = await self._json(client, "GET", "/system_stats")
                 return {
@@ -163,9 +179,9 @@ class ComfyUIWorkshop:
                     "workflows": [
                         {"name": key, "description": value["description"]} for key, value in WORKFLOWS.items()
                     ],
-                    "instructions": "中文需求可先 assist_prompt；generate 只代表已提交，必须 get_task 确认完成后才能声称出图/出片。取得 local_paths 后用 send_platform_file 发送。",
+                    "instructions": "固定流程可用 assist_prompt 后 generate；要按需求挑选已保存流程时，search_workflows 取少量候选，再 describe_workflow 和 generate_workflow。所有提交都必须 get_task 确认完成后才能声称出图/出片；取得 local_paths 后用 send_platform_file 发送。",
                 }
-            if action == "describe_workflow":
+            if action == "describe_workflow" and not call.get("workflow_path"):
                 graph = self._workflow(name)
                 return {
                     "status": "success",
@@ -253,7 +269,7 @@ class ComfyUIWorkshop:
                         return result
                     await asyncio.sleep(min(2, remaining))
         raise ValueError(
-            "action 请选择 list_workflows / describe_workflow / assist_prompt / upload_media / generate / get_task"
+            "action 请选择 search_workflows / describe_workflow / generate_workflow / list_workflows / assist_prompt / upload_media / generate / get_task"
         )
 
     async def get_task(self, client, prompt_id):

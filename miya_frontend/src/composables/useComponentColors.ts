@@ -1,5 +1,5 @@
 import { useStorage } from '@vueuse/core'
-import { watch } from 'vue'
+import { computed, watch } from 'vue'
 
 export interface ComponentColorDef {
   key: string
@@ -14,6 +14,18 @@ export interface ColorGroup {
   icon: string
   colors: ComponentColorDef[]
 }
+
+const observatoryGroup = {
+  id: 'observatory',
+  label: '弥娅观测台',
+  icon: '◎',
+  colors: [
+    { key: 'glaze', label: '瓷釉背景', cssVar: '--miya-observatory-glaze', default: '#F8FBFF' },
+    { key: 'ink', label: '文字', cssVar: '--miya-observatory-ink', default: '#183568' },
+    { key: 'accent', label: '控件与仪表', cssVar: '--miya-observatory-accent', default: '#315DA2' },
+    { key: 'pigment', label: '主圆环', cssVar: '--miya-observatory-pigment', default: '#123794' },
+  ] satisfies [ComponentColorDef, ComponentColorDef, ComponentColorDef, ComponentColorDef],
+} satisfies ColorGroup
 
 // ─── 全部组件调色定义 ─────────────────────────────────
 const COLOR_GROUPS: ColorGroup[] = [
@@ -35,6 +47,7 @@ const COLOR_GROUPS: ColorGroup[] = [
       { key: 'textDim', label: '次文字', cssVar: '--miya-text-dim', default: '#93A7C6' },
     ],
   },
+  observatoryGroup,
   {
     id: 'message',
     label: '消息卡片',
@@ -167,7 +180,8 @@ function normalizeColors(source: Record<string, string>): Record<string, string>
   for (const group of COLOR_GROUPS) {
     for (const c of group.colors) {
       const scopedKey = colorStorageKey(group.id, c.key)
-      const stored = String(source[scopedKey] || source[c.key] || c.default)
+      const legacyValue = group === observatoryGroup ? undefined : source[c.key]
+      const stored = String(source[scopedKey] || legacyValue || c.default)
       const oldDefault = LEGACY_DEFAULTS[scopedKey]
       normalized[scopedKey] = normalizePickerColor(oldDefault && stored.toLowerCase() === oldDefault.toLowerCase() ? c.default : stored, c.default)
     }
@@ -213,6 +227,12 @@ export const componentColors = useStorage<Record<string, string>>(
 // v1 used flat keys (for example both global and terminal used "bg").
 // Normalize once so groups remain independent while preserving legacy choices.
 componentColors.value = normalizeColors(componentColors.value)
+
+export const observatorySceneColors = computed(() => {
+  const [glaze, , , pigment] = observatoryGroup.colors
+  const read = (color: ComponentColorDef) => normalizePickerColor(componentColors.value[colorStorageKey(observatoryGroup.id, color.key)] || color.default, color.default)
+  return { glaze: read(glaze), pigment: read(pigment) }
+})
 
 // ─── 注入 CSS custom properties ────────────────────────
 function hexToRgb(hex: string): string {

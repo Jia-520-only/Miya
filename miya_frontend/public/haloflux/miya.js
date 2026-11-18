@@ -51,10 +51,29 @@ window.MiyaFlux = (() => {
     image.src = source;
   }
   const bounded = (value, min, max, fallback) => typeof value === 'number' && Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
+  const hexColor = value => typeof value === 'string' && /^#[\da-f]{6}$/i.test(value);
+  const paletteRgb = value => value.slice(1).match(/../g).map(channel => parseInt(channel, 16) / 255);
+  function applyPalette({ glaze, pigment }) {
+    if (!document.documentElement.classList.contains('miya-porcelain') || !hexColor(glaze) || !hexColor(pigment)) return;
+    const porcelainMatrix = document.querySelector('#porcelain-ink feColorMatrix');
+    if (!porcelainMatrix) return;
+    const pigmentRgb = paletteRgb(pigment);
+    // Dark pixels become glaze; brighter field strokes carry more pigment.
+    const matrix = paletteRgb(glaze).map((base, i) => {
+      const strength = pigmentRgb[i] - base;
+      return [.213 * strength, .715 * strength, .072 * strength, 0, base].join(' ');
+    });
+    porcelainMatrix.setAttribute('values', [...matrix, '0 0 0 1 0'].join(' '));
+    document.documentElement.style.setProperty('--miya-glaze', glaze);
+  }
   window.addEventListener('message', event => {
     const trustedOrigin = event.origin === origin || (fileOrigin && event.origin === 'null');
     if (event.source !== parent || !trustedOrigin) return;
     const data = event.data;
+    if (data?.type === 'miya:palette') {
+      applyPalette(data);
+      return;
+    }
     if (data?.type === 'miya:portrait') {
       const source = data.source;
       if (typeof source === 'string' && (source === defaultAvatar || (source.length < 2_000_000 && /^data:image\/(jpeg|png|webp);base64,[\da-z+/=]+$/i.test(source))))
@@ -238,7 +257,7 @@ window.MiyaFlux = (() => {
     ctx.strokeStyle = `rgba(168,199,245,${0.2 + (state.layerEcho[key] || 0) * 0.6})`;
     ctx.beginPath(); ctx.moveTo(9, height - 4); ctx.lineTo(band * 0.62, height - 4); ctx.stroke();
   }
-  function draw(ctx, x, y, radius) {
+  function draw(ctx, x, y, radius, portraitContext) {
     const t = state.time, col = rgb();
     const breath = 0.5 + 0.5 * Math.sin(t * (0.85 + state.energy * 0.65));
     ctx.save();
@@ -277,18 +296,24 @@ window.MiyaFlux = (() => {
       ctx.beginPath(); ctx.arc(Math.cos(a) * radius * 0.62, Math.sin(a) * radius * 0.34, 1.8, 0, tau); ctx.fill();
       ctx.restore();
     }
-    drawPortrait(ctx, radius, t, col, breath);
+    if (portraitContext) {
+      portraitContext.save(); portraitContext.translate(x, y);
+      drawPortrait(portraitContext, radius, t, col, breath, true);
+      portraitContext.restore();
+    } else {
+      drawPortrait(ctx, radius, t, col, breath);
+    }
     if (state.echo > 0) {
       ctx.strokeStyle = `rgba(204,222,250,${state.echo * 0.7})`; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.arc(0, 0, radius * (1.0 + (1 - state.echo) * 0.6), 0, tau); ctx.stroke();
     }
     ctx.restore();
   }
-  function drawPortrait(ctx, radius, t, col, breath) {
+  function drawPortrait(ctx, radius, t, col, breath, porcelain = false) {
     const r = radius * (state.composition === 'ambient' ? 0.66 : 0.49);
     ctx.save(); ctx.globalCompositeOperation = 'source-over';
-    ctx.shadowColor = '#537bc4'; ctx.shadowBlur = 14 + breath * 5;
-    ctx.strokeStyle = '#c6daf6'; ctx.lineWidth = 1.5;
+    ctx.shadowColor = porcelain ? '#8da6d57a' : '#537bc4'; ctx.shadowBlur = 14 + breath * 5;
+    ctx.strokeStyle = porcelain ? '#294987' : '#c6daf6'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(0, 0, r + 4, 0, tau); ctx.stroke();
     ctx.shadowBlur = 0;
     ctx.strokeStyle = 'rgba(100,146,223,.55)'; ctx.lineWidth = 0.8;
@@ -302,7 +327,7 @@ window.MiyaFlux = (() => {
       ctx.restore();
     }
     ctx.beginPath(); ctx.arc(0, 0, r, 0, tau); ctx.clip();
-    ctx.fillStyle = '#16294c'; ctx.fillRect(-r, -r, r * 2, r * 2);
+    ctx.fillStyle = porcelain ? '#edf3fd' : '#16294c'; ctx.fillRect(-r, -r, r * 2, r * 2);
     if (avatar) {
       const { zoom, x, y } = state.portrait;
       const side = Math.min(avatar.naturalWidth, avatar.naturalHeight) / zoom;
@@ -311,7 +336,7 @@ window.MiyaFlux = (() => {
       ctx.drawImage(avatar, sx, sy, side, side, -r, -r, r * 2, r * 2);
     } else {
       ctx.font = `${Math.max(20, r * 0.7)}px SimSun, serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#dce7f7'; ctx.fillText('弥', 0, 0);
+      ctx.fillStyle = porcelain ? '#294987' : '#dce7f7'; ctx.fillText('弥', 0, 0);
     }
     const glaze = ctx.createLinearGradient(-r, -r, r, r);
     glaze.addColorStop(0, 'rgba(226,237,251,.06)');

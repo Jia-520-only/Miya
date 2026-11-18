@@ -64,8 +64,9 @@ test('invalid and legacy fallback readings remain unknown', () => {
   assert.equal(normalizeMiyaPresence({ note: { title: 'Incomplete' } }).note, null)
 })
 
-function loadScene() {
+function loadScene(framed = false) {
   const listeners = {}
+  const palette = new Map()
   const parent = { postMessage() {} }
   const window = {
     addEventListener(type, listener) {
@@ -74,6 +75,13 @@ function loadScene() {
     dispatchEvent() {},
   }
   const context = vm.createContext({
+    document: {
+      documentElement: {
+        classList: { contains: name => framed && name === 'miya-porcelain' },
+        style: { setProperty: (name, value) => palette.set(name, value) },
+      },
+      querySelector: () => ({ setAttribute: (name, value) => palette.set(name, value) }),
+    },
     window,
     parent,
     URL,
@@ -86,9 +94,27 @@ function loadScene() {
   vm.runInContext(readFileSync(new URL('../public/haloflux/miya.js', import.meta.url), 'utf8'), context)
   return {
     scene: window.MiyaFlux,
+    palette,
     send: (data, origin = 'http://localhost') => listeners.message({ source: parent, origin, data: { type: 'miya:presence', ...data } }),
   }
 }
+
+test('palette changes only the framed field and rejects invalid or foreign updates', () => {
+  const { send, palette } = loadScene(true)
+  const update = { type: 'miya:palette', glaze: '#F5EFF0', pigment: '#87364F' }
+  send(update, 'https://untrusted.example')
+  send({ ...update, glaze: 'red' })
+  assert.equal(palette.size, 0)
+  send(update)
+  assert.equal(palette.get('--miya-glaze'), update.glaze)
+  const matrix = palette.get('values').split(' ').map(Number)
+  assert.equal(matrix.length, 20)
+  assert.equal(matrix[4], 245 / 255)
+  assert.ok(Math.abs(matrix[0] + matrix[1] + matrix[2] + matrix[4] - 135 / 255) < 1e-9)
+  const ambient = loadScene()
+  ambient.send(update)
+  assert.equal(ambient.palette.size, 0)
+})
 
 test('the scene pulses for new events but not initial load or reconnection', () => {
   const { scene, send } = loadScene()

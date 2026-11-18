@@ -14,9 +14,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "action",
-        choices=("list_workflows", "describe_workflow", "assist_prompt", "upload_media", "generate", "get_task"),
+        choices=(
+            "search_workflows", "describe_workflow", "generate_workflow", "list_workflows",
+            "assist_prompt", "upload_media", "generate", "get_task",
+        ),
     )
     parser.add_argument("--workflow", default="image", choices=("image", "video"))
+    parser.add_argument("--workflow-path", default="")
+    parser.add_argument("--query", default="")
+    parser.add_argument("--limit", type=int, default=6)
     parser.add_argument("--prompt", default="")
     parser.add_argument("--parameters-json", default="{}")
     parser.add_argument("--file-path", default="")
